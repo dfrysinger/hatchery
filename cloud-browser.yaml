@@ -1,59 +1,5 @@
 #cloud-config
-# version: 3.17
-
-# Droplet Init Config v3.17 - 2026-02-04
-# FAST BOOT: Bot online in ~3 min, desktop ready in background
-# Phase 1: nodejs + clawdbot + minimal config -> bot talks
-# Phase 2: packages, desktop, xrdp, skills (background)
-#
-# v3.17 Changes (from v3.16):
-# - FIX: Post-boot health check timing too aggressive for 4-agent startup;
-#         increased sleep-after-restart from 10s to 45s, health timeout from
-#         10s to 30s, retry wait from 5s to 15s (no rush after phase1)
-# - FIX: try-full-config.sh same timing improvements as post-boot-check
-# - FIX: ExecStop sync failed with permission denied on /etc/droplet.env;
-#         use systemd '+' prefix to run sync as root on service stop
-# - FIX: BOOT.md missing message tool instructions and NO_REPLY guidance
-# - FIX: Missing ~/.clawdbot/credentials dir (doctor flagged on every boot)
-# - FIX: IDENTITY.md version reference updated to v3.17
-# - ADD: vdirsyncer/khal calendar configuration (restored from v2.x)
-# - FIX: TOOLS.md updated: himalaya replaced with gmail-api.py for email
-# - FIX: gmail-api.py reads ~/.clawdbot/.env (bot-readable) before /etc/droplet.env
-# - FIX: Gmail creds written to ~/.clawdbot/.env in phase1 and build-full-config
-#
-# v3.16 Changes (from v3.15):
-# - FIX: pip --break-system-packages flag unsupported on Ubuntu 22.04 pip 22.x;
-#         use PIP_BREAK_SYSTEM_PACKAGES=1 env var instead
-# - FIX: bootcmd xrdp mask guard checks phase2-complete instead of setup-complete,
-#         preventing xrdp from being re-masked on the phase2->reboot transition
-#
-# v3.15 Changes (from v3.14):
-# - RENAME: Package openclaw -> clawdbot, binary openclaw -> clawdbot
-# - RENAME: Dirs ~/openclaw -> ~/clawd, ~/.openclaw -> ~/.clawdbot
-# - RENAME: Config openclaw.json -> clawdbot.json (.full.json, .minimal.json)
-# - RENAME: Service openclaw.service -> clawdbot.service
-# - RENAME: Timer openclaw-sync -> clawdbot-sync
-# - RENAME: Scripts sync-openclaw-state.sh -> sync-clawdbot-state.sh,
-#           restore-openclaw-state.sh -> restore-clawdbot-state.sh
-# - RENAME: Dropbox path openclaw-memory -> clawdbot-memory
-# - FIX: NODE_OPTIONS=--experimental-sqlite in both phase1 and full service
-# - FIX: HEARTBEAT.md symlink uses -sf, created after clawdbot init (race fix)
-# - FIX: xrdp daemon-reload after unmask before enable
-# - FIX: Removed unused AGENT_GEN_B64 from droplet.env (leftover from v2.x)
-# - NEW: IDENTITY.md includes Project Context section
-# - NEW: Transcript syncing (sessions/*.jsonl) in sync/restore scripts
-# - KEPT: All v3.14 fixes (binary path, heartbeat, setup-complete, sqlite,
-#          tg-notify, SOUL, plugins, hooks, dmPolicy, multi-agent, safe mode)
-#
-# === PLACEHOLDER REFERENCE ===
-# All placeholders use [[NAME]] format, replaced by iOS Shortcuts
-# Base64 encoded: All _B64 suffix variables
-#
-# === NOTE: HEARTBEAT.md RACE CONDITION ===
-# HEARTBEAT.md symlink must be created AFTER clawdbot creates agent workspace
-# dirs (on first run). Phase 1 creates it for agent1 explicitly. build-full-config
-# re-creates it with -sf for all agents after dirs exist. If clawdbot has not yet
-# initialized the workspace, the symlink target dir may not exist - hence -sf.
+# version: 3.18
 
 package_update: false
 package_upgrade: false
@@ -62,7 +8,6 @@ bootcmd:
   - [ bash, -lc, "mkdir -p /var/lib/init-status; [ -f /var/lib/init-status/setup-complete ] && exit 0; echo '0' > /var/lib/init-status/stage; echo '1' > /var/lib/init-status/phase; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\" >> /var/log/init-stages.log" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/phase2-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
-  # needrestart config handled by write_files section
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; mkdir -p /tmp/downloads; curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz & echo $! > /tmp/downloads/node.pid; wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb & echo $! > /tmp/downloads/chrome.pid" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '99' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=99 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
 
@@ -144,7 +89,6 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # Send Telegram notification - used for early status messages
       source /etc/droplet.env
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       TBT=$(d "$AGENT1_BOT_TOKEN_B64")
@@ -226,8 +170,6 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # PHASE 1: Get bot online ASAP (~3 min target)
-      # Minimal bulletproof config - single agent, telegram only
       set -e
       source /etc/droplet.env
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
@@ -237,15 +179,12 @@ write_files:
       echo "=== Phase 1 Start: $(date) ===" > "$LOG"
       START=$(date +%s)
 
-      # Send early notification
       $TG "[INIT] Droplet starting up. Phase 1 in progress..."
 
-      # Wait for node download (started in bootcmd)
       $S 1 "nodejs"
       NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
       [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
 
-      # Extract node binary
       if [ -f /tmp/downloads/node.tar.xz ]; then
         tar -xJf /tmp/downloads/node.tar.xz -C /usr/local --strip-components=1 >> "$LOG" 2>&1
         rm -f /tmp/downloads/node.tar.xz
@@ -255,19 +194,16 @@ write_files:
         apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
       fi
 
-      # Install clawdbot
       $S 2 "clawdbot-install"
       npm install -g clawdbot@latest >> "$LOG" 2>&1
       echo "Clawdbot installed: $(clawdbot --version 2>/dev/null || echo 'unknown')" >> "$LOG"
 
-      # Setup user (minimal)
       $S 3 "config"
       PW=$(d "$PASSWORD_B64")
       id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
       echo "$USERNAME:$PW" | chpasswd
       echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
 
-      # Decode credentials
       AK=$(d "$ANTHROPIC_KEY_B64")
       TBT=$(d "$AGENT1_BOT_TOKEN_B64")
       TUI=$(d "$TELEGRAM_USER_ID_B64")
@@ -279,12 +215,8 @@ write_files:
       mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
       echo "$GT" > $H/.clawdbot/gateway-token.txt
 
-      # Symlink HEARTBEAT.md to agent1 workspace (critical for safe-mode detection)
-      # NOTE: Uses -sf to force overwrite; target dir created above
       ln -sf "$H/clawd/HEARTBEAT.md" "$H/clawd/agents/agent1/HEARTBEAT.md"
 
-      # MINIMAL CONFIG - bulletproof, single agent, telegram only
-      # No browser, no skills, no hooks - just enough to talk
       cat > $H/.clawdbot/clawdbot.json <<CFG
       {
         "env": {
@@ -292,7 +224,7 @@ write_files:
         },
         "agents": {
           "defaults": {
-            "model": {"primary": "anthropic/claude-sonnet-4-20250514"},
+            "model": {"primary": "anthropic/claude-opus-4-5"},
             "workspace": "$H/clawd"
           },
           "list": [
@@ -331,19 +263,15 @@ write_files:
       }
       CFG
 
-      # Save minimal config as fallback
       cp $H/.clawdbot/clawdbot.json $H/.clawdbot/clawdbot.minimal.json
 
-      # Create .env file (used by gmail-api.py and other tools that need creds)
       echo "ANTHROPIC_API_KEY=${AK}" > $H/.clawdbot/.env
       [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.clawdbot/.env
       GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
       [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.clawdbot/.env
 
-      # Create minimal AGENTS.md
       echo -e "# Agent: ${A1N}\nModel: Claude Sonnet\nBe helpful. Desktop setup in progress..." > $H/clawd/agents/agent1/AGENTS.md
 
-      # Create BOOT.md for self-announcement
       cat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'
       # BOOT.md - Runs Every Heartbeat
 
@@ -383,7 +311,6 @@ write_files:
       chmod 700 $H/.clawdbot
       chmod 600 $H/.clawdbot/clawdbot.json
 
-      # Systemd service (phase 1 minimal - includes NODE_OPTIONS for sqlite)
       cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
@@ -404,14 +331,12 @@ write_files:
       WantedBy=multi-user.target
       SVC
 
-      # Start bot
       $S 4 "starting"
       systemctl daemon-reload
       systemctl enable clawdbot
       systemctl start clawdbot
       ufw allow 18789/tcp
 
-      # Wait for bot to be ready
       BOT_OK=false
       for i in {1..30}; do
         if systemctl is-active --quiet clawdbot; then
@@ -436,7 +361,6 @@ write_files:
       END=$(date +%s)
       echo "=== Phase 1 Complete: $((END - START)) seconds ===" >> "$LOG"
 
-      # Kick off phase 2 in background
       /usr/local/bin/set-phase.sh 2 "background-setup"
       nohup /usr/local/sbin/phase2-background.sh >> /var/log/phase2.log 2>&1 &
       disown
@@ -445,7 +369,6 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # PHASE 2: Everything else (runs in background)
       source /etc/droplet.env
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       S="/usr/local/bin/set-stage.sh"
@@ -454,18 +377,15 @@ write_files:
       START=$(date +%s)
       H="/home/$USERNAME"
 
-      # Wait for chrome download
       CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
       [ -n "$CHROME_PID" ] && wait $CHROME_PID 2>/dev/null || true
 
-      # Kill apt locks
       systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
       killall -9 apt apt-get dpkg 2>/dev/null || true
       sleep 2
       rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
       dpkg --configure -a 2>/dev/null || true
 
-      # Full package install
       $S 10 "packages"
       apt-get update -qq >> "$LOG" 2>&1
       DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
@@ -476,30 +396,25 @@ write_files:
         python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
         >> "$LOG" 2>&1
 
-      # Remove screensaver BEFORE starting desktop
       rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
       apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
 
-      # Install chrome
       $S 11 "chrome"
       [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
       rm -f /tmp/downloads/chrome.deb
       apt-get -f install -y >> "$LOG" 2>&1
 
-      # Chrome config
       mkdir -p $H/.config/chrome-debug/Default
       echo '{"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}' > "$H/.config/chrome-debug/Local State"
       echo '{"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}' > "$H/.config/chrome-debug/Default/Preferences"
       touch "$H/.config/chrome-debug/First Run"
       chown -R $USERNAME:$USERNAME $H/.config/chrome-debug
 
-      # Pip packages
       $S 12 "pip"
       PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
 
-      # Desktop services
       $S 13 "desktop"
       cat > /etc/systemd/system/xvfb.service <<SVC
       [Unit]
@@ -559,7 +474,6 @@ write_files:
       sleep 3
       systemctl start x11vnc
 
-      # Desktop shortcuts
       mkdir -p $H/Desktop
       cat > $H/Desktop/google-chrome.desktop <<'DESK'
       [Desktop Entry]
@@ -582,7 +496,6 @@ write_files:
       chmod +x $H/Desktop/*.desktop
       chown -R $USERNAME:$USERNAME $H/Desktop
 
-      # Skills
       $S 14 "skills"
       npm install -g clawhub@latest >> "$LOG" 2>&1
       for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
@@ -590,7 +503,6 @@ write_files:
       done
       find $H/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
-      # Productivity (rclone, himalaya, calendar)
       $S 15 "productivity"
       DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
       IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
@@ -610,7 +522,6 @@ write_files:
       HIM
       [ -n "$GHT" ] && echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml
 
-      # Calendar (vdirsyncer + khal)
       CU=$(d "$CALDAV_URL_B64"); CUN=$(d "$CALDAV_USER_B64"); CP=$(d "$CALDAV_PASSWORD_B64")
       if [ -n "$CU" ] && [ -n "$CUN" ]; then
         mkdir -p $H/.config/vdirsyncer $H/.config/khal
@@ -658,7 +569,6 @@ write_files:
 
       chown -R $USERNAME:$USERNAME $H/.config
 
-      # xrdp
       $S 16 "xrdp"
       cat > /etc/xrdp/xrdp.ini <<'XI'
       [Globals]
@@ -692,15 +602,11 @@ write_files:
       systemctl restart xrdp
       ufw allow 3389/tcp
 
-      # Restore state from Dropbox BEFORE build-full-config
-      # so YAML-generated files always take precedence
       $S 17 "finalize"
       /usr/local/bin/restore-clawdbot-state.sh 2>/dev/null || true
 
-      # Build and save full config (overwrites YAML-owned files after restore)
       /usr/local/sbin/build-full-config.sh
 
-      # Enable auto-upgrades and sync timer
       systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
       systemctl enable clawdbot-sync.timer 2>/dev/null || true
       systemctl start clawdbot-sync.timer 2>/dev/null || true
@@ -712,7 +618,6 @@ write_files:
       DURATION=$((END - START))
       echo "=== Phase 2 Complete: ${DURATION} seconds ===" >> "$LOG"
 
-      # Announce reboot via Telegram
       TG="/usr/local/bin/tg-notify.sh"
       $TG "[SETUP COMPLETE] Desktop ready. Phase 2 finished in ${DURATION}s. Rebooting for clean state... Back shortly!"
 
@@ -724,7 +629,6 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # Build full clawdbot config with all features
       source /etc/droplet.env
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       H="/home/$USERNAME"
@@ -734,7 +638,6 @@ write_files:
       TBT=$(d "$AGENT1_BOT_TOKEN_B64"); TUI=$(d "$TELEGRAM_USER_ID_B64")
       HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
 
-      # Agent names and notes
       GAN=$(d "$GLOBAL_AGENT_NOTES_B64")
       A1N=$(d "$AGENT1_NAME_B64"); A1N="${A1N:-Claude}"; A1NOTES=$(d "$AGENT1_NOTES_B64"); A1SOUL=$(d "$AGENT1_SOUL_B64")
       A2N=$(d "$AGENT2_NAME_B64"); A2N="${A2N:-GPT}"; A2T=$(d "$AGENT2_BOT_TOKEN_B64"); A2NOTES=$(d "$AGENT2_NOTES_B64"); A2SOUL=$(d "$AGENT2_SOUL_B64")
@@ -746,28 +649,24 @@ write_files:
       BI=$(d "$BOOT_INSTRUCTIONS_B64")
       GT=$(cat $H/.clawdbot/gateway-token.txt)
 
-      # Create agent directories and credentials dir (doctor expects it)
       mkdir -p $H/.clawdbot/credentials
       mkdir -p $H/clawd/agents/agent1/memory
       [ -n "$A2T" ] && mkdir -p $H/clawd/agents/agent2/memory
       [ -n "$A3T" ] && mkdir -p $H/clawd/agents/agent3/memory
       [ -n "$A4T" ] && mkdir -p $H/clawd/agents/agent4/memory
 
-      # Build agent list JSON
       AL="[{\"id\":\"agent1\",\"default\":true,\"name\":\"${A1N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent1\",\"groupChat\":{\"mentionPatterns\":[\"${A1N},\",\"${A1N}:\"]}}"
       [ -n "$A2T" ] && AL="$AL,{\"id\":\"agent2\",\"name\":\"${A2N}\",\"model\":\"openai/gpt-5.2\",\"workspace\":\"$H/clawd/agents/agent2\",\"groupChat\":{\"mentionPatterns\":[\"${A2N},\",\"${A2N}:\"]}}"
       [ -n "$A3T" ] && AL="$AL,{\"id\":\"agent3\",\"name\":\"${A3N}\",\"model\":\"google/gemini-3-pro-preview\",\"workspace\":\"$H/clawd/agents/agent3\",\"groupChat\":{\"mentionPatterns\":[\"${A3N},\",\"${A3N}:\"]}}"
       [ -n "$A4T" ] && AL="$AL,{\"id\":\"agent4\",\"name\":\"${A4N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent4\",\"groupChat\":{\"mentionPatterns\":[\"${A4N},\",\"${A4N}:\"]}}"
       AL="$AL]"
 
-      # Bindings for multi-agent
       BD="["
       [ -n "$A2T" ] && BD="$BD{\"agentId\":\"agent2\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent2\"}}"
       [ -n "$A3T" ] && { [ "$BD" != "[" ] && BD="$BD,"; BD="$BD{\"agentId\":\"agent3\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent3\"}}"; }
       [ -n "$A4T" ] && { [ "$BD" != "[" ] && BD="$BD,"; BD="$BD{\"agentId\":\"agent4\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent4\"}}"; }
       BD="$BD]"
 
-      # Telegram accounts
       TA="\"default\":{\"botToken\":\"${TBT}\"}"
       [ -n "$A2T" ] && TA="$TA,\"agent2\":{\"botToken\":\"${A2T}\"}"
       [ -n "$A3T" ] && TA="$TA,\"agent3\":{\"botToken\":\"${A3T}\"}"
@@ -775,12 +674,10 @@ write_files:
 
       TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
 
-      # Auth profiles
       AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
       [ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
       [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
 
-      # Write full config
       cat > $H/.clawdbot/clawdbot.full.json <<CFG
       {
         "env": {
@@ -845,7 +742,6 @@ write_files:
       }
       CFG
 
-      # Create IDENTITY.md for each agent (includes Project Context)
       write_identity() {
         local ADIR="$1" ANAME="$2" ANOTES="$3"
         cat > "$ADIR/IDENTITY.md" <<IDMD
@@ -858,7 +754,7 @@ write_files:
 
       ## Project Context
       This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.
-      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.17.yaml)
+      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.18.yaml)
       - Project docs: dropbox:droplets/yaml/CONTEXT.md
       - Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
       - Previous transcripts restored from Dropbox on boot
@@ -870,22 +766,16 @@ write_files:
       [ -n "$A3T" ] && write_identity "$H/clawd/agents/agent3" "$A3N" "$A3NOTES"
       [ -n "$A4T" ] && write_identity "$H/clawd/agents/agent4" "$A4N" "$A4NOTES"
 
-      # Create AGENTS.md for each agent
       echo -e "# Agent: ${A1N}\nModel: Claude Opus 4.5\nBe helpful and natural." > $H/clawd/agents/agent1/AGENTS.md
       [ -n "$A2T" ] && echo -e "# Agent: ${A2N}\nModel: GPT-5.2 (reasoning_effort: high)\nBe helpful and natural." > $H/clawd/agents/agent2/AGENTS.md
       [ -n "$A3T" ] && echo -e "# Agent: ${A3N}\nModel: Gemini 3 Pro Preview\nBe helpful and natural." > $H/clawd/agents/agent3/AGENTS.md
       [ -n "$A4T" ] && echo -e "# Agent: ${A4N}\nModel: Claude Opus 4.5\nBe helpful and natural." > $H/clawd/agents/agent4/AGENTS.md
 
-      # Create SOUL.md for each agent (if provided)
       [ -n "$A1SOUL" ] && echo "$A1SOUL" > $H/clawd/agents/agent1/SOUL.md
       [ -n "$A2T" ] && [ -n "$A2SOUL" ] && echo "$A2SOUL" > $H/clawd/agents/agent2/SOUL.md
       [ -n "$A3T" ] && [ -n "$A3SOUL" ] && echo "$A3SOUL" > $H/clawd/agents/agent3/SOUL.md
       [ -n "$A4T" ] && [ -n "$A4SOUL" ] && echo "$A4SOUL" > $H/clawd/agents/agent4/SOUL.md
 
-      # Symlink shared context (TOOLS.md, USER.md, HEARTBEAT.md) to all agent workspaces
-      # NOTE: HEARTBEAT.md symlink uses -sf to handle race condition where clawdbot
-      # may not have fully initialized agent workspace dirs yet. These symlinks are
-      # created AFTER mkdir -p above, so target dirs exist at this point.
       for _a in agent1 agent2 agent3 agent4; do
         _AD="$H/clawd/agents/$_a"
         [ -d "$_AD" ] && {
@@ -895,7 +785,6 @@ write_files:
         }
       done
 
-      # USER.md
       cat > $H/clawd/USER.md <<USERMD
       # USER.md
       $([ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (learn)")
@@ -903,22 +792,29 @@ write_files:
       $([ -n "$UN" ] && echo -e "\n$UN")
       USERMD
 
-      # BOOTSTRAP.md (one-time instructions)
-      [ -n "$BI" ] && echo "$BI" > $H/clawd/agents/agent1/BOOTSTRAP.md
+      BSPRE="You are a new instance with no prior context. Before doing anything else:"
+      BSPRE="$BSPRE
+      1. Check for chat transcripts from previous sessions in your sessions directory
+      2. Read through the last ~100 messages to understand what was being worked on
+      3. Note any ongoing tasks, preferences, or decisions from those conversations
+      4. Use this context to inform your responses going forward
+      After reading transcripts, proceed with any other bootstrap instructions below."
+      for _a in agent1 agent2 agent3 agent4; do
+        _AD="$H/clawd/agents/$_a"
+        [ -d "$_AD" ] && printf '%s\n' "$BSPRE" > "$_AD/BOOTSTRAP.md"
+      done
+      [ -n "$BI" ] && printf '\n%s\n' "$BI" >> $H/clawd/agents/agent1/BOOTSTRAP.md
 
-      # Auth profiles JSON
       mkdir -p $H/.clawdbot/agents/main/agent
       cat > $H/.clawdbot/agents/main/agent/auth-profiles.json <<APJ
       {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
       APJ
 
-      # Symlink auth-profiles to all agents
       for _ag in agent1 agent2 agent3 agent4; do
         mkdir -p "$H/.clawdbot/agents/$_ag/agent"
         ln -sf "$H/.clawdbot/agents/main/agent/auth-profiles.json" "$H/.clawdbot/agents/$_ag/agent/auth-profiles.json"
       done
 
-      # Update systemd service with full environment (includes NODE_OPTIONS for sqlite)
       cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
@@ -970,7 +866,6 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # Post-reboot health check and config upgrade
       source /etc/droplet.env
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       H="/home/$USERNAME"
@@ -979,54 +874,42 @@ write_files:
 
       echo "=== Post-boot check: $(date) ===" >> "$LOG"
 
-      # Only run if we need to (sentinel from phase2)
       [ ! -f /var/lib/init-status/needs-post-boot-check ] && {
         echo "No post-boot check needed" >> "$LOG"
         exit 0
       }
 
-      # Wait for clawdbot to stabilize
       sleep 15
 
-      # Check if full config exists
       if [ ! -f "$H/.clawdbot/clawdbot.full.json" ]; then
         echo "No full config found, skipping upgrade" >> "$LOG"
         rm -f /var/lib/init-status/needs-post-boot-check
         exit 0
       fi
 
-      # Apply full config
       echo "Applying full config..." >> "$LOG"
       cp "$H/.clawdbot/clawdbot.full.json" "$H/.clawdbot/clawdbot.json"
       chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
       chmod 600 "$H/.clawdbot/clawdbot.json"
       systemctl restart clawdbot
 
-      # Wait generously for 4 agents + 4 telegram bots to initialize
-      # No rush here - phase1 bot is already online for user
-      sleep 45
-
-      # Health check (3 attempts, generous timeouts)
       HEALTHY=false
-      for i in 1 2 3; do
-        echo "Health check attempt $i..." >> "$LOG"
+      for i in $(seq 1 12); do
+        sleep 5
+        echo "Health check attempt $i/12..." >> "$LOG"
 
-        # Check service is active
         if ! systemctl is-active --quiet clawdbot; then
           echo "  Service not active" >> "$LOG"
-          sleep 15
           continue
         fi
 
-        # Check gateway responds (try clawdbot health command)
-        if timeout 30 su - $USERNAME -c "clawdbot health --json" >> "$LOG" 2>&1; then
-          echo "  Gateway healthy" >> "$LOG"
+        if curl -sf http://127.0.0.1:18789/ >> "$LOG" 2>&1; then
+          echo "  Gateway responding (attempt $i)" >> "$LOG"
           HEALTHY=true
           break
         fi
 
-        echo "  Gateway not responding" >> "$LOG"
-        sleep 15
+        echo "  Gateway not responding yet" >> "$LOG"
       done
 
       if [ "$HEALTHY" = "true" ]; then
@@ -1041,15 +924,12 @@ write_files:
       else
         echo "Full config FAILED, reverting to safe mode" >> "$LOG"
 
-        # Restore minimal config
         cp "$H/.clawdbot/clawdbot.minimal.json" "$H/.clawdbot/clawdbot.json"
         chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
         chmod 600 "$H/.clawdbot/clawdbot.json"
 
-        # Create safe mode marker
         touch /var/lib/init-status/safe-mode
 
-        # Create SAFE_MODE.md for the bot
         cat > "$H/clawd/agents/agent1/SAFE_MODE.md" <<'SAFEMD'
       # SAFE MODE ACTIVE
 
@@ -1084,7 +964,6 @@ write_files:
       SAFEMD
         chown $USERNAME:$USERNAME "$H/clawd/agents/agent1/SAFE_MODE.md"
 
-        # Restart with minimal config
         systemctl restart clawdbot
         sleep 5
 
@@ -1097,31 +976,25 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # Called by safe-mode bot to attempt full config
       source /etc/droplet.env
       H="/home/$USERNAME"
 
       echo "Attempting full config at $(date)"
 
-      # Apply full config
       cp "$H/.clawdbot/clawdbot.full.json" "$H/.clawdbot/clawdbot.json"
       chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
       chmod 600 "$H/.clawdbot/clawdbot.json"
       systemctl restart clawdbot
 
-      # Wait generously for 4 agents + telegram bots to initialize
-      sleep 45
-
-      # Health check
       HEALTHY=false
-      for i in 1 2 3; do
+      for i in $(seq 1 12); do
+        sleep 5
         if systemctl is-active --quiet clawdbot; then
-          if timeout 30 su - $USERNAME -c "clawdbot health --json" >/dev/null 2>&1; then
+          if curl -sf http://127.0.0.1:18789/ >/dev/null 2>&1; then
             HEALTHY=true
             break
           fi
         fi
-        sleep 15
       done
 
       if [ "$HEALTHY" = "true" ]; then
@@ -1130,7 +1003,6 @@ write_files:
         echo "SUCCESS: Full config now active"
         exit 0
       else
-        # Restore minimal config
         cp "$H/.clawdbot/clawdbot.minimal.json" "$H/.clawdbot/clawdbot.json"
         chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
         chmod 600 "$H/.clawdbot/clawdbot.json"
@@ -1147,10 +1019,8 @@ write_files:
   - path: /home/bot/clawd/TOOLS.md
     defer: true
     content: |
-      ### Environment
       Cloud VM (Ubuntu), display :10 shared with user via RDP.
 
-      ### Email
       DO blocks SMTP. Use gmail-api.py for all email:
       - Send: gmail-api.py send "to@email" "Subject" "Body" [--html] [--cc addr] [-a file]
       - List: gmail-api.py list [-n count] [-q "search query"]
@@ -1158,25 +1028,20 @@ write_files:
       Requires: google-auth, google-api-python-client (installed via pip)
       Credentials: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN from /etc/droplet.env
 
-      ### Browser
       Chrome remote debugging on port 18800.
 
-      ### Calendar
       khal for viewing, vdirsyncer for CalDAV sync.
       - View: khal list [today] [2days]
       - Sync: vdirsyncer sync
 
-      ### Tools
       Chrome, Thunderbird, goplaces, ffmpeg, LibreOffice, rclone, pandoc, khal/vdirsyncer, yt-dlp, ImageMagick, scrot/flameshot, qpdf, jq, gh, vlc, htop/ncdu
 
-      ### Skills
       weather, github, video-frames, goplaces, youtube-transcript, yt-dlp-downloader-skill
 
   - path: /home/bot/clawd/HEARTBEAT.md
     defer: true
     permissions: "0644"
     content: |
-      # HEARTBEAT.md
       - If BOOTSTRAP.md exists, execute it first and delete when done.
       - If BOOT.md exists, execute it on every heartbeat (do NOT delete).
       - If SAFE_MODE.md exists, follow its instructions to repair the system.
@@ -1220,7 +1085,6 @@ write_files:
       def get_creds():
         cid,csc,rtk=os.environ.get('GMAIL_CLIENT_ID'),os.environ.get('GMAIL_CLIENT_SECRET'),os.environ.get('GMAIL_REFRESH_TOKEN')
         if not all([cid,csc,rtk]):
-          # Try bot's .env file first (readable by bot user)
           for envf in [os.path.expanduser('~/.clawdbot/.env'),'/etc/droplet.env']:
             try:
               with open(envf,'r') as f:
@@ -1285,7 +1149,6 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # Hot-reload council group ID without rebuilding droplet
       [ -z "$1" ] && { echo "Usage: set-council-group.sh <group_id>"; exit 1; }
       GID="$1"; source /etc/droplet.env
       H="/home/$USERNAME"; CFG="$H/.clawdbot/clawdbot.json"
@@ -1315,21 +1178,16 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # Restore bot-owned files from Dropbox (memory + user identity + transcripts)
-      # TOOLS.md is NOT restored - YAML is authoritative for that
       source /etc/droplet.env
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
       HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
       H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
-      # Restore bot-owned workspace files (not TOOLS.md - YAML manages that)
       for f in MEMORY.md USER.md; do su - $USERNAME -c "rclone copy '$R/$f' '$H/clawd/' 2>/dev/null" || true; done
-      # Restore agent memory directories
       for a in agent1 agent2 agent3 agent4; do
         AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
         su - $USERNAME -c "rclone copy '$R/agents/${a}/memory/' '$AD/memory/' 2>/dev/null" || true
       done
-      # Restore transcripts (session history from previous droplets)
       for a in agent1 agent2 agent3 agent4; do
         TD="$H/.clawdbot/agents/$a/sessions"; mkdir -p "$TD"
         su - $USERNAME -c "rclone copy '$R/agents/${a}/sessions/' '$TD/' --include '*.jsonl' 2>/dev/null" || true
@@ -1340,21 +1198,16 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      # Sync bot-owned state to Dropbox (memory, user identity, transcripts)
-      # TOOLS.md is NOT synced - YAML is authoritative for that
       source /etc/droplet.env
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
       HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
       H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
-      # Sync bot-owned workspace files
       for f in MEMORY.md USER.md; do [ -f "$H/clawd/$f" ] && su - $USERNAME -c "rclone copy '$H/clawd/$f' '$R/' 2>/dev/null" || true; done
-      # Sync agent memory directories
       for a in agent1 agent2 agent3 agent4; do
         AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
         su - $USERNAME -c "rclone sync '$AD/memory' '$R/agents/${a}/memory' 2>/dev/null" || true
       done
-      # Sync transcripts (copy only, don't delete old sessions from Dropbox)
       for a in agent1 agent2 agent3 agent4; do
         TD="$H/.clawdbot/agents/$a/sessions"
         [ -d "$TD" ] && su - $USERNAME -c "rclone copy '$TD/' '$R/agents/${a}/sessions/' --include '*.jsonl' 2>/dev/null" || true
@@ -1403,4 +1256,3 @@ runcmd:
   - [ bash, -lc, "/usr/local/sbin/phase1-critical.sh" ]
   - [ bash, -lc, "/usr/local/bin/rename-telegram-bots.sh" ]
 
-# Phase 2 kicks off automatically in background from phase1
