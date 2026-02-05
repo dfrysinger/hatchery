@@ -1,5 +1,5 @@
 #cloud-config
-# version: 3.19
+# version: 3.20
 
 package_update: false
 package_upgrade: false
@@ -306,7 +306,8 @@ write_files:
       If nothing needs attention, reply with ONLY: NO_REPLY.
       BOOTMD
 
-      chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
+      chown $USERNAME:$USERNAME $H
+      chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd $H/.local $H/.config
       chmod 700 $H/.clawdbot
       chmod 600 $H/.clawdbot/clawdbot.json
 
@@ -440,9 +441,8 @@ write_files:
       User=$USERNAME
       Environment=DISPLAY=:10
       Environment=HOME=$H
-      Environment=DBUS_SESSION_BUS_ADDRESS=autolaunch:
       ExecStartPre=/bin/sleep 2
-      ExecStart=/usr/bin/xfce4-session
+      ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
       Restart=on-failure
       [Install]
       WantedBy=multi-user.target
@@ -455,14 +455,23 @@ write_files:
       Requires=desktop.service
       [Service]
       Type=simple
-      User=$USERNAME
+      User=root
       Environment=DISPLAY=:10
       ExecStartPre=/bin/sleep 3
-      ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
+      ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -ssl /home/bot/.vnc/combined.pem -unixpw bot -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
       Restart=on-failure
       [Install]
       WantedBy=multi-user.target
       SVC
+
+      # Generate SSL cert and VNC password for secure VNC
+      mkdir -p $H/.vnc
+      openssl req -new -x509 -days 365 -nodes \
+        -out $H/.vnc/cert.pem -keyout $H/.vnc/key.pem \
+        -subj "/CN=$(hostname)" 2>/dev/null
+      cat $H/.vnc/key.pem $H/.vnc/cert.pem > $H/.vnc/combined.pem
+      chown -R $USERNAME:$USERNAME $H/.vnc
+      chmod 600 $H/.vnc/*.pem
 
       mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
       chown -R $USERNAME:$USERNAME $H/.config
@@ -648,6 +657,7 @@ write_files:
       GT=$(cat $H/.clawdbot/gateway-token.txt)
 
       mkdir -p $H/.clawdbot/credentials
+      chmod 700 $H/.clawdbot/credentials
       mkdir -p $H/clawd/agents/agent1/memory
       [ -n "$A2T" ] && mkdir -p $H/clawd/agents/agent2/memory
       [ -n "$A3T" ] && mkdir -p $H/clawd/agents/agent3/memory
@@ -707,7 +717,7 @@ write_files:
           "mode": "local",
           "port": 18789,
           "bind": "lan",
-          "controlUi": {"enabled": true, "allowInsecureAuth": true},
+          "controlUi": {"enabled": true, "allowInsecureAuth": false},
           "auth": {"mode": "token", "token": "${GT}"}
         },
         "auth": {
@@ -753,7 +763,7 @@ write_files:
 
       ## Project Context
       This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.
-      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.19.yaml)
+      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.20.yaml)
       - Project docs: dropbox:droplets/yaml/CONTEXT.md
       - Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
       - Previous transcripts restored from Dropbox on boot
@@ -809,9 +819,11 @@ write_files:
       {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
       APJ
 
+      chmod 600 $H/.clawdbot/agents/main/agent/auth-profiles.json
       for _ag in agent1 agent2 agent3 agent4; do
         mkdir -p "$H/.clawdbot/agents/$_ag/agent"
-        ln -sf "$H/.clawdbot/agents/main/agent/auth-profiles.json" "$H/.clawdbot/agents/$_ag/agent/auth-profiles.json"
+        cp "$H/.clawdbot/agents/main/agent/auth-profiles.json" "$H/.clawdbot/agents/$_ag/agent/auth-profiles.json"
+        chmod 600 "$H/.clawdbot/agents/$_ag/agent/auth-profiles.json"
       done
 
       cat > /etc/systemd/system/clawdbot.service <<SVC
