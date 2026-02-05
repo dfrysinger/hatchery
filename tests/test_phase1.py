@@ -299,6 +299,40 @@ class TestPhase1Both:
         assert config["channels"]["discord"]["accounts"]["default"]["token"] == "dc-tok"
 
 
+class TestTokenKeyNames:
+    """Validate correct token key names per platform.
+    
+    Discord uses 'token', Telegram uses 'botToken'. These are different
+    and must not be confused - clawdbot will reject unrecognized keys.
+    """
+
+    def test_telegram_uses_botToken_key(self):
+        """Telegram channel accounts must use 'botToken' key."""
+        config = run_phase1_config(platform="telegram")
+        tg_default = config["channels"]["telegram"]["accounts"]["default"]
+        assert "botToken" in tg_default, "Telegram should use 'botToken' key"
+        assert "token" not in tg_default, "Telegram should NOT have 'token' key"
+
+    def test_discord_uses_token_key(self):
+        """Discord channel accounts must use 'token' key (not 'botToken')."""
+        config = run_phase1_config(platform="discord")
+        dc_default = config["channels"]["discord"]["accounts"]["default"]
+        assert "token" in dc_default, "Discord should use 'token' key"
+        assert "botToken" not in dc_default, "Discord should NOT have 'botToken' key"
+
+    def test_both_platforms_use_correct_keys(self):
+        """When both platforms enabled, each uses its correct token key."""
+        config = run_phase1_config(platform="both")
+        
+        tg_default = config["channels"]["telegram"]["accounts"]["default"]
+        assert "botToken" in tg_default, "Telegram should use 'botToken'"
+        assert "token" not in tg_default, "Telegram should NOT have 'token'"
+        
+        dc_default = config["channels"]["discord"]["accounts"]["default"]
+        assert "token" in dc_default, "Discord should use 'token'"
+        assert "botToken" not in dc_default, "Discord should NOT have 'botToken'"
+
+
 class TestPhase1ConfigStructure:
     """Structural checks on the generated minimal config."""
 
