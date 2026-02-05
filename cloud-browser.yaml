@@ -1,6 +1,7 @@
 #cloud-config
-# version: 2.47
-# Cloud Browser Config v2.47 - 2026-02-01
+# version: 2.48
+# Cloud Browser Config v2.48 - 2026-02-01
+# Fixed: BG_COLOR now extracted to user-readable ~/.config/bg-color.env (was failing because /etc/droplet.env is root-only)
 # Added: Stage logging + AGENT_GEN fallback to gen-1 to /var/log/cloud-init-stages.log and /var/log/api-server-requests.log
 package_update: false
 package_upgrade: false
@@ -370,7 +371,10 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      # Source user-readable bg-color file (created by setup-desktop.sh)
+      if [ -f "$HOME/.config/bg-color.env" ]; then
+        source "$HOME/.config/bg-color.env"
+      fi
       sleep 3
       HEX="${BG_COLOR:-2d3748}"
       HEX="${HEX#\#}"
@@ -1178,6 +1182,10 @@ write_files:
       echo "xfce4-session" > $HOMEDIR/.xsession
       chown $USERNAME:$USERNAME $HOMEDIR/.xsession
       mkdir -p $HOMEDIR/.config/autostart
+      # Extract BG_COLOR to user-readable file (droplet.env is root-only)
+      echo "BG_COLOR=\"${BG_COLOR}\"" > $HOMEDIR/.config/bg-color.env
+      chmod 644 $HOMEDIR/.config/bg-color.env
+      chown $USERNAME:$USERNAME $HOMEDIR/.config/bg-color.env
       cp /tmp/templates/set-background.desktop $HOMEDIR/.config/autostart/
       chown -R $USERNAME:$USERNAME $HOMEDIR/.config/autostart
 
