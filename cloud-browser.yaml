@@ -1,31 +1,23 @@
 #cloud-config
-# version: 3.5.1
-# Droplet Init Config v3.5.1 - 2026-02-02
+# version: 3.8
+# Droplet Init Config v3.8 - 2026-02-02
+# Multi-agent council support, habitat-based memory, hot-reload council group
 #
 # === PLACEHOLDER REFERENCE ===
-# Plaintext (validated in Shortcut - alphanumeric + underscore only):
-#   USERNAME
-#
-# Base64 encoded (everything else):
-#   SSH_KEY_B64, DO_TOKEN_B64, PASSWORD_B64, DESTRUCT_MINS_B64,
-#   TELEGRAM_BOT_TOKEN_B64, TELEGRAM_USER_ID_B64, ANTHROPIC_KEY_B64,
-#   BRAVE_KEY_B64, GPLACES_KEY_B64, DROPBOX_TOKEN_B64, EMAIL_B64,
-#   IMAP_HOST_B64, SMTP_HOST_B64, EMAIL_PASSWORD_B64, CALDAV_URL_B64,
-#   CALDAV_USER_B64, CALDAV_PASSWORD_B64, BG_COLOR_B64, AGENT_GEN_B64,
+# Plaintext: USERNAME, BG_R, BG_G, BG_B
+# Base64: SSH_KEY_B64, DO_TOKEN_B64, PASSWORD_B64, DESTRUCT_MINS_B64,
+#   TELEGRAM_USER_ID_B64, ANTHROPIC_KEY_B64, OPENAI_TOKEN_B64,
+#   GOOGLE_API_KEY_B64, BRAVE_KEY_B64, DROPBOX_TOKEN_B64,
+#   EMAIL_B64, IMAP_HOST_B64, SMTP_HOST_B64, EMAIL_PASSWORD_B64,
+#   CALDAV_URL_B64, CALDAV_USER_B64, CALDAV_PASSWORD_B64, AGENT_GEN_B64,
 #   GH_TOKEN_B64, GMAIL_CLIENT_ID_B64, GMAIL_CLIENT_SECRET_B64,
 #   GMAIL_REFRESH_TOKEN_B64, DROPLET_TAG_B64, USER_REALNAME_B64,
 #   USER_LOCATION_B64, USER_NOTES_B64, BOT_NAME_B64, BOT_NOTES_B64,
-#   BOOT_INSTRUCTIONS_B64
-#
-# === CHANGELOG ===
-# v3.5.1: x11vnc full-screen polling, persistent background color (-noxrecord -noxfixes -fs 1.0) for reliable Xvfb display
-# v3.5: x11vnc RDP quality fixes (-noxdamage -fixscreen -noscr), disable compositor,
-#       keep --no-install-recommends except desktop, skip reboot, xrdp race fix
-# v3.4-exp: Timing instrumentation, test --no-install-recommends, skip reboot
-# v3.3: Added gmail-api.py, xrdp ssl-cert group fix
-# v3.2: Base64 encode all inputs (except USERNAME) for shell safety
-# v3.1: Single display (:10), permission fix, placeholder index
-# v3.0: [[PLACEHOLDER]] format, direct paths, /var/lib/init-status/
+#   BOOT_INSTRUCTIONS_B64, HABITAT_NAME_B64, COUNCIL_GROUP_ID_B64,
+#   AGENT1_NAME_B64, AGENT1_BOT_TOKEN_B64,
+#   AGENT2_NAME_B64, AGENT2_BOT_TOKEN_B64,
+#   AGENT3_NAME_B64, AGENT3_BOT_TOKEN_B64,
+#   AGENT4_NAME_B64, AGENT4_BOT_TOKEN_B64
 #
 package_update: false
 package_upgrade: false
@@ -47,11 +39,11 @@ write_files:
      DO_TOKEN_B64="[[DO_TOKEN_B64]]"
      PASSWORD_B64="[[PASSWORD_B64]]"
      DESTRUCT_MINS_B64="[[DESTRUCT_MINS_B64]]"
-     TELEGRAM_BOT_TOKEN_B64="[[TELEGRAM_BOT_TOKEN_B64]]"
+     AGENT1_BOT_TOKEN_B64="[[AGENT1_BOT_TOKEN_B64]]"
      TELEGRAM_USER_ID_B64="[[TELEGRAM_USER_ID_B64]]"
      ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
      BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
-     GPLACES_KEY_B64="[[GPLACES_KEY_B64]]"
+     GOOGLE_API_KEY_B64="[[GOOGLE_API_KEY_B64]]"
      DROPBOX_TOKEN_B64="[[DROPBOX_TOKEN_B64]]"
      EMAIL_B64="[[EMAIL_B64]]"
      IMAP_HOST_B64="[[IMAP_HOST_B64]]"
@@ -60,7 +52,6 @@ write_files:
      CALDAV_URL_B64="[[CALDAV_URL_B64]]"
      CALDAV_USER_B64="[[CALDAV_USER_B64]]"
      CALDAV_PASSWORD_B64="[[CALDAV_PASSWORD_B64]]"
-     BG_COLOR_B64="[[BG_COLOR_B64]]"
      AGENT_GEN_B64="[[AGENT_GEN_B64]]"
      GH_TOKEN_B64="[[GH_TOKEN_B64]]"
      GMAIL_CLIENT_ID_B64="[[GMAIL_CLIENT_ID_B64]]"
@@ -73,6 +64,16 @@ write_files:
      BOT_NAME_B64="[[BOT_NAME_B64]]"
      BOT_NOTES_B64="[[BOT_NOTES_B64]]"
      BOOT_INSTRUCTIONS_B64="[[BOOT_INSTRUCTIONS_B64]]"
+     HABITAT_NAME_B64="[[HABITAT_NAME_B64]]"
+     OPENAI_TOKEN_B64="[[OPENAI_TOKEN_B64]]"
+     AGENT1_NAME_B64="[[AGENT1_NAME_B64]]"
+     AGENT2_NAME_B64="[[AGENT2_NAME_B64]]"
+     AGENT2_BOT_TOKEN_B64="[[AGENT2_BOT_TOKEN_B64]]"
+     AGENT3_NAME_B64="[[AGENT3_NAME_B64]]"
+     AGENT3_BOT_TOKEN_B64="[[AGENT3_BOT_TOKEN_B64]]"
+     AGENT4_NAME_B64="[[AGENT4_NAME_B64]]"
+     AGENT4_BOT_TOKEN_B64="[[AGENT4_BOT_TOKEN_B64]]"
+     COUNCIL_GROUP_ID_B64="[[COUNCIL_GROUP_ID_B64]]"
 
  - path: /etc/update-manager/release-upgrades
    permissions: "0644"
@@ -84,7 +85,6 @@ write_files:
    permissions: "0644"
    content: |
      Unattended-Upgrade::Allowed-Origins {"${distro_id}:${distro_codename}-security";};
-     Unattended-Upgrade::Package-Blacklist {};
      Unattended-Upgrade::AutoFixInterruptedDpkg "true";
      Unattended-Upgrade::MinimalSteps "true";
      Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
@@ -179,7 +179,7 @@ write_files:
      User=[[USERNAME]]
      Environment=DISPLAY=:10
      ExecStartPre=/bin/sleep 3
-     ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -localhost -noxdamage -noxrecord -noxfixes -fs 1.0 -defer 10 -wait 5
+     ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -localhost -noxdamage -fixscreen V=2 -noscr
      Restart=on-failure
      RestartSec=5
      [Install]
@@ -209,22 +209,22 @@ write_files:
  - path: /home/[[USERNAME]]/.config/google-chrome/Local State
    defer: true
    content: |
-     {"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false},"toolkit_views":{"bookmark_bar_view_mode":0}}
+     {"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}
 
  - path: /home/[[USERNAME]]/.config/google-chrome/Default/Preferences
    defer: true
    content: |
-     {"browser":{"check_default_browser":false,"show_home_button":true},"session":{"restore_on_startup":1},"signin":{"allowed":true},"sync":{"requested":false},"credentials_enable_service":true,"profile":{"password_manager_enabled":true,"default_content_setting_values":{"notifications":2}},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true,"make_chrome_default_for_user":true,"import_bookmarks":false,"import_history":false,"import_search_engine":false}}
+     {"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"credentials_enable_service":true,"profile":{"password_manager_enabled":true,"default_content_setting_values":{"notifications":2}},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}
 
  - path: /home/[[USERNAME]]/.config/chrome-debug/Local State
    defer: true
    content: |
-     {"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false},"toolkit_views":{"bookmark_bar_view_mode":0}}
+     {"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}
 
  - path: /home/[[USERNAME]]/.config/chrome-debug/Default/Preferences
    defer: true
    content: |
-     {"browser":{"check_default_browser":false,"show_home_button":true},"session":{"restore_on_startup":1},"signin":{"allowed":true},"sync":{"requested":false},"credentials_enable_service":true,"profile":{"password_manager_enabled":true,"default_content_setting_values":{"notifications":2}},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true,"make_chrome_default_for_user":true,"import_bookmarks":false,"import_history":false,"import_search_engine":false}}
+     {"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"credentials_enable_service":true,"profile":{"password_manager_enabled":true,"default_content_setting_values":{"notifications":2}},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}
 
  - path: /home/[[USERNAME]]/Desktop/google-chrome.desktop
    permissions: "0755"
@@ -237,8 +237,6 @@ write_files:
      Terminal=false
      Icon=google-chrome
      Type=Application
-     Categories=Network;WebBrowser;
-     MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
 
  - path: /home/[[USERNAME]]/Desktop/thunderbird.desktop
    permissions: "0755"
@@ -256,21 +254,10 @@ write_files:
    defer: true
    content: xfce4-session
 
- - path: /home/[[USERNAME]]/.config/bg-color.env
+ - path: /home/[[USERNAME]]/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
    defer: true
    content: |
-     BG_COLOR_B64="[[BG_COLOR_B64]]"
-
- - path: /home/[[USERNAME]]/.config/autostart/set-background.desktop
-   defer: true
-   content: |
-     [Desktop Entry]
-     Type=Application
-     Name=Set Desktop Background
-     Exec=/usr/local/bin/set-desktop-background.sh
-     StartupNotify=false
-     Terminal=false
-     Hidden=false
+     <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="[[BG_R]]"/><value type="double" value="[[BG_G]]"/><value type="double" value="[[BG_B]]"/><value type="double" value="1"/></property></property></property></property></property></channel>
 
  - path: /home/[[USERNAME]]/.config/khal/config
    defer: true
@@ -282,62 +269,26 @@ write_files:
      [locale]
      timeformat = %H:%M
      dateformat = %Y-%m-%d
-     longdateformat = %Y-%m-%d
-     datetimeformat = %Y-%m-%d %H:%M
-     longdatetimeformat = %Y-%m-%d %H:%M
 
  - path: /home/[[USERNAME]]/clawd/TOOLS.md
    defer: true
    content: |
      ### Environment
-     - Running on cloud VM (Ubuntu) as `[[USERNAME]]`
-     - Single shared display :10 (you and user see the same desktop)
-     - User connects via RDP; you both work on :10
-     - Chrome at `/usr/bin/google-chrome-stable`
-
+     Cloud VM (Ubuntu), display :10 shared with user via RDP.
      ### Email
-     **DigitalOcean blocks SMTP.** For sending, use Gmail API script (install separately).
-     For reading via IMAP, **himalaya** works: `himalaya list` / `himalaya read 1`
-
-     ### Browser Control
-     Desktop Chrome has remote debugging on port 18800.
-     Launch programmatically:
-         DISPLAY=:10 google-chrome-stable --remote-debugging-port=18800 --user-data-dir=/home/[[USERNAME]]/.config/chrome-debug <url> &
-     User will see what you do since you share display :10.
-
+     DO blocks SMTP. Use gmail-api.py for sending, himalaya for reading.
+     ### Browser
+     Chrome remote debugging on port 18800.
      ### Tools
-     - **Chrome**: Remote debugging (port 18800)
-     - **Thunderbird**: Email/calendar client
-     - **goplaces**: Google Places CLI
-     - **ffmpeg**: Video/audio processing
-     - **LibreOffice**: Documents
-     - **rclone**: Cloud storage
-     - **pandoc**: Document conversion
-     - **himalaya**: Email CLI (IMAP reading)
-     - **khal/vdirsyncer**: Calendar CLI
-     - **yt-dlp**: Video downloads
-     - **ImageMagick**: Image manipulation
-     - **scrot/flameshot**: Screenshots
-     - **qpdf**: PDF manipulation
-     - **jq**: JSON processing
-     - **gh**: GitHub CLI
-     - **vlc**: Media player
-     - **htop/ncdu**: System monitoring
-
-     ### ClawdHub Skills
+     Chrome, Thunderbird, goplaces, ffmpeg, LibreOffice, rclone, pandoc, himalaya, khal/vdirsyncer, yt-dlp, ImageMagick, scrot/flameshot, qpdf, jq, gh, vlc, htop/ncdu
+     ### Skills
      weather, github, youtube-transcript, yt-dlp-downloader-skill, video-frames, goplaces
-
-     ### Workspace
-     `/home/[[USERNAME]]/clawd`
 
  - path: /home/[[USERNAME]]/clawd/HEARTBEAT.md
    defer: true
    content: |
      # HEARTBEAT.md
-     ## On Wake
      - If BOOTSTRAP.md exists, execute it first and delete when done.
-     ## Periodic Tasks
-     - Add recurring tasks below this line as needed.
 
  - path: /tmp/templates/clawdbot-dashboard.desktop
    content: |
@@ -360,34 +311,12 @@ write_files:
    permissions: "0755"
    content: |
      #!/bin/bash
-     TLOG="/var/log/timing.log"
-     TS=$(date +%s.%3N)
-     TSH=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+     TLOG="/var/log/timing.log"; TS=$(date +%s.%3N); TSH=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
      case "$1" in
-       start)
-         echo "$TS" > "/tmp/tlog_${2}"
-         echo "$TSH START $2 $3" >> "$TLOG"
-         ;;
-       end)
-         if [ -f "/tmp/tlog_${2}" ]; then
-           START=$(cat "/tmp/tlog_${2}")
-           DUR=$(echo "$TS - $START" | bc 2>/dev/null || echo "?")
-           echo "$TSH END   $2 duration=${DUR}s $3" >> "$TLOG"
-           rm -f "/tmp/tlog_${2}"
-         else
-           echo "$TSH END   $2 duration=? $3" >> "$TLOG"
-         fi
-         ;;
-       mark)
-         echo "$TSH MARK  $2 $3" >> "$TLOG"
-         ;;
-       pkg)
-         if dpkg -l "$2" 2>/dev/null | grep -q "^ii"; then
-           echo "$TSH PKG   $2 status=pre-installed" >> "$TLOG"
-         else
-           echo "$TSH PKG   $2 status=not-installed" >> "$TLOG"
-         fi
-         ;;
+       start) echo "$TS" > "/tmp/tlog_${2}"; echo "$TSH START $2 $3" >> "$TLOG" ;;
+       end) [ -f "/tmp/tlog_${2}" ] && { S=$(cat "/tmp/tlog_${2}"); D=$(echo "$TS - $S" | bc 2>/dev/null || echo "?"); echo "$TSH END $2 duration=${D}s $3" >> "$TLOG"; rm -f "/tmp/tlog_${2}"; } || echo "$TSH END $2 duration=? $3" >> "$TLOG" ;;
+       mark) echo "$TSH MARK $2 $3" >> "$TLOG" ;;
+       pkg) dpkg -l "$2" 2>/dev/null | grep -q "^ii" && echo "$TSH PKG $2 pre-installed" >> "$TLOG" || echo "$TSH PKG $2 not-installed" >> "$TLOG" ;;
      esac
 
  - path: /usr/local/bin/schedule-destruct.sh
@@ -396,8 +325,8 @@ write_files:
      #!/bin/bash
      source /etc/droplet.env
      d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     DESTRUCT_MINS=$(d "$DESTRUCT_MINS_B64")
-     [ -n "$DESTRUCT_MINS" ] && [ "$DESTRUCT_MINS" != "0" ] && [ "$DESTRUCT_MINS" -gt 0 ] 2>/dev/null && systemd-run --unit=self-destruct --on-active=${DESTRUCT_MINS}m /usr/local/bin/kill-droplet.sh
+     M=$(d "$DESTRUCT_MINS_B64")
+     [ -n "$M" ] && [ "$M" != "0" ] && [ "$M" -gt 0 ] 2>/dev/null && systemd-run --unit=self-destruct --on-active=${M}m /usr/local/bin/kill-droplet.sh
 
  - path: /usr/local/bin/kill-droplet.sh
    permissions: "0755"
@@ -405,37 +334,15 @@ write_files:
      #!/bin/bash
      source /etc/droplet.env
      d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     DO_TOKEN=$(d "$DO_TOKEN_B64")
-     DROPLET_TAG=$(d "$DROPLET_TAG_B64")
-     curl -X DELETE -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/droplets?tag_name=$DROPLET_TAG"
+     curl -X DELETE -H "Authorization: Bearer $(d "$DO_TOKEN_B64")" "https://api.digitalocean.com/v2/droplets?tag_name=$(d "$DROPLET_TAG_B64")"
 
  - path: /usr/local/bin/mount-dropbox.sh
    permissions: "0755"
    content: |
      #!/bin/bash
-     mkdir -p "$HOME/Dropbox"
-     fusermount -uz "$HOME/Dropbox" 2>/dev/null || true
+     mkdir -p "$HOME/Dropbox"; fusermount -uz "$HOME/Dropbox" 2>/dev/null || true
      rclone mount dropbox: "$HOME/Dropbox" --vfs-cache-mode writes --daemon
      sleep 2 && thunar "$HOME/Dropbox"
-
- - path: /usr/local/bin/set-desktop-background.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     [ -f "$HOME/.config/bg-color.env" ] && source "$HOME/.config/bg-color.env"
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     BG_COLOR=$(d "$BG_COLOR_B64")
-     sleep 3
-     HEX="${BG_COLOR:-2d3748}"; [ -z "$HEX" ] && HEX="2d3748"; HEX="${HEX#\#}"
-     R=$(printf "scale=4; %d/255\n" 0x${HEX:0:2} | bc)
-     G=$(printf "scale=4; %d/255\n" 0x${HEX:2:2} | bc)
-     B=$(printf "scale=4; %d/255\n" 0x${HEX:4:2} | bc)
-     xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -oE '/backdrop/screen[0-9]+/[^/]+/workspace[0-9]+' | sort -u | while read ws; do
-       xfconf-query -c xfce4-desktop -p "$ws/color-style" -n -t int -s 0 2>/dev/null
-       xfconf-query -c xfce4-desktop -p "$ws/image-style" -n -t int -s 0 2>/dev/null
-       xfconf-query -c xfce4-desktop -p "$ws/rgba1" -n -t double -t double -t double -t double -s $R -s $G -s $B -s 1.0 2>/dev/null
-     done
-     
 
  - path: /usr/local/bin/restore-clawdbot-state.sh
    permissions: "0755"
@@ -443,17 +350,17 @@ write_files:
      #!/bin/bash
      source /etc/droplet.env
      d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     DROPBOX_TOKEN=$(d "$DROPBOX_TOKEN_B64")
-     AGENT_GEN=$(d "$AGENT_GEN_B64")
-     HOMEDIR="/home/$USERNAME"; REMOTE="dropbox:clawdbot-memory"
-     [ -z "$DROPBOX_TOKEN" ] && exit 0
-     MY_GEN="${AGENT_GEN:-1}"; PREV_GEN=$((MY_GEN - 1))
-     mkdir -p "$HOMEDIR/clawd/memory" "$HOMEDIR/clawd/memory/archive"
-     su - $USERNAME -c "rclone copy '$REMOTE/MEMORY.md' '$HOMEDIR/clawd/' 2>/dev/null"
-     [ "$PREV_GEN" -gt 0 ] && su - $USERNAME -c "rclone copy '$REMOTE/gen-${PREV_GEN}/memory' '$HOMEDIR/clawd/memory/' 2>/dev/null"
-     for i in $(seq 1 $((PREV_GEN - 1))); do su - $USERNAME -c "rclone copy '$REMOTE/gen-${i}/memory' '$HOMEDIR/clawd/memory/archive/gen-${i}/' 2>/dev/null"; done
-     echo "$MY_GEN" > "$HOMEDIR/clawd/.gen"; date -u +%s > "$HOMEDIR/clawd/.gen-created"
-     chown -R $USERNAME:$USERNAME "$HOMEDIR/clawd"
+     DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
+     AG=$(d "$AGENT_GEN_B64"); HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
+     H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"; MG="${AG:-1}"; PG=$((MG - 1))
+     mkdir -p "$H/clawd/memory" "$H/clawd/memory/archive" "$H/clawd/shared"
+     su - $USERNAME -c "rclone copy '$R/MEMORY.md' '$H/clawd/' 2>/dev/null"
+     su - $USERNAME -c "rclone copy '$R/shared/' '$H/clawd/shared/' 2>/dev/null"
+     [ "$PG" -gt 0 ] && su - $USERNAME -c "rclone copy '$R/gen-${PG}/memory' '$H/clawd/memory/' 2>/dev/null"
+     for i in $(seq 1 $((PG - 1))); do su - $USERNAME -c "rclone copy '$R/gen-${i}/memory' '$H/clawd/memory/archive/gen-${i}/' 2>/dev/null"; done
+     for a in agent1 agent2 agent3 agent4; do [ -d "$H/clawd/agents/$a" ] && su - $USERNAME -c "rclone copy '$R/agents/${a}/' '$H/clawd/agents/${a}/' 2>/dev/null"; done
+     echo "$MG" > "$H/clawd/.gen"; echo "$HN" > "$H/clawd/.habitat"; date -u +%s > "$H/clawd/.gen-created"
+     chown -R $USERNAME:$USERNAME "$H/clawd"
 
  - path: /usr/local/bin/sync-clawdbot-state.sh
    permissions: "0755"
@@ -461,14 +368,42 @@ write_files:
      #!/bin/bash
      source /etc/droplet.env
      d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     DROPBOX_TOKEN=$(d "$DROPBOX_TOKEN_B64")
-     AGENT_GEN=$(d "$AGENT_GEN_B64")
-     HOMEDIR="/home/$USERNAME"; REMOTE="dropbox:clawdbot-memory"
-     [ -z "$DROPBOX_TOKEN" ] && exit 0
-     MY_GEN="${AGENT_GEN:-$(cat "$HOMEDIR/clawd/.gen" 2>/dev/null)}"; [ -z "$MY_GEN" ] && MY_GEN="1"
-     su - $USERNAME -c "rclone sync '$HOMEDIR/clawd/memory' '$REMOTE/gen-${MY_GEN}/memory' --exclude 'archive/**' 2>/dev/null"
-     [ -f "$HOMEDIR/clawd/MEMORY.md" ] && su - $USERNAME -c "rclone copy '$HOMEDIR/clawd/MEMORY.md' '$REMOTE/' 2>/dev/null"
-     date -u +%s > "$HOMEDIR/clawd/.last-sync"; chown $USERNAME:$USERNAME "$HOMEDIR/clawd/.last-sync" 2>/dev/null
+     DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
+     AG=$(d "$AGENT_GEN_B64"); HN=$(d "$HABITAT_NAME_B64"); H="/home/$USERNAME"
+     HN="${HN:-default}"; [ -f "$H/clawd/.habitat" ] && HN=$(cat "$H/clawd/.habitat")
+     R="dropbox:clawdbot-memory/${HN}"; MG="${AG:-$(cat "$H/clawd/.gen" 2>/dev/null)}"; [ -z "$MG" ] && MG="1"
+     su - $USERNAME -c "rclone sync '$H/clawd/memory' '$R/gen-${MG}/memory' --exclude 'archive/**' 2>/dev/null"
+     [ -f "$H/clawd/MEMORY.md" ] && su - $USERNAME -c "rclone copy '$H/clawd/MEMORY.md' '$R/' 2>/dev/null"
+     [ -d "$H/clawd/shared" ] && su - $USERNAME -c "rclone sync '$H/clawd/shared' '$R/shared/' 2>/dev/null"
+     for a in agent1 agent2 agent3 agent4; do
+       [ -d "$H/clawd/agents/$a" ] && { su - $USERNAME -c "rclone sync '$H/clawd/agents/${a}/memory' '$R/agents/${a}/memory' 2>/dev/null"; [ -f "$H/clawd/agents/${a}/MEMORY.md" ] && su - $USERNAME -c "rclone copy '$H/clawd/agents/${a}/MEMORY.md' '$R/agents/${a}/' 2>/dev/null"; }
+     done
+     date -u +%s > "$H/clawd/.last-sync"; chown $USERNAME:$USERNAME "$H/clawd/.last-sync" 2>/dev/null
+
+ - path: /usr/local/bin/set-council-group.sh
+   permissions: "0755"
+   content: |
+     #!/bin/bash
+     # Hot-reload council group ID without rebuilding droplet
+     [ -z "$1" ] && { echo "Usage: set-council-group.sh <group_id>"; exit 1; }
+     GID="$1"; source /etc/droplet.env
+     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
+     H="/home/$USERNAME"; CFG="$H/.clawdbot/clawdbot.json"
+     [ ! -f "$CFG" ] && { echo "Config not found"; exit 1; }
+     AC=$(cat "$H/clawd/.agent-count" 2>/dev/null || echo "1")
+     [ "$AC" -lt 2 ] && { echo "Council requires 2+ agents. Found: $AC"; exit 1; }
+     cp "$CFG" "$CFG.bak"
+     if grep -q '"groups":{' "$CFG"; then
+       sed -i "s|\"groups\":{[^}]*}|\"groups\":{\"${GID}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}|" "$CFG"
+     else
+       sed -i "s|\"telegram\":{\"enabled\":true|\"telegram\":{\"enabled\":true,\"groups\":{\"${GID}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}|" "$CFG"
+     fi
+     echo "$GID" > "$H/clawd/.council-group-id"
+     echo "true" > "$H/clawd/.council-enabled"
+     chown $USERNAME:$USERNAME "$H/clawd/.council-group-id" "$H/clawd/.council-enabled"
+     systemctl restart clawdbot
+     sleep 3
+     systemctl is-active --quiet clawdbot && echo "Council group set to $GID. Clawdbot restarted." || { echo "Restart failed, restoring backup"; cp "$CFG.bak" "$CFG"; systemctl restart clawdbot; exit 1; }
 
  - path: /usr/local/bin/api-server.py
    permissions: "0755"
@@ -477,88 +412,76 @@ write_files:
      import http.server,socketserver,subprocess,json,re,os,base64
      PORT=8080
      STAGES={0:"init",1:"packages",2:"credentials",3:"chrome",4:"desktop",5:"clawdbot",6:"productivity",7:"cleanup",8:"xrdp",9:"ready",10:"ready"}
-     def decode_b64(s):
+     def d64(s):
          try:return base64.b64decode(s).decode('utf-8') if s else ""
          except:return ""
-     def get_destruct_mins():
+     def get_dm():
          try:
              with open('/etc/droplet.env','r') as f:
                  for l in f:
                      m=re.match(r'DESTRUCT_MINS_B64="([^"]*)"',l.strip())
-                     if m:return int(decode_b64(m.group(1)) or "0")
+                     if m:return int(d64(m.group(1)) or "0")
          except:pass
          return 0
      def get_status():
-         errors=[]
+         e=[]
          if os.path.exists('/var/run/init-errors'):
              try:
-                 with open('/var/run/init-errors','r') as f:errors=[l.strip() for l in f if l.strip()]
+                 with open('/var/run/init-errors','r') as f:e=[l.strip() for l in f if l.strip()]
              except:pass
-         stage=0
+         s=0
          try:
-             with open('/var/lib/init-status/stage','r') as f:stage=int(f.read().strip())
+             with open('/var/lib/init-status/stage','r') as f:s=int(f.read().strip())
          except:pass
-         return {"stage":stage,"desc":STAGES.get(stage,"unknown"),"errors":errors}
-     def parse_timing():
-         ops={}
-         try:
-             with open('/var/log/timing.log','r') as f:
-                 for line in f:
-                     parts=line.strip().split(' ',3)
-                     if len(parts)<3:continue
-                     ts,action,name=parts[0],parts[1],parts[2]
-                     extra=parts[3] if len(parts)>3 else ""
-                     if action=='START':
-                         ops[name]={'start':ts,'status':'running'}
-                     elif action=='END':
-                         if name in ops:
-                             ops[name]['end']=ts
-                             ops[name]['status']='done'
-                             m=re.search(r'duration=([0-9.?]+)s',extra)
-                             if m:ops[name]['duration']=m.group(1)
-                             ops[name]['extra']=extra
-                         else:
-                             ops[name]={'end':ts,'status':'done','extra':extra}
-                     elif action=='MARK':
-                         ops[name]={'ts':ts,'status':'mark','extra':extra}
-                     elif action=='PKG':
-                         ops[f"pkg_{name}"]={'ts':ts,'status':extra}
-         except:pass
-         return ops
+         return {"stage":s,"desc":STAGES.get(s,"unknown"),"errors":e}
      class H(http.server.BaseHTTPRequestHandler):
          def log_message(self,*a):pass
          def do_GET(self):
              if self.path=='/status':
                  s=get_status();self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(s).encode())
              elif self.path=='/timer':
-                 self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();m=get_destruct_mins();self.wfile.write(json.dumps({"destruct_mins":m,"enabled":m>0}).encode())
+                 self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();m=get_dm();self.wfile.write(json.dumps({"destruct_mins":m,"enabled":m>0}).encode())
              elif self.path=='/stages':
                  self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
                  try:
                      with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
                  except:self.wfile.write(b"No log")
-             elif self.path=='/timing':
-                 self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-                 self.wfile.write(json.dumps(parse_timing(),indent=2).encode())
-             elif self.path=='/timing/raw':
-                 self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
-                 try:
-                     with open('/var/log/timing.log','r') as f:self.wfile.write(f.read().encode())
-                 except:self.wfile.write(b"No timing log")
              elif self.path=='/sync':
                  self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
                  try:r=subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
-                 except Exception as e:self.wfile.write(json.dumps({"ok":False,"error":str(e)}).encode())
+                 except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
              else:self.send_response(404);self.end_headers()
          def do_POST(self):
              if self.path=='/prepare-shutdown':
                  self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
                  try:r=subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,capture_output=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":r.returncode==0,"ready_for_shutdown":True}).encode())
-                 except Exception as e:self.wfile.write(json.dumps({"ok":False,"error":str(e)}).encode())
+                 except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
              elif self.path=='/keepalive':
                  self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
                  try:subprocess.run("systemctl stop self-destruct.timer self-destruct.service 2>/dev/null;systemctl reset-failed self-destruct.timer 2>/dev/null;/usr/local/bin/schedule-destruct.sh",shell=True);self.wfile.write(json.dumps({"status":"success"}).encode())
-                 except Exception as e:self.wfile.write(json.dumps({"status":"error","error":str(e)}).encode())
+                 except Exception as x:self.wfile.write(json.dumps({"status":"error","error":str(x)}).encode())
+             elif self.path=='/setcouncil':
+                 self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+                 try:
+                     cl=int(self.headers.get('Content-Length',0));body=self.rfile.read(cl).decode() if cl>0 else ''
+                     gid=json.loads(body).get('group_id','') if body.startswith('{') else body.strip()
+                     if not gid or not re.match(r'^-?\d+$',gid):self.wfile.write(json.dumps({"ok":False,"error":"Invalid group_id"}).encode());return
+                     r=subprocess.run(["/usr/local/bin/set-council-group.sh",gid],capture_output=True,timeout=30)
+                     self.wfile.write(json.dumps({"ok":r.returncode==0,"msg":r.stdout.decode().strip()}).encode())
+                 except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+             elif self.path=='/council':
+                 self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+                 try:
+                     with open('/etc/droplet.env','r') as f:
+                         for l in f:
+                             if l.startswith('USERNAME='):un=l.split('=',1)[1].strip().strip('"');break
+                     h=f"/home/{un}";gid=None;ce=False;ac=1
+                     if os.path.exists(f"{h}/clawd/.council-group-id"):gid=open(f"{h}/clawd/.council-group-id").read().strip()
+                     if os.path.exists(f"{h}/clawd/.council-enabled"):ce=open(f"{h}/clawd/.council-enabled").read().strip()=="true"
+                     if os.path.exists(f"{h}/clawd/.agent-count"):ac=int(open(f"{h}/clawd/.agent-count").read().strip())
+                     self.wfile.write(json.dumps({"council_enabled":ce,"group_id":gid,"agent_count":ac}).encode())
+                 except Exception as x:self.wfile.write(json.dumps({"error":str(x)}).encode())
+             else:self.send_response(404);self.end_headers()
      class R(socketserver.TCPServer):allow_reuse_address=True
      with R(("",PORT),H) as h:h.serve_forever()
 
@@ -566,7 +489,7 @@ write_files:
    permissions: "0755"
    content: |
      #!/usr/bin/env python3
-     """Gmail API CLI - send/read email via API (bypasses SMTP blocks)"""
+     """Gmail API CLI"""
      import argparse,base64,os,sys,mimetypes,re
      from email.mime.text import MIMEText
      from email.mime.multipart import MIMEMultipart
@@ -576,185 +499,80 @@ write_files:
          from google.oauth2.credentials import Credentials
          from googleapiclient.discovery import build
      except ImportError:
-         sys.exit("Missing deps. Run: pip3 install google-auth google-api-python-client")
+         sys.exit("Run: pip3 install google-auth google-api-python-client")
      def get_creds():
-         cid=os.environ.get('GMAIL_CLIENT_ID')
-         csc=os.environ.get('GMAIL_CLIENT_SECRET')
-         rtk=os.environ.get('GMAIL_REFRESH_TOKEN')
+         cid,csc,rtk=os.environ.get('GMAIL_CLIENT_ID'),os.environ.get('GMAIL_CLIENT_SECRET'),os.environ.get('GMAIL_REFRESH_TOKEN')
          if not all([cid,csc,rtk]):
              try:
                  with open('/etc/droplet.env','r') as f:
-                     for line in f:
-                         line=line.strip()
-                         if line.startswith('GMAIL_CLIENT_ID_B64='):
-                             v=line.split('=',1)[1].strip('"').strip("'")
-                             if v:cid=base64.b64decode(v).decode()
-                         elif line.startswith('GMAIL_CLIENT_SECRET_B64='):
-                             v=line.split('=',1)[1].strip('"').strip("'")
-                             if v:csc=base64.b64decode(v).decode()
-                         elif line.startswith('GMAIL_REFRESH_TOKEN_B64='):
-                             v=line.split('=',1)[1].strip('"').strip("'")
-                             if v:rtk=base64.b64decode(v).decode()
+                     for l in f:
+                         l=l.strip()
+                         if l.startswith('GMAIL_CLIENT_ID_B64='):v=l.split('=',1)[1].strip('"');cid=base64.b64decode(v).decode() if v else cid
+                         elif l.startswith('GMAIL_CLIENT_SECRET_B64='):v=l.split('=',1)[1].strip('"');csc=base64.b64decode(v).decode() if v else csc
+                         elif l.startswith('GMAIL_REFRESH_TOKEN_B64='):v=l.split('=',1)[1].strip('"');rtk=base64.b64decode(v).decode() if v else rtk
              except:pass
-         if not all([cid,csc,rtk]):
-             sys.exit("Gmail API credentials not configured")
+         if not all([cid,csc,rtk]):sys.exit("Gmail API credentials not configured")
          return Credentials(None,refresh_token=rtk,token_uri="https://oauth2.googleapis.com/token",client_id=cid,client_secret=csc)
      def attach_file(msg,fp):
-         if not os.path.isfile(fp):
-             print(f"Warning: Attachment not found: {fp}",file=sys.stderr);return False
-         ct,_=mimetypes.guess_type(fp)
-         if ct is None:ct='application/octet-stream'
-         mt,st=ct.split('/',1)
-         fn=os.path.basename(fp)
+         if not os.path.isfile(fp):return False
+         ct,_=mimetypes.guess_type(fp);ct=ct or 'application/octet-stream';mt,st=ct.split('/',1)
          with open(fp,'rb') as f:
-             if mt=='text':
-                 part=MIMEText(f.read().decode('utf-8',errors='replace'),_subtype=st)
-             else:
-                 part=MIMEBase(mt,st);part.set_payload(f.read());encoders.encode_base64(part)
-         part.add_header('Content-Disposition','attachment',filename=fn)
-         msg.attach(part);return True
+             if mt=='text':part=MIMEText(f.read().decode('utf-8',errors='replace'),_subtype=st)
+             else:part=MIMEBase(mt,st);part.set_payload(f.read());encoders.encode_base64(part)
+         part.add_header('Content-Disposition','attachment',filename=os.path.basename(fp));msg.attach(part);return True
      def cmd_send(args):
-         creds=get_creds();svc=build('gmail','v1',credentials=creds,cache_discovery=False)
+         svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
          msg=MIMEMultipart('mixed');msg['To']=args.to;msg['Subject']=args.subject
          if args.cc:msg['Cc']=args.cc
          msg.attach(MIMEText(args.body,'html' if args.html else 'plain'))
-         ac=0
          if args.attach:
-             for fp in args.attach:
-                 if attach_file(msg,fp):ac+=1;print(f"Attached: {os.path.basename(fp)}")
-         raw=base64.urlsafe_b64encode(msg.as_bytes()).decode()
-         r=svc.users().messages().send(userId='me',body={'raw':raw}).execute()
-         am=f" with {ac} attachment(s)" if ac else ""
-         print(f"Sent to {args.to}{am} (ID: {r['id']})")
+             for fp in args.attach:attach_file(msg,fp)
+         r=svc.users().messages().send(userId='me',body={'raw':base64.urlsafe_b64encode(msg.as_bytes()).decode()}).execute()
+         print(f"Sent to {args.to} (ID: {r['id']})")
      def cmd_list(args):
-         creds=get_creds();svc=build('gmail','v1',credentials=creds,cache_discovery=False)
+         svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
          res=svc.users().messages().list(userId='me',maxResults=args.n,q=args.q or '').execute()
-         msgs=res.get('messages',[])
-         if not msgs:print("No messages found.");return
-         for msg in msgs:
+         for msg in res.get('messages',[]):
              m=svc.users().messages().get(userId='me',id=msg['id'],format='metadata',metadataHeaders=['From','Subject','Date']).execute()
              h={x['name']:x['value'] for x in m['payload']['headers']}
-             ha=False
-             if 'parts' in m.get('payload',{}):
-                 for p in m['payload']['parts']:
-                     if p.get('filename'):ha=True;break
-             ai=" [+attach]" if ha else ""
-             print(f"ID: {msg['id']}{ai}\n  From: {h.get('From','?')}\n  Subject: {h.get('Subject','(no subject)')}\n  Date: {h.get('Date','?')}\n")
-     def get_attachments(svc,mid,payload,save_dir=None):
-         atts=[]
-         def proc(parts):
-             for p in parts:
-                 fn=p.get('filename')
-                 if fn:
-                     ai={'filename':fn,'mimeType':p.get('mimeType'),'size':p['body'].get('size',0)}
-                     if save_dir:
-                         if 'attachmentId' in p['body']:
-                             att=svc.users().messages().attachments().get(userId='me',messageId=mid,id=p['body']['attachmentId']).execute()
-                             data=base64.urlsafe_b64decode(att['data'])
-                         elif 'data' in p['body']:
-                             data=base64.urlsafe_b64decode(p['body']['data'])
-                         else:data=None
-                         if data:
-                             sp=os.path.join(save_dir,fn);c=1;b,e=os.path.splitext(sp)
-                             while os.path.exists(sp):sp=f"{b}_{c}{e}";c+=1
-                             with open(sp,'wb') as f:f.write(data)
-                             ai['saved_to']=sp
-                     atts.append(ai)
-                 if 'parts' in p:proc(p['parts'])
-         if 'parts' in payload:proc(payload['parts'])
-         return atts
+             print(f"ID: {msg['id']}\n  From: {h.get('From','?')}\n  Subject: {h.get('Subject','(no subject)')}\n  Date: {h.get('Date','?')}\n")
      def cmd_read(args):
-         creds=get_creds();svc=build('gmail','v1',credentials=creds,cache_discovery=False)
+         svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
          m=svc.users().messages().get(userId='me',id=args.id,format='full').execute()
          h={x['name']:x['value'] for x in m['payload']['headers']}
-         print(f"From: {h.get('From','?')}\nTo: {h.get('To','?')}")
-         if h.get('Cc'):print(f"Cc: {h.get('Cc')}")
-         print(f"Subject: {h.get('Subject','?')}\nDate: {h.get('Date','?')}")
-         sd=args.save_attachments if hasattr(args,'save_attachments') and args.save_attachments else None
-         if sd:os.makedirs(sd,exist_ok=True)
-         atts=get_attachments(svc,args.id,m['payload'],sd)
-         if atts:
-             print(f"\nAttachments ({len(atts)}):")
-             for a in atts:
-                 sz=a['size']/1024
-                 if 'saved_to' in a:print(f"  * {a['filename']} ({sz:.1f} KB) -> {a['saved_to']}")
-                 else:print(f"  * {a['filename']} ({sz:.1f} KB)")
-         print("="*60)
+         print(f"From: {h.get('From','?')}\nTo: {h.get('To','?')}\nSubject: {h.get('Subject','?')}\nDate: {h.get('Date','?')}\n{'='*60}")
          def get_body(pl):
-             if 'body' in pl and pl['body'].get('data'):
-                 return base64.urlsafe_b64decode(pl['body']['data']).decode('utf-8',errors='replace')
+             if 'body' in pl and pl['body'].get('data'):return base64.urlsafe_b64decode(pl['body']['data']).decode('utf-8',errors='replace')
              if 'parts' in pl:
                  for p in pl['parts']:
                      if p.get('filename'):continue
-                     if p['mimeType']=='text/plain' and p['body'].get('data'):
-                         return base64.urlsafe_b64decode(p['body']['data']).decode('utf-8',errors='replace')
-                     if p['mimeType']=='multipart/alternative' and 'parts' in p:
-                         r=get_body(p)
-                         if r:return r
+                     if p['mimeType']=='text/plain' and p['body'].get('data'):return base64.urlsafe_b64decode(p['body']['data']).decode('utf-8',errors='replace')
                      if 'parts' in p:
                          r=get_body(p)
                          if r:return r
-                 for p in pl['parts']:
-                     if p.get('filename'):continue
-                     if p['mimeType']=='text/html' and p['body'].get('data'):
-                         html=base64.urlsafe_b64decode(p['body']['data']).decode('utf-8',errors='replace')
-                         txt=re.sub(r'<[^>]+>',' ',html);txt=re.sub(r'\s+',' ',txt).strip()
-                         return f"[HTML]\n{txt}"
              return None
-         body=get_body(m['payload'])
-         print(body if body else "(Could not extract body)")
-     def cmd_reply(args):
-         creds=get_creds();svc=build('gmail','v1',credentials=creds,cache_discovery=False)
-         orig=svc.users().messages().get(userId='me',id=args.id,format='metadata',metadataHeaders=['From','Subject','Message-ID','References']).execute()
-         h={x['name']:x['value'] for x in orig['payload']['headers']}
-         msg=MIMEMultipart('mixed');msg['To']=h.get('From','')
-         subj=h.get('Subject','')
-         if not subj.lower().startswith('re:'):subj=f"Re: {subj}"
-         msg['Subject']=subj
-         mid=h.get('Message-ID','')
-         if mid:
-             msg['In-Reply-To']=mid
-             refs=h.get('References','')
-             msg['References']=f"{refs} {mid}".strip()
-         msg.attach(MIMEText(args.body,'html' if args.html else 'plain'))
-         if args.attach:
-             for fp in args.attach:
-                 if attach_file(msg,fp):print(f"Attached: {os.path.basename(fp)}")
-         raw=base64.urlsafe_b64encode(msg.as_bytes()).decode()
-         r=svc.users().messages().send(userId='me',body={'raw':raw,'threadId':orig['threadId']}).execute()
-         print(f"Reply sent (ID: {r['id']})")
+         print(get_body(m['payload']) or "(Could not extract body)")
      def main():
-         p=argparse.ArgumentParser(description='Gmail API CLI')
-         sub=p.add_subparsers(dest='cmd',required=True)
-         ps=sub.add_parser('send');ps.add_argument('to');ps.add_argument('subject');ps.add_argument('body')
-         ps.add_argument('--html',action='store_true');ps.add_argument('--cc',type=str)
-         ps.add_argument('--attach','-a',action='append')
-         pl=sub.add_parser('list');pl.add_argument('-n',type=int,default=10);pl.add_argument('-q',type=str,default='')
-         pr=sub.add_parser('read');pr.add_argument('id');pr.add_argument('--save-attachments','-s',type=str,metavar='DIR')
-         py=sub.add_parser('reply');py.add_argument('id');py.add_argument('body')
-         py.add_argument('--html',action='store_true');py.add_argument('--attach','-a',action='append')
-         args=p.parse_args()
-         {'send':cmd_send,'list':cmd_list,'read':cmd_read,'reply':cmd_reply}[args.cmd](args)
+         p=argparse.ArgumentParser();sub=p.add_subparsers(dest='cmd',required=True)
+         ps=sub.add_parser('send');ps.add_argument('to');ps.add_argument('subject');ps.add_argument('body');ps.add_argument('--html',action='store_true');ps.add_argument('--cc');ps.add_argument('--attach','-a',action='append')
+         pl=sub.add_parser('list');pl.add_argument('-n',type=int,default=10);pl.add_argument('-q',default='')
+         pr=sub.add_parser('read');pr.add_argument('id')
+         args=p.parse_args();{'send':cmd_send,'list':cmd_list,'read':cmd_read}[args.cmd](args)
      if __name__=='__main__':main()
 
  - path: /usr/local/sbin/install-packages.sh
    permissions: "0755"
    content: |
      #!/bin/bash
-     LOG="/var/log/package-install.log"
-     T="/usr/local/bin/tlog.sh"
-     echo "=== v3.5 Package Install Started: $(date) ===" > "$LOG"
+     LOG="/var/log/package-install.log"; T="/usr/local/bin/tlog.sh"
+     echo "=== v3.8 Package Install: $(date) ===" > "$LOG"
      $T start total_install
-     $T mark baseline "Checking pre-installed packages"
-     for pkg in xfce4 xfce4-goodies thunderbird libreoffice-writer vlc ffmpeg imagemagick python3; do
-       $T pkg "$pkg"
-     done
      $T start dl_chrome
      wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb &
-     PID_CHROME=$!
+     PC=$!
      $T start dl_goplaces
      (GPURL=$(curl -s https://api.github.com/repos/steipete/goplaces/releases/latest | grep -o 'https://[^"]*linux_amd64.tar.gz'); [ -n "$GPURL" ] && curl -sL "$GPURL" -o /tmp/goplaces.tar.gz) &
-     PID_GP=$!
+     PG=$!
      $T start setup_nodesource
      curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >> "$LOG" 2>&1
      $T end setup_nodesource
@@ -763,74 +581,27 @@ write_files:
      chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
      echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
      $T end setup_gh_repo
-     $T start stop_apt_services
      systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true
      systemctl disable apt-daily.timer apt-daily-upgrade.timer unattended-upgrades 2>/dev/null || true
-     killall -9 apt apt-get dpkg unattended-upgr 2>/dev/null || true
-     sleep 2
-     $T end stop_apt_services
-     $T start wait_apt_locks
-     for lf in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
-       [ -f "$lf" ] && ! fuser "$lf" >/dev/null 2>&1 && rm -f "$lf"
-     done
-     WC=0
-     while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-       [ $((WC % 10)) -eq 0 ] && [ $WC -gt 0 ] && killall -9 apt apt-get dpkg 2>/dev/null || true
-       sleep 2; WC=$((WC + 1))
-       [ $WC -gt 90 ] && { rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock; dpkg --configure -a >> "$LOG" 2>&1 || true; break; }
-     done
-     $T end wait_apt_locks
+     killall -9 apt apt-get dpkg unattended-upgr 2>/dev/null || true; sleep 2
+     for lf in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do [ -f "$lf" ] && ! fuser "$lf" >/dev/null 2>&1 && rm -f "$lf"; done
+     WC=0; while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do [ $((WC % 10)) -eq 0 ] && [ $WC -gt 0 ] && killall -9 apt apt-get dpkg 2>/dev/null; sleep 2; WC=$((WC + 1)); [ $WC -gt 90 ] && { rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock; dpkg --configure -a >> "$LOG" 2>&1; break; }; done
      $T start apt_update
      apt-get update >> "$LOG" 2>&1
      $T end apt_update
-     $T start apt_xrdp "xrdp xorgxrdp"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xrdp xorgxrdp >> "$LOG" 2>&1 || echo "FAIL apt_xrdp" >> /var/run/init-errors
-     $T end apt_xrdp
-     $T start apt_display "xvfb x11vnc lightdm dbus-x11"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy >> "$LOG" 2>&1 || echo "FAIL apt_display" >> /var/run/init-errors
-     $T end apt_display
-     $T start apt_desktop "xfce4 xfce4-goodies xfce4-terminal"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xfce4-terminal >> "$LOG" 2>&1 || echo "FAIL apt_desktop" >> /var/run/init-errors
+     $T start apt_core
+     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy >> "$LOG" 2>&1
+     $T end apt_core
+     $T start apt_desktop
+     DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xfce4-terminal >> "$LOG" 2>&1
      $T end apt_desktop
-     $T start apt_nodejs "nodejs from nodesource"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs >> "$LOG" 2>&1 || echo "FAIL apt_nodejs" >> /var/run/init-errors
-     NODE_VER=$(node --version 2>/dev/null || echo "FAILED")
-     $T end apt_nodejs "version=$NODE_VER"
-     $T start apt_build "build-essential git"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential git >> "$LOG" 2>&1 || echo "FAIL apt_build" >> /var/run/init-errors
-     $T end apt_build
-     $T start apt_gh "gh CLI"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh >> "$LOG" 2>&1 || echo "FAIL apt_gh" >> /var/run/init-errors
-     $T end apt_gh
-     $T start apt_media "ffmpeg imagemagick vlc"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg imagemagick vlc >> "$LOG" 2>&1 || echo "FAIL apt_media" >> /var/run/init-errors
-     $T end apt_media
-     $T start apt_office "libreoffice-writer thunderbird pandoc"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libreoffice-writer thunderbird pandoc >> "$LOG" 2>&1 || echo "FAIL apt_office" >> /var/run/init-errors
-     $T end apt_office
-     $T start apt_utils "scrot flameshot qpdf jq htop ncdu bc wget xz-utils"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends scrot flameshot qpdf jq htop ncdu bc wget xz-utils >> "$LOG" 2>&1 || echo "FAIL apt_utils" >> /var/run/init-errors
-     $T end apt_utils
-     $T start apt_python "python3 python3-pip"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-pip >> "$LOG" 2>&1 || echo "FAIL apt_python" >> /var/run/init-errors
-     $T end apt_python
-     $T start apt_cloud "rclone fuse3 khal vdirsyncer unattended-upgrades"
-     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends rclone fuse3 khal vdirsyncer unattended-upgrades >> "$LOG" 2>&1 || echo "FAIL apt_cloud" >> /var/run/init-errors
-     $T end apt_cloud
-     $T start wait_downloads
-     wait $PID_CHROME; $T end dl_chrome
-     wait $PID_GP; $T end dl_goplaces
-     $T end wait_downloads
-     $T start install_chrome
+     $T start apt_tools
+     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs build-essential git gh ffmpeg imagemagick vlc libreoffice-writer thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades >> "$LOG" 2>&1
+     $T end apt_tools
+     wait $PC; $T end dl_chrome; wait $PG; $T end dl_goplaces
      [ -f /tmp/chrome.deb ] && apt-get install -y /tmp/chrome.deb >> "$LOG" 2>&1 && rm -f /tmp/chrome.deb
-     $T end install_chrome
-     $T start apt_cleanup
-     apt-get purge -y gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
-     apt-get autoremove -y >> "$LOG" 2>&1
-     $T end apt_cleanup
-     $T start install_goplaces
+     apt-get purge -y gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true; apt-get autoremove -y >> "$LOG" 2>&1
      [ -f /tmp/goplaces.tar.gz ] && tar -xzf /tmp/goplaces.tar.gz -C /usr/local/bin 2>/dev/null && chmod +x /usr/local/bin/goplaces 2>/dev/null && rm -f /tmp/goplaces.tar.gz
-     $T end install_goplaces
      $T start pip_packages
      pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
      $T end pip_packages
@@ -839,7 +610,6 @@ write_files:
      [ -f "/root/.local/bin/himalaya" ] && ln -sf "/root/.local/bin/himalaya" /usr/local/bin/himalaya
      $T end install_himalaya
      $T end total_install
-     echo "=== Package Install Finished: $(date) ===" >> "$LOG"
 
  - path: /usr/local/sbin/setup-user.sh
    permissions: "0755"
@@ -847,18 +617,15 @@ write_files:
      #!/bin/bash
      source /etc/droplet.env
      d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     SSH_KEY=$(d "$SSH_KEY_B64")
-     PASSWORD=$(d "$PASSWORD_B64")
-     GPLACES_KEY=$(d "$GPLACES_KEY_B64")
-     BRAVE_KEY=$(d "$BRAVE_KEY_B64")
+     SK=$(d "$SSH_KEY_B64"); PW=$(d "$PASSWORD_B64"); GPK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
      id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
      chown $USERNAME:$USERNAME /home/$USERNAME
-     [ -n "$SSH_KEY" ] && { mkdir -p /home/$USERNAME/.ssh; echo "$SSH_KEY" >> /home/$USERNAME/.ssh/authorized_keys; chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh; chmod 700 /home/$USERNAME/.ssh; chmod 600 /home/$USERNAME/.ssh/authorized_keys; }
-     echo "$USERNAME:$PASSWORD" | chpasswd
+     [ -n "$SK" ] && { mkdir -p /home/$USERNAME/.ssh; echo "$SK" >> /home/$USERNAME/.ssh/authorized_keys; chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh; chmod 700 /home/$USERNAME/.ssh; chmod 600 /home/$USERNAME/.ssh/authorized_keys; }
+     echo "$USERNAME:$PW" | chpasswd
      echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME; chmod 440 /etc/sudoers.d/$USERNAME
      usermod -aG systemd-journal $USERNAME
-     [ -n "$GPLACES_KEY" ] && echo "export GOOGLE_PLACES_API_KEY=\"$GPLACES_KEY\"" >> /home/$USERNAME/.bashrc
-     [ -n "$BRAVE_KEY" ] && echo "export BRAVE_API_KEY=\"$BRAVE_KEY\"" >> /home/$USERNAME/.bashrc
+     [ -n "$GPK" ] && echo "export GOOGLE_PLACES_API_KEY=\"$GPK\"" >> /home/$USERNAME/.bashrc
+     [ -n "$BK" ] && echo "export BRAVE_API_KEY=\"$BK\"" >> /home/$USERNAME/.bashrc
      chown -R $USERNAME:$USERNAME /home/$USERNAME
 
  - path: /usr/local/sbin/setup-chrome.sh
@@ -866,13 +633,11 @@ write_files:
    content: |
      #!/bin/bash
      source /etc/droplet.env
-     HOMEDIR="/home/$USERNAME"
-     touch "$HOMEDIR/.config/google-chrome/First Run" "$HOMEDIR/.config/chrome-debug/First Run"
-     chown -R $USERNAME:$USERNAME $HOMEDIR/.config/google-chrome $HOMEDIR/.config/chrome-debug $HOMEDIR/Desktop
+     H="/home/$USERNAME"
+     touch "$H/.config/google-chrome/First Run" "$H/.config/chrome-debug/First Run"
+     chown -R $USERNAME:$USERNAME $H/.config/google-chrome $H/.config/chrome-debug $H/Desktop
      update-alternatives --set x-www-browser /usr/bin/google-chrome-stable 2>/dev/null || true
-     update-alternatives --set gnome-www-browser /usr/bin/google-chrome-stable 2>/dev/null || true
      su - $USERNAME -c 'xdg-settings set default-web-browser google-chrome.desktop' 2>/dev/null || true
-     su - $USERNAME -c 'xdg-mime default google-chrome.desktop x-scheme-handler/http x-scheme-handler/https' 2>/dev/null || true
 
  - path: /usr/local/sbin/setup-clawdbot.sh
    permissions: "0755"
@@ -881,43 +646,40 @@ write_files:
      source /etc/droplet.env
      T="/usr/local/bin/tlog.sh"
      d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     ANTHROPIC_KEY=$(d "$ANTHROPIC_KEY_B64")
-     BRAVE_KEY=$(d "$BRAVE_KEY_B64")
-     GPLACES_KEY=$(d "$GPLACES_KEY_B64")
-     TELEGRAM_BOT_TOKEN=$(d "$TELEGRAM_BOT_TOKEN_B64")
-     TELEGRAM_USER_ID=$(d "$TELEGRAM_USER_ID_B64")
-     USER_REALNAME=$(d "$USER_REALNAME_B64")
-     USER_LOCATION=$(d "$USER_LOCATION_B64")
-     USER_NOTES=$(d "$USER_NOTES_B64")
-     BOT_NAME=$(d "$BOT_NAME_B64")
-     BOT_NOTES=$(d "$BOT_NOTES_B64")
-     BOOT_INSTRUCTIONS=$(d "$BOOT_INSTRUCTIONS_B64")
-     HOMEDIR="/home/$USERNAME"; LOG="/var/log/clawdbot-setup.log"
-     echo "=== v3.5 Clawdbot Setup Started: $(date) ===" > "$LOG"
+     AK=$(d "$ANTHROPIC_KEY_B64"); OK=$(d "$OPENAI_TOKEN_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
+     TBT=$(d "$AGENT1_BOT_TOKEN_B64"); TUI=$(d "$TELEGRAM_USER_ID_B64")
+     URN=$(d "$USER_REALNAME_B64"); UL=$(d "$USER_LOCATION_B64"); UN=$(d "$USER_NOTES_B64")
+     BN=$(d "$BOT_NAME_B64"); BNO=$(d "$BOT_NOTES_B64"); BI=$(d "$BOOT_INSTRUCTIONS_B64")
+     A1N=$(d "$AGENT1_NAME_B64"); A1N="${A1N:-${BN:-Claude}}"
+     A2N=$(d "$AGENT2_NAME_B64"); A2N="${A2N:-GPT}"; A2T=$(d "$AGENT2_BOT_TOKEN_B64")
+     A3N=$(d "$AGENT3_NAME_B64"); A3N="${A3N:-Gemini}"; A3T=$(d "$AGENT3_BOT_TOKEN_B64")
+     A4N=$(d "$AGENT4_NAME_B64"); A4N="${A4N:-Opus}"; A4T=$(d "$AGENT4_BOT_TOKEN_B64")
+     CGI=$(d "$COUNCIL_GROUP_ID_B64"); HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
+     H="/home/$USERNAME"; LOG="/var/log/clawdbot-setup.log"
+     echo "=== v3.8 Clawdbot Setup: $(date) ===" > "$LOG"
      $T start total_clawdbot
+     AC=1; [ -n "$A2T" ] && AC=$((AC+1)); [ -n "$A3T" ] && AC=$((AC+1)); [ -n "$A4T" ] && AC=$((AC+1))
+     CE="false"; [ -n "$CGI" ] && CE="true"
+     echo "Agents:$AC Council:$CE" >> "$LOG"
      $T start setup_swap
      [ ! -f /swapfile ] && { fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048; chmod 600 /swapfile; mkswap /swapfile; swapon /swapfile; echo '/swapfile none swap sw 0 0' >> /etc/fstab; }
      $T end setup_swap
-     $T start npm_clawdbot
-     npm install -g clawdbot@latest >> "$LOG" 2>&1 & PID1=$!
-     $T start npm_clawdhub
-     npm install -g clawdhub@latest >> "$LOG" 2>&1 & PID2=$!
-     wait $PID1
-     CB_STATUS=$?
-     $T end npm_clawdbot "exit=$CB_STATUS"
-     [ $CB_STATUS -ne 0 ] && echo "clawdbot" >> /var/run/init-errors
-     wait $PID2
-     CH_STATUS=$?
-     $T end npm_clawdhub "exit=$CH_STATUS"
-     [ $CH_STATUS -ne 0 ] && echo "clawdhub" >> /var/run/init-errors
-     $T start npm_undici
+     $T start npm_install
+     npm install -g clawdbot@latest >> "$LOG" 2>&1 & P1=$!
+     npm install -g clawdhub@latest >> "$LOG" 2>&1 & P2=$!
+     wait $P1; wait $P2
      cd /usr/lib/node_modules/clawdhub && npm install undici >> "$LOG" 2>&1
-     $T end npm_undici
-     mkdir -p $HOMEDIR/.clawdbot/agents/main/{agent,sessions} $HOMEDIR/.clawdbot/credentials $HOMEDIR/clawd/{skills,memory}
-     GATEWAY_TOKEN=$(openssl rand -hex 24); echo "$GATEWAY_TOKEN" > $HOMEDIR/.clawdbot/gateway-token.txt
-     CENV="Environment=NODE_ENV=production\nEnvironment=PATH=/usr/bin:/usr/local/bin\nEnvironment=DISPLAY=:10\nEnvironment=ANTHROPIC_API_KEY=${ANTHROPIC_KEY}"
-     [ -n "$BRAVE_KEY" ] && CENV="$CENV\nEnvironment=BRAVE_API_KEY=${BRAVE_KEY}"
-     [ -n "$GPLACES_KEY" ] && CENV="$CENV\nEnvironment=GOOGLE_PLACES_API_KEY=${GPLACES_KEY}"
+     $T end npm_install
+     mkdir -p $H/.clawdbot/agents/main/{agent,sessions} $H/.clawdbot/credentials $H/clawd/{skills,shared}
+     mkdir -p $H/clawd/agents/agent1/memory
+     [ -n "$A2T" ] && mkdir -p $H/clawd/agents/agent2/memory
+     [ -n "$A3T" ] && mkdir -p $H/clawd/agents/agent3/memory
+     [ -n "$A4T" ] && mkdir -p $H/clawd/agents/agent4/memory
+     GT=$(openssl rand -hex 24); echo "$GT" > $H/.clawdbot/gateway-token.txt
+     ENV="Environment=NODE_ENV=production\nEnvironment=PATH=/usr/bin:/usr/local/bin\nEnvironment=DISPLAY=:10\nEnvironment=ANTHROPIC_API_KEY=${AK}"
+     [ -n "$OK" ] && ENV="$ENV\nEnvironment=OPENAI_API_KEY=${OK}"
+     [ -n "$GK" ] && ENV="$ENV\nEnvironment=GOOGLE_API_KEY=${GK}"
+     [ -n "$BK" ] && ENV="$ENV\nEnvironment=BRAVE_API_KEY=${BK}"
      cat > /etc/systemd/system/clawdbot.service <<SVC
      [Unit]
      Description=Clawdbot Gateway
@@ -926,58 +688,73 @@ write_files:
      [Service]
      Type=simple
      User=$USERNAME
-     WorkingDirectory=$HOMEDIR
+     WorkingDirectory=$H
      ExecStartPre=/bin/sleep 2
      ExecStart=/usr/bin/clawdbot gateway --bind lan --port 18789
      ExecStop=/usr/local/bin/sync-clawdbot-state.sh
      TimeoutStopSec=30
      Restart=always
-     $(echo -e "$CENV")
+     $(echo -e "$ENV")
      [Install]
      WantedBy=multi-user.target
      SVC
-     echo -e "ANTHROPIC_API_KEY=${ANTHROPIC_KEY}\nDISPLAY=:10" > $HOMEDIR/.clawdbot/.env
-     [ -n "$BRAVE_KEY" ] && echo "BRAVE_API_KEY=${BRAVE_KEY}" >> $HOMEDIR/.clawdbot/.env
-     [ -n "$GPLACES_KEY" ] && echo "GOOGLE_PLACES_API_KEY=${GPLACES_KEY}" >> $HOMEDIR/.clawdbot/.env
-     BJ=""; [ -n "$BRAVE_KEY" ] && BJ="\"BRAVE_API_KEY\":\"${BRAVE_KEY}\","
-     GJ=""; [ -n "$GPLACES_KEY" ] && GJ="\"GOOGLE_PLACES_API_KEY\":\"${GPLACES_KEY}\","
-     cat > $HOMEDIR/.clawdbot/clawdbot.json <<CFG
-     {"env":{"ANTHROPIC_API_KEY":"${ANTHROPIC_KEY}",${BJ}${GJ}"DISPLAY":":10"},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":false,"noSandbox":true,"defaultProfile":"clawd"},"tools":{"web":{"search":{"enabled":true},"fetch":{"enabled":true}}},"messages":{"ackReactionScope":"group-mentions"},"agents":{"defaults":{"model":{"primary":"anthropic/claude-opus-4-5"},"maxConcurrent":4,"subagents":{"maxConcurrent":8},"compaction":{"mode":"safeguard"},"workspace":"$HOMEDIR/clawd"}},"gateway":{"mode":"local","port":18789,"bind":"lan","controlUi":{"enabled":true,"allowInsecureAuth":true},"auth":{"mode":"token","token":"${GATEWAY_TOKEN}"},"tailscale":{"mode":"off","resetOnExit":false}},"auth":{"profiles":{"anthropic:default":{"provider":"anthropic","mode":"api_key"}}},"plugins":{"entries":{"telegram":{"enabled":true}}},"channels":{"telegram":{"enabled":true,"botToken":"${TELEGRAM_BOT_TOKEN}","dmPolicy":"allowlist","allowFrom":["${TELEGRAM_USER_ID}"]}},"skills":{"install":{"nodeManager":"npm"}},"hooks":{"internal":{"enabled":true,"entries":{"boot-md":{"enabled":true}}}}}
+     echo -e "ANTHROPIC_API_KEY=${AK}\nDISPLAY=:10" > $H/.clawdbot/.env
+     [ -n "$OK" ] && echo "OPENAI_API_KEY=${OK}" >> $H/.clawdbot/.env
+     [ -n "$GK" ] && echo "GOOGLE_API_KEY=${GK}" >> $H/.clawdbot/.env
+     [ -n "$BK" ] && echo "BRAVE_API_KEY=${BK}" >> $H/.clawdbot/.env
+     BJ=""; [ -n "$BK" ] && BJ="\"BRAVE_API_KEY\":\"${BK}\","
+     OJ=""; [ -n "$OK" ] && OJ="\"OPENAI_API_KEY\":\"${OK}\","
+     GAJ=""; [ -n "$GK" ] && GAJ="\"GOOGLE_API_KEY\":\"${GK}\","
+     AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
+     [ -n "$OK" ] && AP="$AP,\"openai:default\":{\"provider\":\"openai\",\"mode\":\"api_key\"}"
+     [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
+     AL="[{\"id\":\"agent1\",\"default\":true,\"name\":\"${A1N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent1\",\"groupChat\":{\"mentionPatterns\":[\"${A1N},\",\"${A1N}:\"]}}"
+     [ -n "$A2T" ] && AL="$AL,{\"id\":\"agent2\",\"name\":\"${A2N}\",\"model\":\"openai/gpt-5.2\",\"workspace\":\"$H/clawd/agents/agent2\",\"groupChat\":{\"mentionPatterns\":[\"${A2N},\",\"${A2N}:\"]}}"
+     [ -n "$A3T" ] && AL="$AL,{\"id\":\"agent3\",\"name\":\"${A3N}\",\"model\":\"google/gemini-3-pro-preview\",\"workspace\":\"$H/clawd/agents/agent3\",\"groupChat\":{\"mentionPatterns\":[\"${A3N},\",\"${A3N}:\"]}}"
+     [ -n "$A4T" ] && AL="$AL,{\"id\":\"agent4\",\"name\":\"${A4N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent4\",\"groupChat\":{\"mentionPatterns\":[\"${A4N},\",\"${A4N}:\"]}}"
+     AL="$AL]"
+     BD="["
+     [ -n "$A2T" ] && BD="$BD{\"agentId\":\"agent2\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent2\"}}"
+     [ -n "$A3T" ] && { [ "$BD" != "[" ] && BD="$BD,"; BD="$BD{\"agentId\":\"agent3\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent3\"}}"; }
+     [ -n "$A4T" ] && { [ "$BD" != "[" ] && BD="$BD,"; BD="$BD{\"agentId\":\"agent4\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent4\"}}"; }
+     BD="$BD]"
+     TA="\"default\":{\"botToken\":\"${TBT}\"}"
+     [ -n "$A2T" ] && TA="$TA,\"agent2\":{\"botToken\":\"${A2T}\"}"
+     [ -n "$A3T" ] && TA="$TA,\"agent3\":{\"botToken\":\"${A3T}\"}"
+     [ -n "$A4T" ] && TA="$TA,\"agent4\":{\"botToken\":\"${A4T}\"}"
+     TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
+     cat > $H/.clawdbot/clawdbot.json <<CFG
+     {"env":{"ANTHROPIC_API_KEY":"${AK}",${OJ}${GAJ}${BJ}"DISPLAY":":10"},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":false,"noSandbox":true},"agents":{"defaults":{"model":{"primary":"anthropic/claude-opus-4-5"},"maxConcurrent":4,"subagents":{"maxConcurrent":8},"workspace":"$H/clawd"},"list":${AL}},"bindings":${BD},"gateway":{"mode":"local","port":18789,"bind":"lan","controlUi":{"enabled":true,"allowInsecureAuth":true},"auth":{"mode":"token","token":"${GT}"}},"auth":{"profiles":{${AP}}},"plugins":{"entries":{"telegram":{"enabled":true}}},"channels":{"telegram":{"enabled":true,"dmPolicy":"allowlist","allowFrom":["${TUI}"],"accounts":{${TA}}${TG}}},"skills":{"install":{"nodeManager":"npm"}},"hooks":{"internal":{"enabled":true,"entries":{"boot-md":{"enabled":true}}}}}
      CFG
-     cat > $HOMEDIR/.clawdbot/agents/main/agent/auth-profiles.json <<AP
-     {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${ANTHROPIC_KEY}"}}}
-     AP
-     echo -e "# USER.md - About Your Human\n" > $HOMEDIR/clawd/USER.md
-     [ -n "$USER_REALNAME" ] && { echo "- **Name:** $USER_REALNAME" >> $HOMEDIR/clawd/USER.md; } || echo "- **Name:** *(learn and fill in)*" >> $HOMEDIR/clawd/USER.md
-     [ -n "$USER_LOCATION" ] && { echo "- **Location:** $USER_LOCATION" >> $HOMEDIR/clawd/USER.md; } || echo "- **Location:** *(learn and fill in)*" >> $HOMEDIR/clawd/USER.md
-     echo -e "\n## Additional Context" >> $HOMEDIR/clawd/USER.md
-     [ -n "$USER_NOTES" ] && echo "$USER_NOTES" >> $HOMEDIR/clawd/USER.md || echo "*(add notes as you learn about your human)*" >> $HOMEDIR/clawd/USER.md
-     echo -e "\n---\n*Update this file as you learn. Respect privacy.*" >> $HOMEDIR/clawd/USER.md
-     echo -e "# IDENTITY.md - Who Am I?\n" > $HOMEDIR/clawd/IDENTITY.md
-     [ -n "$BOT_NAME" ] && { echo "- **Name:** $BOT_NAME" >> $HOMEDIR/clawd/IDENTITY.md; } || echo "- **Name:** *(choose your own)*" >> $HOMEDIR/clawd/IDENTITY.md
-     echo -e "\n## About Me" >> $HOMEDIR/clawd/IDENTITY.md
-     [ -n "$BOT_NOTES" ] && echo "$BOT_NOTES" >> $HOMEDIR/clawd/IDENTITY.md || echo "I'm an AI assistant living in a cloud VM with browser automation, email, calendar, and file access." >> $HOMEDIR/clawd/IDENTITY.md
-     echo -e "\n---\n*This file is yours to evolve as you discover who you are.*" >> $HOMEDIR/clawd/IDENTITY.md
-     [ -n "$BOOT_INSTRUCTIONS" ] && { echo "$BOOT_INSTRUCTIONS" > $HOMEDIR/clawd/BOOTSTRAP.md; chown $USERNAME:$USERNAME $HOMEDIR/clawd/BOOTSTRAP.md; }
-     sed "s|__GATEWAY_TOKEN__|$GATEWAY_TOKEN|g" /tmp/templates/clawdbot-dashboard.desktop > $HOMEDIR/Desktop/clawdbot-dashboard.desktop
-     chmod +x $HOMEDIR/Desktop/clawdbot-dashboard.desktop
-     chmod 700 $HOMEDIR/.clawdbot; chmod 600 $HOMEDIR/.clawdbot/clawdbot.json
-     chown -R $USERNAME:$USERNAME $HOMEDIR/.clawdbot $HOMEDIR/clawd $HOMEDIR/Desktop
-     $T start skills_total
-     SKILLS="video-frames goplaces weather github youtube-transcript yt-dlp-downloader-skill"
-     for s in $SKILLS; do
-       $T start "skill_$s"
-       su - $USERNAME -c "cd $HOMEDIR/clawd && clawdhub install $s" >> "$LOG" 2>&1
-       $T end "skill_$s"
-     done
-     $T end skills_total
-     find $HOMEDIR/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null
-     chown -R $USERNAME:$USERNAME $HOMEDIR/clawd
-     $T start clawdbot_service_start
+     echo -e "# Agent: ${A1N}\nModel: Claude Opus 4.5\nBe helpful and natural." > $H/clawd/agents/agent1/AGENTS.md
+     [ -n "$A2T" ] && echo -e "# Agent: ${A2N}\nModel: GPT-4.5\nBe helpful and natural." > $H/clawd/agents/agent2/AGENTS.md
+     [ -n "$A3T" ] && echo -e "# Agent: ${A3N}\nModel: Gemini 2.5 Pro\nBe helpful and natural." > $H/clawd/agents/agent3/AGENTS.md
+     [ -n "$A4T" ] && echo -e "# Agent: ${A4N}\nModel: Claude Opus 4.5 + Extended Thinking\nBe helpful and natural." > $H/clawd/agents/agent4/AGENTS.md
+     cat > $H/clawd/shared/KNOWLEDGE.md <<KMD
+     # Shared Knowledge
+     ## About the Human
+     $([ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (to learn)")
+     $([ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (to learn)")
+     KMD
+     [ -n "$CGI" ] && echo "# Council Decisions Archive" > $H/clawd/shared/DECISIONS.md
+     cat > $H/.clawdbot/agents/main/agent/auth-profiles.json <<APJ
+     {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OK" ] && echo ",\"openai:default\":{\"type\":\"api_key\",\"provider\":\"openai\",\"token\":\"${OK}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
+     APJ
+     echo -e "# USER.md\n$([ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (learn)")\n$([ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (learn)")\n$([ -n "$UN" ] && echo "\n$UN")" > $H/clawd/USER.md
+     echo -e "# IDENTITY.md\n$([ -n "$BN" ] && echo "- Name: $BN" || echo "- Name: (choose)")\n$([ -n "$BNO" ] && echo "\n$BNO" || echo "\nAI assistant on cloud VM.")" > $H/clawd/IDENTITY.md
+     [ -n "$BI" ] && echo "$BI" > $H/clawd/BOOTSTRAP.md
+     echo "$HN" > $H/clawd/.habitat; echo "$AC" > $H/clawd/.agent-count; echo "$CE" > $H/clawd/.council-enabled
+     sed "s|__GATEWAY_TOKEN__|$GT|g" /tmp/templates/clawdbot-dashboard.desktop > $H/Desktop/clawdbot-dashboard.desktop
+     chmod +x $H/Desktop/clawdbot-dashboard.desktop
+     chmod 700 $H/.clawdbot; chmod 600 $H/.clawdbot/clawdbot.json
+     chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd $H/Desktop
+     $T start skills
+     for s in video-frames goplaces weather github youtube-transcript yt-dlp-downloader-skill; do su - $USERNAME -c "cd $H/clawd && clawdhub install $s" >> "$LOG" 2>&1; done
+     $T end skills
+     find $H/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null
+     chown -R $USERNAME:$USERNAME $H/clawd
      systemctl daemon-reload; systemctl enable clawdbot; systemctl start clawdbot
-     $T end clawdbot_service_start
      $T end total_clawdbot
-     echo "=== Clawdbot Setup Finished: $(date) ===" >> "$LOG"
 
  - path: /usr/local/sbin/setup-optional.sh
    permissions: "0755"
@@ -985,98 +762,61 @@ write_files:
      #!/bin/bash
      source /etc/droplet.env
      d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     DROPBOX_TOKEN=$(d "$DROPBOX_TOKEN_B64")
-     EMAIL=$(d "$EMAIL_B64")
-     EMAIL_PASSWORD=$(d "$EMAIL_PASSWORD_B64")
-     IMAP_HOST=$(d "$IMAP_HOST_B64")
-     GH_TOKEN=$(d "$GH_TOKEN_B64")
-     CALDAV_URL=$(d "$CALDAV_URL_B64")
-     CALDAV_USER=$(d "$CALDAV_USER_B64")
-     CALDAV_PASSWORD=$(d "$CALDAV_PASSWORD_B64")
-     HOMEDIR="/home/$USERNAME"; LOG="/var/log/optional-setup.log"
-     echo "=== Optional Config Started: $(date) ===" > "$LOG"
-     mkdir -p $HOMEDIR/.config/{himalaya,vdirsyncer,rclone,gh} $HOMEDIR/.local/share/{vdirsyncer,khal/calendars}
-     if [ -n "$DROPBOX_TOKEN" ]; then
-       cat > $HOMEDIR/.config/rclone/rclone.conf <<RC
-     [dropbox]
-     type = dropbox
-     token = $DROPBOX_TOKEN
-     RC
-       mkdir -p $HOMEDIR/Dropbox
-       cat > $HOMEDIR/Desktop/dropbox.desktop <<DD
-     [Desktop Entry]
-     Version=1.0
-     Type=Application
-     Name=Dropbox
-     Exec=/usr/local/bin/mount-dropbox.sh
-     Icon=folder-remote
-     Terminal=false
-     DD
-       chmod +x $HOMEDIR/Desktop/dropbox.desktop; chown $USERNAME:$USERNAME $HOMEDIR/Dropbox
+     DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
+     IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
+     CU=$(d "$CALDAV_URL_B64"); CUN=$(d "$CALDAV_USER_B64"); CP=$(d "$CALDAV_PASSWORD_B64")
+     H="/home/$USERNAME"; LOG="/var/log/optional-setup.log"
+     mkdir -p $H/.config/{himalaya,vdirsyncer,rclone,gh} $H/.local/share/{vdirsyncer,khal/calendars}
+     if [ -n "$DBT" ]; then
+       echo -e "[dropbox]\ntype = dropbox\ntoken = $DBT" > $H/.config/rclone/rclone.conf
+       mkdir -p $H/Dropbox
+       echo -e "[Desktop Entry]\nVersion=1.0\nType=Application\nName=Dropbox\nExec=/usr/local/bin/mount-dropbox.sh\nIcon=folder-remote\nTerminal=false" > $H/Desktop/dropbox.desktop
+       chmod +x $H/Desktop/dropbox.desktop
      fi
-     IMAP_H="${IMAP_HOST:-imap.gmail.com}"
-     if [ -n "$EMAIL" ] && [ -n "$EMAIL_PASSWORD" ]; then
-       cat > $HOMEDIR/.config/himalaya/config.toml <<HIM
+     IH="${IH:-imap.gmail.com}"
+     [ -n "$EM" ] && [ -n "$EP" ] && cat > $H/.config/himalaya/config.toml <<HIM
      [accounts.default]
-     email = "${EMAIL}"
+     email = "${EM}"
      default = true
      backend.type = "imap"
-     backend.host = "${IMAP_H}"
+     backend.host = "${IH}"
      backend.port = 993
      backend.encryption.type = "tls"
-     backend.login = "${EMAIL}"
+     backend.login = "${EM}"
      backend.auth.type = "password"
-     backend.auth.raw = "${EMAIL_PASSWORD}"
+     backend.auth.raw = "${EP}"
      HIM
-     fi
-     if [ -n "$GH_TOKEN" ]; then
-       cat > $HOMEDIR/.config/gh/hosts.yml <<GH
-     github.com:
-         oauth_token: ${GH_TOKEN}
-         git_protocol: https
-         user: ""
-     GH
-       chmod 600 $HOMEDIR/.config/gh/hosts.yml
-     fi
-     if [ -n "$CALDAV_URL" ] && [ -n "$CALDAV_USER" ]; then
-       cat > $HOMEDIR/.config/vdirsyncer/config <<VD
+     [ -n "$GHT" ] && { echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml; chmod 600 $H/.config/gh/hosts.yml; }
+     if [ -n "$CU" ] && [ -n "$CUN" ]; then
+       cat > $H/.config/vdirsyncer/config <<VD
      [general]
      status_path = "~/.local/share/vdirsyncer/status/"
      [pair calendar]
      a = "calendar_local"
      b = "calendar_remote"
      collections = ["from a", "from b"]
-     metadata = ["color"]
      [storage calendar_local]
      type = "filesystem"
      path = "~/.local/share/khal/calendars/"
      fileext = ".ics"
      [storage calendar_remote]
      type = "caldav"
-     url = "${CALDAV_URL}"
-     username = "${CALDAV_USER}"
-     password = "${CALDAV_PASSWORD}"
+     url = "${CU}"
+     username = "${CUN}"
+     password = "${CP}"
      VD
-       mkdir -p $HOMEDIR/.local/share/vdirsyncer/status
+       mkdir -p $H/.local/share/vdirsyncer/status
        su - $USERNAME -c "yes | vdirsyncer discover" >> "$LOG" 2>&1 || true
-       su - $USERNAME -c "vdirsyncer sync" >> "$LOG" 2>&1 || true
      fi
-     chown -R $USERNAME:$USERNAME $HOMEDIR/.config $HOMEDIR/.local $HOMEDIR/Desktop
-     echo "=== Optional Config Finished: $(date) ===" >> "$LOG"
+     chown -R $USERNAME:$USERNAME $H/.config $H/.local $H/Desktop
 
  - path: /usr/local/sbin/setup-display.sh
    permissions: "0755"
    content: |
      #!/bin/bash
      source /etc/droplet.env
-     systemctl daemon-reload
-     systemctl enable xvfb desktop x11vnc
-     systemctl start xvfb
-     sleep 2
-     systemctl start desktop
-     sleep 3
-     systemctl start x11vnc
-     sleep 2
+     systemctl daemon-reload; systemctl enable xvfb desktop x11vnc
+     systemctl start xvfb; sleep 2; systemctl start desktop; sleep 3; systemctl start x11vnc; sleep 2
      su - $USERNAME -c "DISPLAY=:10 xfconf-query -c xfwm4 -p /general/use_compositing -s false" 2>/dev/null || true
 
  - path: /usr/local/sbin/configure-xrdp.sh
@@ -1084,42 +824,29 @@ write_files:
    content: |
      #!/bin/bash
      source /etc/droplet.env
-     cp /etc/xrdp/xrdp.ini /etc/xrdp/xrdp.ini.bak
-     cat > /etc/xrdp/xrdp.ini <<'XRDPINI'
+     cat > /etc/xrdp/xrdp.ini <<'XI'
      [Globals]
      ini_version=1
      fork=true
      port=3389
-     use_vsock=false
      tcp_nodelay=true
      tcp_keepalive=true
      security_layer=rdp
      crypt_level=high
-     certificate=
-     key_file=
      ssl_protocols=TLSv1.2, TLSv1.3
-     autorun=
      allow_channels=true
-     allow_multimon=true
      bitmap_cache=true
      bitmap_compression=true
-     bulk_compression=true
      max_bpp=32
-     new_cursors=true
      use_fastpath=both
      [Logging]
      LogFile=xrdp.log
      LogLevel=INFO
-     EnableSyslog=true
-     SyslogLevel=INFO
      [Channels]
      rdpdr=true
      rdpsnd=true
      drdynvc=true
      cliprdr=true
-     rail=false
-     xrdpvr=true
-     tcutils=true
      [vnc-any]
      name=Desktop
      lib=libvnc.so
@@ -1127,52 +854,29 @@ write_files:
      port=5900
      username=na
      password=ask
-     XRDPINI
-     cat > /etc/xrdp/sesman.ini <<'SESMANINI'
+     XI
+     cat > /etc/xrdp/sesman.ini <<'SI'
      [Globals]
      ListenAddress=127.0.0.1
      ListenPort=3350
      EnableUserWindowManager=true
      UserWindowManager=startwm.sh
-     DefaultWindowManager=startwm.sh
      [Security]
      AllowRootLogin=true
      MaxLoginRetry=4
-     TerminalServerUsers=tsusers
-     TerminalServerAdmins=tsadmins
-     AlwaysGroupCheck=false
      [Sessions]
      X11DisplayOffset=10
      MaxSessions=10
      KillDisconnected=false
-     DisconnectedTimeLimit=0
-     IdleTimeLimit=0
-     Policy=Default
      [Logging]
      LogFile=xrdp-sesman.log
      LogLevel=INFO
-     EnableSyslog=true
-     SyslogLevel=INFO
-     SESMANINI
-     cat > /etc/xrdp/startwm.sh <<'STARTWM'
-     #!/bin/sh
-     exec sleep infinity
-     STARTWM
-     chmod 755 /etc/xrdp/startwm.sh
+     SI
+     echo -e "#!/bin/sh\nexec sleep infinity" > /etc/xrdp/startwm.sh; chmod 755 /etc/xrdp/startwm.sh
      usermod -aG ssl-cert xrdp
      mkdir -p /etc/systemd/system/xrdp.service.d
-     cat > /etc/systemd/system/xrdp.service.d/wait-for-vnc.conf <<'DROPIN'
-     [Unit]
-     After=x11vnc.service
-     Wants=x11vnc.service
-     
-     [Service]
-     ExecStartPre=/bin/bash -c 'for i in {1..30}; do nc -z 127.0.0.1 5900 && exit 0; sleep 1; done; exit 1'
-     DROPIN
-     systemctl daemon-reload
-     systemctl unmask xrdp xrdp-sesman
-     systemctl enable xrdp
-     systemctl restart xrdp
+     echo -e "[Unit]\nAfter=x11vnc.service\nWants=x11vnc.service\n\n[Service]\nExecStartPre=/bin/bash -c 'for i in {1..30}; do nc -z 127.0.0.1 5900 && exit 0; sleep 1; done; exit 1'" > /etc/systemd/system/xrdp.service.d/wait-for-vnc.conf
+     systemctl daemon-reload; systemctl unmask xrdp xrdp-sesman; systemctl enable xrdp; systemctl restart xrdp
 
 users:
  - default
