@@ -79,8 +79,8 @@ def make_phase1_stub(script_content, tmp_dir):
                 skip_block -= 1
             continue
 
-        # Start capturing at AK= assignment
-        if not capturing and re.match(r'\s*AK=', stripped):
+        # Start capturing at H= assignment (moved earlier for chown fix)
+        if not capturing and re.match(r'\s*H=', stripped):
             capturing = True
 
         if not capturing:
@@ -251,7 +251,7 @@ class TestPhase1Discord:
 
     def test_discord_bot_token(self):
         config = run_phase1_config(platform="discord", dc_token="my-dc-token")
-        assert config["channels"]["discord"]["accounts"]["default"]["botToken"] == "my-dc-token"
+        assert config["channels"]["discord"]["accounts"]["default"]["token"] == "my-dc-token"
 
     def test_discord_dm_enabled(self):
         config = run_phase1_config(platform="discord")
@@ -296,7 +296,7 @@ class TestPhase1Both:
     def test_both_have_bot_tokens(self):
         config = run_phase1_config(platform="both", tg_token="tg-tok", dc_token="dc-tok")
         assert config["channels"]["telegram"]["accounts"]["default"]["botToken"] == "tg-tok"
-        assert config["channels"]["discord"]["accounts"]["default"]["botToken"] == "dc-tok"
+        assert config["channels"]["discord"]["accounts"]["default"]["token"] == "dc-tok"
 
 
 class TestPhase1ConfigStructure:

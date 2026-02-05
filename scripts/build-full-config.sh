@@ -78,10 +78,10 @@ for i in $(seq 2 $AC); do
   [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK}\"}"
 done
 TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
-DA="\"default\":{\"botToken\":\"${AGENT1_DISCORD_BOT_TOKEN}\"}"
+DA="\"default\":{\"token\":\"${AGENT1_DISCORD_BOT_TOKEN}\"}"
 for i in $(seq 2 $AC); do
   DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"
-  [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"botToken\":\"${DTOK}\"}"
+  [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"token\":\"${DTOK}\"}"
 done
 DG=""; [ -n "$DGI" ] && DG=",\"guilds\":{\"${DGI}\":{\"requireMention\":true}}"
 DC_DM_ALLOW=""; [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI}\"]"

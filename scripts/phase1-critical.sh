@@ -87,7 +87,7 @@ if [ "$DC_ENABLED" = "true" ]; then
   [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI}\"]"
   DC_GUILD=""
   [ -n "$DGI" ] && DC_GUILD=",\"guilds\":{\"${DGI}\":{\"requireMention\":true}}"
-  DC_CHANNEL="\"discord\":{\"enabled\":true,\"groupPolicy\":\"allowlist\",\"accounts\":{\"default\":{\"botToken\":\"${DBT}\"}},\"dm\":{\"enabled\":true,\"policy\":\"pairing\"${DC_DM_ALLOW}}${DC_GUILD}}"
+  DC_CHANNEL="\"discord\":{\"enabled\":true,\"groupPolicy\":\"allowlist\",\"accounts\":{\"default\":{\"token\":\"${DBT}\"}},\"dm\":{\"enabled\":true,\"policy\":\"pairing\"${DC_DM_ALLOW}}${DC_GUILD}}"
 else
   DC_CHANNEL="\"discord\":{\"enabled\":false}"
 fi

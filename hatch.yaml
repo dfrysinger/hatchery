@@ -378,7 +378,7 @@ write_files:
         [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI}\"]"
         DC_GUILD=""
         [ -n "$DGI" ] && DC_GUILD=",\"guilds\":{\"${DGI}\":{\"requireMention\":true}}"
-        DC_CHANNEL="\"discord\":{\"enabled\":true,\"groupPolicy\":\"allowlist\",\"accounts\":{\"default\":{\"botToken\":\"${DBT}\"}},\"dm\":{\"enabled\":true,\"policy\":\"pairing\"${DC_DM_ALLOW}}${DC_GUILD}}"
+        DC_CHANNEL="\"discord\":{\"enabled\":true,\"groupPolicy\":\"allowlist\",\"accounts\":{\"default\":{\"token\":\"${DBT}\"}},\"dm\":{\"enabled\":true,\"policy\":\"pairing\"${DC_DM_ALLOW}}${DC_GUILD}}"
       else
         DC_CHANNEL="\"discord\":{\"enabled\":false}"
       fi
@@ -779,10 +779,10 @@ write_files:
         [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK}\"}"
       done
       TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
-      DA="\"default\":{\"botToken\":\"${AGENT1_DISCORD_BOT_TOKEN}\"}"
+      DA="\"default\":{\"token\":\"${AGENT1_DISCORD_BOT_TOKEN}\"}"
       for i in $(seq 2 $AC); do
         DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"
-        [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"botToken\":\"${DTOK}\"}"
+        [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"token\":\"${DTOK}\"}"
       done
       DG=""; [ -n "$DGI" ] && DG=",\"guilds\":{\"${DGI}\":{\"requireMention\":true}}"
       DC_DM_ALLOW=""; [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI}\"]"
