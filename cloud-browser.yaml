@@ -1,6 +1,6 @@
 #cloud-config
-# version: 3.2
-# Droplet Init Config v3.2 - 2026-02-01
+# version: 3.3
+# Droplet Init Config v3.3 - 2026-02-02
 #
 # === PLACEHOLDER REFERENCE ===
 # Plaintext (validated in Shortcut - alphanumeric + underscore only):
@@ -39,6 +39,7 @@
 # BOOT_INSTRUCTIONS_B64
 #
 # === CHANGELOG ===
+# v3.3: Added gmail-api.py, xrdp ssl-cert group fix
 # v3.2: Base64 encode all inputs (except USERNAME) for shell safety
 # v3.1: Single display (:10), permission fix, placeholder index
 # v3.0: [[PLACEHOLDER]] format, direct paths, /var/lib/init-status/
@@ -510,6 +511,199 @@ write_files:
      class R(socketserver.TCPServer):allow_reuse_address=True
      with R(("",PORT),H) as h:h.serve_forever()
 
+ - path: /usr/local/bin/gmail-api.py
+   permissions: "0755"
+   content: |
+     #!/usr/bin/env python3
+     """Gmail API CLI - send/read email via API (bypasses SMTP blocks)
+
+     Usage:
+       gmail-api.py send "to@example.com" "Subject" "Body"
+       gmail-api.py send "to@example.com" "Subject" "Body" --attach file.pdf
+       gmail-api.py list [-n 10] [-q "search query"]
+       gmail-api.py read MESSAGE_ID [--save-attachments DIR]
+       gmail-api.py reply MESSAGE_ID "Reply body"
+     """
+     import argparse,base64,os,sys,mimetypes,re
+     from email.mime.text import MIMEText
+     from email.mime.multipart import MIMEMultipart
+     from email.mime.base import MIMEBase
+     from email import encoders
+
+     try:
+       from google.oauth2.credentials import Credentials
+       from googleapiclient.discovery import build
+     except ImportError:
+       sys.exit("Missing deps. Run: pip3 install google-auth google-api-python-client")
+
+     def get_creds():
+       cid=os.environ.get('GMAIL_CLIENT_ID')
+       csc=os.environ.get('GMAIL_CLIENT_SECRET')
+       rtk=os.environ.get('GMAIL_REFRESH_TOKEN')
+       if not all([cid,csc,rtk]):
+         try:
+           with open('/etc/droplet.env','r') as f:
+             for line in f:
+               line=line.strip()
+               if line.startswith('GMAIL_CLIENT_ID_B64='):
+                 v=line.split('=',1)[1].strip('"').strip("'")
+                 if v:cid=base64.b64decode(v).decode()
+               elif line.startswith('GMAIL_CLIENT_SECRET_B64='):
+                 v=line.split('=',1)[1].strip('"').strip("'")
+                 if v:csc=base64.b64decode(v).decode()
+               elif line.startswith('GMAIL_REFRESH_TOKEN_B64='):
+                 v=line.split('=',1)[1].strip('"').strip("'")
+                 if v:rtk=base64.b64decode(v).decode()
+         except:pass
+       if not all([cid,csc,rtk]):
+         sys.exit("Gmail API credentials not configured")
+       return Credentials(None,refresh_token=rtk,token_uri="https://oauth2.googleapis.com/token",client_id=cid,client_secret=csc)
+
+     def attach_file(msg,fp):
+       if not os.path.isfile(fp):
+         print(f"Warning: Attachment not found: {fp}",file=sys.stderr);return False
+       ct,_=mimetypes.guess_type(fp)
+       if ct is None:ct='application/octet-stream'
+       mt,st=ct.split('/',1)
+       fn=os.path.basename(fp)
+       with open(fp,'rb') as f:
+         if mt=='text':
+           part=MIMEText(f.read().decode('utf-8',errors='replace'),_subtype=st)
+         else:
+           part=MIMEBase(mt,st);part.set_payload(f.read());encoders.encode_base64(part)
+       part.add_header('Content-Disposition','attachment',filename=fn)
+       msg.attach(part);return True
+
+     def cmd_send(args):
+       creds=get_creds();svc=build('gmail','v1',credentials=creds,cache_discovery=False)
+       msg=MIMEMultipart('mixed');msg['To']=args.to;msg['Subject']=args.subject
+       if args.cc:msg['Cc']=args.cc
+       msg.attach(MIMEText(args.body,'html' if args.html else 'plain'))
+       ac=0
+       if args.attach:
+         for fp in args.attach:
+           if attach_file(msg,fp):ac+=1;print(f"Attached: {os.path.basename(fp)}")
+       raw=base64.urlsafe_b64encode(msg.as_bytes()).decode()
+       r=svc.users().messages().send(userId='me',body={'raw':raw}).execute()
+       am=f" with {ac} attachment(s)" if ac else ""
+       print(f"Sent to {args.to}{am} (ID: {r['id']})")
+
+     def cmd_list(args):
+       creds=get_creds();svc=build('gmail','v1',credentials=creds,cache_discovery=False)
+       res=svc.users().messages().list(userId='me',maxResults=args.n,q=args.q or '').execute()
+       msgs=res.get('messages',[])
+       if not msgs:print("No messages found.");return
+       for msg in msgs:
+         m=svc.users().messages().get(userId='me',id=msg['id'],format='metadata',metadataHeaders=['From','Subject','Date']).execute()
+         h={x['name']:x['value'] for x in m['payload']['headers']}
+         ha=False
+         if 'parts' in m.get('payload',{}):
+           for p in m['payload']['parts']:
+             if p.get('filename'):ha=True;break
+         ai=" [+attach]" if ha else ""
+         print(f"ID: {msg['id']}{ai}\n  From: {h.get('From','?')}\n  Subject: {h.get('Subject','(no subject)')}\n  Date: {h.get('Date','?')}\n")
+
+     def get_attachments(svc,mid,payload,save_dir=None):
+       atts=[]
+       def proc(parts):
+         for p in parts:
+           fn=p.get('filename')
+           if fn:
+             ai={'filename':fn,'mimeType':p.get('mimeType'),'size':p['body'].get('size',0)}
+             if save_dir:
+               if 'attachmentId' in p['body']:
+                 att=svc.users().messages().attachments().get(userId='me',messageId=mid,id=p['body']['attachmentId']).execute()
+                 data=base64.urlsafe_b64decode(att['data'])
+               elif 'data' in p['body']:
+                 data=base64.urlsafe_b64decode(p['body']['data'])
+               else:data=None
+               if data:
+                 sp=os.path.join(save_dir,fn);c=1;b,e=os.path.splitext(sp)
+                 while os.path.exists(sp):sp=f"{b}_{c}{e}";c+=1
+                 with open(sp,'wb') as f:f.write(data)
+                 ai['saved_to']=sp
+             atts.append(ai)
+           if 'parts' in p:proc(p['parts'])
+       if 'parts' in payload:proc(payload['parts'])
+       return atts
+
+     def cmd_read(args):
+       creds=get_creds();svc=build('gmail','v1',credentials=creds,cache_discovery=False)
+       m=svc.users().messages().get(userId='me',id=args.id,format='full').execute()
+       h={x['name']:x['value'] for x in m['payload']['headers']}
+       print(f"From: {h.get('From','?')}\nTo: {h.get('To','?')}")
+       if h.get('Cc'):print(f"Cc: {h.get('Cc')}")
+       print(f"Subject: {h.get('Subject','?')}\nDate: {h.get('Date','?')}")
+       sd=args.save_attachments if hasattr(args,'save_attachments') and args.save_attachments else None
+       if sd:os.makedirs(sd,exist_ok=True)
+       atts=get_attachments(svc,args.id,m['payload'],sd)
+       if atts:
+         print(f"\nAttachments ({len(atts)}):")
+         for a in atts:
+           sz=a['size']/1024
+           if 'saved_to' in a:print(f"  * {a['filename']} ({sz:.1f} KB) -> {a['saved_to']}")
+           else:print(f"  * {a['filename']} ({sz:.1f} KB)")
+       print("="*60)
+       def get_body(pl):
+         if 'body' in pl and pl['body'].get('data'):
+           return base64.urlsafe_b64decode(pl['body']['data']).decode('utf-8',errors='replace')
+         if 'parts' in pl:
+           for p in pl['parts']:
+             if p.get('filename'):continue
+             if p['mimeType']=='text/plain' and p['body'].get('data'):
+               return base64.urlsafe_b64decode(p['body']['data']).decode('utf-8',errors='replace')
+             if p['mimeType']=='multipart/alternative' and 'parts' in p:
+               r=get_body(p)
+               if r:return r
+             if 'parts' in p:
+               r=get_body(p)
+               if r:return r
+           for p in pl['parts']:
+             if p.get('filename'):continue
+             if p['mimeType']=='text/html' and p['body'].get('data'):
+               html=base64.urlsafe_b64decode(p['body']['data']).decode('utf-8',errors='replace')
+               txt=re.sub(r'<[^>]+>',' ',html);txt=re.sub(r'\s+',' ',txt).strip()
+               return f"[HTML]\n{txt}"
+         return None
+       body=get_body(m['payload'])
+       print(body if body else "(Could not extract body)")
+
+     def cmd_reply(args):
+       creds=get_creds();svc=build('gmail','v1',credentials=creds,cache_discovery=False)
+       orig=svc.users().messages().get(userId='me',id=args.id,format='metadata',metadataHeaders=['From','Subject','Message-ID','References']).execute()
+       h={x['name']:x['value'] for x in orig['payload']['headers']}
+       msg=MIMEMultipart('mixed');msg['To']=h.get('From','')
+       subj=h.get('Subject','')
+       if not subj.lower().startswith('re:'):subj=f"Re: {subj}"
+       msg['Subject']=subj
+       mid=h.get('Message-ID','')
+       if mid:
+         msg['In-Reply-To']=mid
+         refs=h.get('References','')
+         msg['References']=f"{refs} {mid}".strip()
+       msg.attach(MIMEText(args.body,'html' if args.html else 'plain'))
+       if args.attach:
+         for fp in args.attach:
+           if attach_file(msg,fp):print(f"Attached: {os.path.basename(fp)}")
+       raw=base64.urlsafe_b64encode(msg.as_bytes()).decode()
+       r=svc.users().messages().send(userId='me',body={'raw':raw,'threadId':orig['threadId']}).execute()
+       print(f"Reply sent (ID: {r['id']})")
+
+     def main():
+       p=argparse.ArgumentParser(description='Gmail API CLI')
+       sub=p.add_subparsers(dest='cmd',required=True)
+       ps=sub.add_parser('send');ps.add_argument('to');ps.add_argument('subject');ps.add_argument('body')
+       ps.add_argument('--html',action='store_true');ps.add_argument('--cc',type=str)
+       ps.add_argument('--attach','-a',action='append')
+       pl=sub.add_parser('list');pl.add_argument('-n',type=int,default=10);pl.add_argument('-q',type=str,default='')
+       pr=sub.add_parser('read');pr.add_argument('id');pr.add_argument('--save-attachments','-s',type=str,metavar='DIR')
+       py=sub.add_parser('reply');py.add_argument('id');py.add_argument('body')
+       py.add_argument('--html',action='store_true');py.add_argument('--attach','-a',action='append')
+       args=p.parse_args()
+       {'send':cmd_send,'list':cmd_list,'read':cmd_read,'reply':cmd_reply}[args.cmd](args)
+
+     if __name__=='__main__':main()
+
  - path: /usr/local/sbin/install-packages.sh
    permissions: "0755"
    content: |
@@ -830,6 +1024,7 @@ write_files:
      exec sleep infinity
      STARTWM
      chmod 755 /etc/xrdp/startwm.sh
+     usermod -aG ssl-cert xrdp
      systemctl unmask xrdp xrdp-sesman
      systemctl enable xrdp
      systemctl restart xrdp
