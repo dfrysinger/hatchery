@@ -339,6 +339,7 @@ write_files:
       id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
       echo "$USERNAME:$PW" | chpasswd
       echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
+      H="/home/$USERNAME"
       chown $USERNAME:$USERNAME $H
       AK=$(d "$ANTHROPIC_KEY_B64")
       TBT="$AGENT1_BOT_TOKEN"
@@ -349,7 +350,6 @@ write_files:
       GK=$(d "$GOOGLE_API_KEY_B64")
       A1N="$AGENT1_NAME"
       PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
-      H="/home/$USERNAME"
       GT=$(openssl rand -hex 24)
       mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
       echo "$GT" > $H/.clawdbot/gateway-token.txt
