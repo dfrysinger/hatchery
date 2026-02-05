@@ -1,9 +1,9 @@
 # Hatchery v5.0 — Product Requirements Document
 
-**Version:** 1.1 (Judge-Reviewed)
+**Version:** 1.2 (Final — Post-Panel Review)
 **Date:** 2026-02-05
 **Authors:** Council Review Panel (Claude, ChatGPT, Gemini) · Facilitated by Opus
-**Status:** Judge-reviewed — Ready for user approval
+**Status:** Final draft — Ready for implementation approval
 
 ---
 
@@ -40,7 +40,7 @@ v5.0 is a structural overhaul that addresses all 13 findings from the council co
 |---|------|---------------|
 | G1 | Eliminate all 13 Round 1 reliability/security findings | Zero critical/high findings in post-implementation review |
 | G2 | Reduce YAML to ≤15KB | Measured after externalization |
-| G3 | Bot online with memory context in ≤2 minutes | Time from droplet creation to first contextual Telegram response |
+| G3 | Bot online in ≤2 minutes; context restored in ≤3 minutes when Dropbox reachable | Time-to-bot-online and time-to-context-restored measured separately |
 | G4 | All scripts individually testable via CI | 100% of scripts have at least one test |
 | G5 | Non-technical user can deploy via wizard Shortcut | No terminal commands required for standard deployment |
 | G6 | Safe mode is bulletproof | Bot recoverable from any failure state without user SSH access |
@@ -295,8 +295,8 @@ hatchery/
 **Solution:** JSON Schema validation + graduated fallback.
 
 **Requirements:**
-- R4.5.1: parse-habitat.py MUST validate HABITAT_B64 against `schemas/habitat.schema.json`.
-- R4.5.2: parse-habitat.py MUST validate AGENT_LIB_B64 against `schemas/agents.schema.json`.
+- R4.5.1: parse-habitat.py MUST validate HABITAT_B64 using Python's standard `json` library only (no third-party dependencies like `jsonschema` — these are unavailable on fresh Ubuntu images during cloud-init). Validation checks: required keys exist (`name`, `agents`), `agents` is a non-empty list, each agent has `agent` and `botToken` strings. Full JSON Schema validation deferred to build-config.py in Phase 1 (post-pip-install).
+- R4.5.2: build-config.py (Phase 1, post-install) MUST validate habitat and agent library against `schemas/habitat.schema.json` and `schemas/agents.schema.json` using the `jsonschema` Python library.
 - R4.5.3: Validation errors MUST list every failing field with expected type/format.
 - R4.5.4: On partial failure (some fields valid, some not): use valid fields, substitute safe defaults for invalid ones, log every substitution.
 - R4.5.5: On complete failure (not valid base64, not valid JSON): extract bot token via regex as last resort, generate emergency config, send detailed Telegram error.
@@ -309,7 +309,7 @@ hatchery/
 - R4.6.3: The bot in safe mode MUST be able to run `try-full-config.sh` when asked by the user via Telegram.
 - R4.6.4: try-full-config.sh MUST send Telegram notifications for success/failure.
 - R4.6.5: Safe mode MUST be recoverable without SSH access (Telegram-only recovery).
-- R4.6.6: Safe mode MUST attempt multi-agent minimal config first. Fall back to single-agent (agent1) ONLY if multi-agent minimal also fails. Users configure multiple agents intentionally — losing 3 of 4 bots is a severe degradation.
+- R4.6.6: Safe mode MUST attempt multi-agent minimal config first (10s health check timeout). Fall back to single-agent (agent1) ONLY if multi-agent minimal fails health check. Full agent configs are preserved on disk so upgrade to full config can restore all agents. (Judge overrules ChatGPT + Gemini who prefer single-agent — multi-agent-first with fast fallback gets both reliability AND user intent.)
 - R4.6.7: Post-boot-check MUST write a `/var/lib/init-status/config-upgraded` marker after successfully applying full config. On subsequent reboots, skip the upgrade attempt if marker exists and full config is already active.
 
 ### 4.7 Script Robustness (Judge Addition)
@@ -395,10 +395,10 @@ hatchery/
 **Requirements:**
 
 **Native VNC (port 5900):**
-- R7.1.1: x11vnc MUST require a password, derived from the user's droplet password (PASSWORD_B64).
-- R7.1.2: Password file MUST be stored at `/home/bot/.vnc/passwd` with 0600 permissions.
+- R7.1.1: x11vnc MUST require a password. A random 12-character password MUST be generated at setup and sent to the user via Telegram as a one-time notification. This is NOT derived from the droplet password (per ChatGPT: separate blast radius).
+- R7.1.2: Password file MUST be stored at `/home/bot/.vnc/passwd` with 0600 permissions. Plaintext stored in `/home/bot/.vnc/password.txt` (0600) for bot-assisted recovery.
 - R7.1.3: x11vnc MUST be started with `-rfbauth /home/bot/.vnc/passwd` (replacing `-nopw`).
-- R7.1.4: Port 5900 remains open via ufw for direct VNC client access (Jump, Screens, etc.).
+- R7.1.4: Port 5900 open via ufw for direct VNC client access (Jump, Screens, etc.). **Note:** Classic VNC/RFB is unencrypted — password auth protects access but traffic is not confidential. For encrypted access, use noVNC over HTTPS (R7.1.9) or SSH tunnel. This trade-off is documented and acceptable for ephemeral droplets.
 
 **noVNC Web Interface (port 6080):**
 - R7.1.5: Install noVNC and websockify via apt (packages: `novnc` and `websockify`).
@@ -413,6 +413,8 @@ hatchery/
 - R7.2.1: GET endpoints (`/status`, `/health`, `/stages`) MUST remain public (no secrets exposed).
 - R7.2.2: POST endpoints (`/sync`, `/prepare-shutdown`) MUST require `Authorization: Bearer <gateway-token>`.
 - R7.2.3: Unauthorized POST requests MUST return 401 with no information leakage.
+- R7.2.4: api-server.py MUST read the gateway token from `/home/bot/.clawdbot/gateway-token.txt` (same token used by clawdbot gateway control UI). Token file is 0600, owned by bot user.
+- R7.2.5: GET `/status` MUST include: Hatchery version, Node version, clawdbot version, timestamps per stage, `last_error` field (last error message if any), and a human-readable `message` field.
 
 ### 7.3 Secrets Management (Finding #12)
 
@@ -428,8 +430,9 @@ hatchery/
 
 **Requirements:**
 - R7.4.1: Phase 1 MUST run `ufw default deny incoming` and `ufw --force enable` before opening any ports.
-- R7.4.2: Allowed ports: 22 (SSH), 5900 (VNC), 6080 (noVNC), 8080 (status API), 18789 (clawdbot gateway).
-- R7.4.3: Port 3389 (RDP) MAY be opened as a fallback. xrdp is retained in Phase 2 (already installed as part of desktop environment) but is NOT the primary access method. VNC is primary, RDP is available for clients that lack VNC support. (Q6 resolved: keep RDP as fallback.)
+- R7.4.2: Allowed ports: 22 (SSH), 80 (ACME challenges, only when HABITAT_DOMAIN set), 5900 (VNC), 6080 (noVNC), 8080 (status API). Port 18789 (clawdbot gateway) MUST bind to localhost by default; expose via ufw only if habitat config explicitly sets `exposeGateway: true`.
+- R7.4.3: Port 3389 (RDP) is NOT opened by default. xrdp is retained in Phase 2 but port is only opened if habitat config sets `enableRDP: true`. VNC is the sole default remote access method.
+- R7.4.4: Install fail2ban with default SSH jail + custom jail for VNC auth failures (5 attempts → 10 min ban).
 
 ### 7.5 Supply Chain (Findings #4, #5)
 
@@ -472,7 +475,7 @@ hatchery/
 | Unit tests (Shell) | bats | `tests/unit/test_scripts.bats` |
 | Template rendering | pytest | Verify workspace files generate correctly |
 
-**Workflow 2: Integration Test** (`integration-test.yml`) — Runs on merge to main.
+**Workflow 2: Integration Test** (`integration-test.yml`) — Runs on **release candidates only** (tag push matching `v*-rc*`), NOT on every merge.
 
 | Step | Action | Timeout |
 |------|--------|---------|
@@ -480,12 +483,19 @@ hatchery/
 | 2 | Poll `/status` endpoint until `phase1_complete` | 3min |
 | 3 | Verify: clawdbot responds to API health check | 30s |
 | 4 | Poll `/status` until `setup_complete` | 10min |
-| 5 | Verify: VNC accessible with password | 30s |
-| 6 | Verify: all expected systemd services active | 30s |
+| 5 | Verify: VNC port responds (nmap check, not full auth test) | 30s |
+| 6 | Verify: all expected systemd services active (SSH command) | 30s |
 | 7 | Verify: memory files exist in expected locations | 10s |
-| 8 | Destroy droplet | 30s |
+| 8 | **Always** destroy droplet (in `finally` block — tagged `hatchery-ci-test` for cleanup sweeper) | 30s |
 
 **Estimated cost:** ~$0.03 per run (s-1vcpu-2gb for ~15 min).
+
+**Safeguards (per ChatGPT RISK-4):**
+- Droplets tagged `hatchery-ci-test` with auto-destroy after 30 min (DO firewall tag)
+- Weekly cleanup sweeper job destroys any `hatchery-ci-test` tagged droplets older than 1 hour
+- Budget alert on DO at $5/month for CI usage
+
+**PR validation (Workflow 1) uses Docker** for unit tests — no real droplets needed (per Gemini: Docker mock covers 95% of logic).
 
 **Required GitHub Secrets for integration tests:**
 - `DO_TOKEN` — DigitalOcean API token (test account)
@@ -601,18 +611,18 @@ v5.0 introduces proper versioning via GitHub Releases.
 ### 10.2 Rollback
 
 If a release tarball fails to download:
-1. bootstrap.sh retries 3 times
-2. On final failure: fall back to a bundled minimal inline script in the YAML itself (emergency mode)
-3. Emergency mode: installs Node + clawdbot, generates minimal config, starts bot
-4. Bot notifies user: "Setup ran in emergency mode. GitHub may be unreachable."
+1. bootstrap.sh retries 3 times with exponential backoff (5s, 15s, 30s)
+2. On final failure: **fail fast**. Send Telegram notification: "Setup failed — could not fetch Hatchery scripts from GitHub. Please retry or check GitHub status." Do NOT maintain an inline emergency fallback (per Gemini + ChatGPT: maintaining two bootstrap paths is worse than failing cleanly; the iOS Shortcut can retry).
+3. Set stage to "error" so /status API reports the failure clearly.
 
 ### 10.3 Phased Rollout
 
 | Phase | Version | Changes |
 |-------|---------|---------|
-| 1 | v4.5 | Quick wins: rclone copy, destruct timer fix, EnvironmentFile, VNC password, error handling |
-| 2 | v4.6 | build-config.py, externalize scripts (still in YAML for now), input validation, noVNC |
-| 3 | v5.0 | Full architecture: thin YAML, GitHub releases, CI/CD pipeline, all scripts external |
+| 1 | v4.5 | Quick wins: rclone copy, destruct timer fix, EnvironmentFile, VNC password + fail2ban, API auth on POST, ufw hardening, error handling traps, gateway binds localhost |
+| 2 | v5.0 | Full architecture: thin YAML, build-config.py, all scripts external via GitHub releases, CI/CD pipeline, input validation, noVNC, JSON Schema validation |
+
+*v4.6 collapsed into v5.0 per Gemini's recommendation — the externalization IS the architecture change.*
 
 ---
 
@@ -657,7 +667,7 @@ If a release tarball fails to download:
 
 ---
 
-## Judge's Review Notes (v1.1)
+## Judge's Review Notes (v1.2 — Post-Panel Critique)
 
 ### What's Strong
 - Architecture evolution (§3) is well-structured with a clear migration path
@@ -680,11 +690,40 @@ If a release tarball fails to download:
 11. **Added Q7-Q9** — npm fallback, stale YAML, Phase 2 reboot elimination
 12. **Kept RDP** as fallback (R7.4.3) — VNC primary, RDP for compatibility
 
+### Panel Critique Synthesis (v1.1 → v1.2)
+
+**Accepted from ChatGPT:**
+- ✅ GAP-1: Threat model — added fail2ban (R7.4.4), gateway binds localhost by default (R7.4.2)
+- ✅ GAP-2: VNC confidentiality — documented plaintext trade-off, noVNC/HTTPS is the encrypted path (R7.1.4)
+- ✅ GAP-5: Observability — added version/error reporting to /status (R7.2.5)
+- ✅ OE-2: Auto-merge disabled — dependency PRs require human approval
+- ✅ RQ-1: Split G3 into time-to-bot-online and time-to-context-restored
+- ✅ R7.1.1: Random per-service VNC password sent via Telegram (not derived from droplet password)
+- ✅ RISK-1: Port 18789 binds localhost by default
+- ✅ RISK-4: CI test cleanup guardrails (always-destroy, tagged, sweeper, budget cap)
+- ❌ Q5 single-agent safe mode: Overruled — multi-agent-first with 10s timeout is fast enough
+- ❌ Q6 remove RDP: Compromise — RDP not exposed by default, opt-in via habitat config
+
+**Accepted from Gemini:**
+- ✅ R4.5.1 CRITICAL FIX: jsonschema not available during cloud-init. Rewrote: stdlib-only validation in parse-habitat.py, full schema validation deferred to build-config.py post-install
+- ✅ Emergency Mode removed: fail fast on GitHub unreachable
+- ✅ Port 80 added for ACME challenges
+- ✅ Phased rollout collapsed: v4.5 → v5.0 (skip v4.6)
+- ✅ Integration tests on release candidates only, Docker for PR validation
+- ❌ Q5 single-agent: Overruled (see above)
+- ❌ Q6 remove RDP: Compromise (see above)
+
+**New disagreements resolved:**
+- ChatGPT wants IP allowlisting; deferred to Shortcut-level firewall management (existing "Repair Habitat Firewall" shortcut)
+- Gemini wants Shortcut Interface Specification; added to "What's Still Missing" below
+
 ### What's Still Missing (future PRD revisions)
+- iOS Shortcut Interface Specification (per Gemini: formal contract between Shortcut and YAML)
 - Detailed wizard Shortcut specification (§9.1 is aspirational, needs Shortcut-level requirements)
 - Monitoring beyond Telegram (Uptime Robot, DO monitoring, etc.)
 - Cost optimization analysis (which DO droplet size, when to downsize)
 - Documentation for contributors (CONTRIBUTING.md)
+- IP allowlisting at ufw level (currently handled by DO firewall via Shortcut)
 
 ---
 
