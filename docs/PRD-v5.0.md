@@ -1,9 +1,9 @@
 # Hatchery v5.0 — Product Requirements Document
 
-**Version:** 1.0 (Draft)
+**Version:** 1.1 (Judge-Reviewed)
 **Date:** 2026-02-05
 **Authors:** Council Review Panel (Claude, ChatGPT, Gemini) · Facilitated by Opus
-**Status:** Draft — Pending Panel Review
+**Status:** Judge-reviewed — Ready for user approval
 
 ---
 
@@ -51,6 +51,17 @@ v5.0 is a structural overhaul that addresses all 13 findings from the council co
 - **Multi-droplet coordination** — Identified as a blind spot; deferred to future version.
 - **Upstream clawdbot changes** — v5.0 must work with clawdbot as-is. No dependency on new upstream features.
 - **Migration tooling for v4.4 → v5.0** — Users create fresh droplets; migration is not required.
+
+### Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| GitHub unavailable during bootstrap | Droplet stuck — no scripts fetched | Emergency inline fallback in YAML (§10.2), retry with backoff |
+| Telegram unavailable during setup | User has zero visibility | /status API always available; iOS Shortcut polls /status as backup |
+| npm registry down | clawdbot can't install | Retry loop (R5.1.1); emergency mode installs from cached .tgz in release tarball |
+| Dropbox token expired/invalid | No memory restore, sync fails silently | Explicit token validation in Phase 1; clear error to user (R9.2.1) |
+| Phase 1 interrupted mid-run | Partial state, broken droplet | All scripts must be idempotent (new R4.7.1) |
+| apt/dpkg lock contention | Phase 2 apt-get stalls or fails | Robust lock acquisition with timeout (new R4.7.2) |
 
 ---
 
@@ -271,7 +282,7 @@ hatchery/
 **Solution:** Replace with trap-based error handler.
 
 **Requirements:**
-- R4.4.1: No script SHALL use `set -e`.
+- R4.4.1: No script SHALL use `set -e` without a corresponding ERR trap. `set -euo pipefail` combined with an ERR trap is acceptable and preferred over bare `set -e`.
 - R4.4.2: All scripts MUST define a trap handler: `trap 'error_handler $LINENO "$BASH_COMMAND"' ERR`
 - R4.4.3: The error handler MUST: log the failed command + line number, send Telegram notification, continue for non-critical failures, abort only for fatal failures (Node install, clawdbot install).
 - R4.4.4: Each script MUST define which commands are fatal vs. non-fatal.
@@ -298,6 +309,15 @@ hatchery/
 - R4.6.3: The bot in safe mode MUST be able to run `try-full-config.sh` when asked by the user via Telegram.
 - R4.6.4: try-full-config.sh MUST send Telegram notifications for success/failure.
 - R4.6.5: Safe mode MUST be recoverable without SSH access (Telegram-only recovery).
+- R4.6.6: Safe mode MUST attempt multi-agent minimal config first. Fall back to single-agent (agent1) ONLY if multi-agent minimal also fails. Users configure multiple agents intentionally — losing 3 of 4 bots is a severe degradation.
+- R4.6.7: Post-boot-check MUST write a `/var/lib/init-status/config-upgraded` marker after successfully applying full config. On subsequent reboots, skip the upgrade attempt if marker exists and full config is already active.
+
+### 4.7 Script Robustness (Judge Addition)
+
+**Requirements:**
+- R4.7.1: All scripts MUST be idempotent. If phase1.sh or phase2.sh is interrupted and re-run, it MUST produce the same result without errors. Use guard files (e.g., `/var/lib/init-status/node-installed`) to skip completed steps.
+- R4.7.2: Phase 2 MUST acquire dpkg/apt locks with a retry loop (max 120s, 5s interval) before running apt-get. Use `flock /var/lib/dpkg/lock-frontend` or poll for lock availability. Do NOT use `killall -9 apt` — this corrupts dpkg state.
+- R4.7.3: All log files (`/var/log/phase1.log`, `phase2.log`, `init-stages.log`, `post-boot-check.log`) MUST have logrotate configs to prevent unbounded growth on long-running droplets.
 
 ---
 
@@ -360,7 +380,7 @@ hatchery/
 - R6.2.2: Sync MUST NOT run until restore-ok guard file exists.
 - R6.2.3: Shutdown sync (ExecStop) MUST have a 30s timeout to prevent hung shutdowns.
 - R6.2.4: Sync failures MUST be counted. After 3 consecutive failures, notify via Telegram.
-- R6.2.5: Sync MUST include a generation counter (droplet creation timestamp) to prevent older droplets from overwriting newer droplet state. The newest generation always wins.
+- R6.2.5: Sync MUST include a generation counter to prevent older droplets from overwriting newer state. Implementation: Phase 1 writes a file `dropbox:clawdbot-memory/<habitat>/.generation` containing the droplet creation timestamp (from DO metadata API: `curl -s http://169.254.169.254/metadata/v1/created`). Before syncing, check remote `.generation` — only sync if local timestamp ≥ remote. The newest generation always wins.
 
 ---
 
@@ -381,11 +401,11 @@ hatchery/
 - R7.1.4: Port 5900 remains open via ufw for direct VNC client access (Jump, Screens, etc.).
 
 **noVNC Web Interface (port 6080):**
-- R7.1.5: Install noVNC and websockify.
-- R7.1.6: Run websockify on port 6080, proxying to localhost:5900.
-- R7.1.7: noVNC MUST be served behind nginx or a basic HTTP auth layer using the droplet password.
+- R7.1.5: Install noVNC and websockify via apt (packages: `novnc` and `websockify`).
+- R7.1.6: Run websockify on port 6080, proxying to localhost:5900. Managed via systemd unit `novnc.service`.
+- R7.1.7: noVNC MUST use websockify's built-in `--web` flag with token-based auth. Password derived from PASSWORD_B64 (same as VNC). No nginx dependency required — keep the stack simple.
 - R7.1.8: Port 6080 open via ufw. Users access via `http://<droplet-ip>:6080/vnc.html`.
-- R7.1.9: If a domain is configured (HABITAT_DOMAIN), set up Let's Encrypt for HTTPS.
+- R7.1.9: If a domain is configured (HABITAT_DOMAIN), set up Let's Encrypt via certbot for HTTPS on port 6080. This is a v5.0 goal (Q1 resolved: YES, auto-HTTPS when domain is set).
 
 ### 7.2 API Server Auth (Finding #3)
 
@@ -409,12 +429,26 @@ hatchery/
 **Requirements:**
 - R7.4.1: Phase 1 MUST run `ufw default deny incoming` and `ufw --force enable` before opening any ports.
 - R7.4.2: Allowed ports: 22 (SSH), 5900 (VNC), 6080 (noVNC), 8080 (status API), 18789 (clawdbot gateway).
-- R7.4.3: Port 3389 (RDP) SHALL NOT be opened. RDP is removed in v5.0 (VNC is primary).
+- R7.4.3: Port 3389 (RDP) MAY be opened as a fallback. xrdp is retained in Phase 2 (already installed as part of desktop environment) but is NOT the primary access method. VNC is primary, RDP is available for clients that lack VNC support. (Q6 resolved: keep RDP as fallback.)
 
 ### 7.5 Supply Chain (Findings #4, #5)
 
 **Requirements:**
-- R7.5.1: clawdbot version MUST be pinned in `version.json`. Format: `{"clawdbot": "5.x.x"}`.
+- R7.5.1: clawdbot version MUST be pinned in `version.json`. Full schema:
+  ```json
+  {
+    "version": "5.0.0",
+    "file": "hatch.yaml",
+    "deps": {
+      "clawdbot": {"version": "x.y.z"},
+      "node": {"version": "22.12.0", "sha256": "..."},
+      "himalaya": {"version": "x.y.z", "sha256": "..."},
+      "rclone": {"version": "x.y.z", "sha256": "..."},
+      "clawhub": {"version": "x.y.z"}
+    },
+    "minShortcutVersion": "2.0"
+  }
+  ```
 - R7.5.2: himalaya MUST be installed from a pinned release URL with SHA256 verification. Hash stored in `version.json`.
 - R7.5.3: Node.js version MUST be pinned in `version.json`. URL and SHA256 hash included.
 - R7.5.4: No script SHALL use `curl | sh` or `wget | sh` patterns.
@@ -452,6 +486,13 @@ hatchery/
 | 8 | Destroy droplet | 30s |
 
 **Estimated cost:** ~$0.03 per run (s-1vcpu-2gb for ~15 min).
+
+**Required GitHub Secrets for integration tests:**
+- `DO_TOKEN` — DigitalOcean API token (test account)
+- `TEST_BOT_TOKEN` — Telegram bot token for test agent
+- `TEST_TELEGRAM_USER_ID` — Telegram user ID for test notifications
+- `TEST_ANTHROPIC_KEY` — Anthropic API key (can be a low-tier key for health check only)
+- `TEST_DROPBOX_TOKEN` — Dropbox token with a test memory folder
 
 **Workflow 3: Dependency Updates** (`dependency-update.yml`) — Weekly cron.
 
@@ -577,14 +618,22 @@ If a release tarball fails to download:
 
 ## 11. Open Questions
 
+| # | Question | Impact | Owner | Resolution |
+|---|----------|--------|-------|------------|
+| Q1 | Should we support HTTPS for noVNC automatically when HABITAT_DOMAIN is set? | Security, UX | Panel | **YES** — Auto-HTTPS via certbot when domain is configured (R7.1.9) |
+| Q2 | What's the minimum viable set of Phase 2 packages? Can we trim the apt-get install lists? | Speed, size | Panel | **DEFER** — Audit during v4.6 implementation. Candidates for removal: vlc, thunderbird, libreoffice-writer |
+| Q3 | Should the status API expose a cost estimate (uptime × droplet size hourly rate)? | UX | User | **OPEN** — Nice to have. Low priority. |
+| Q4 | Do we need a mechanism for the iOS Shortcut to check for YAML updates? | Accessibility | User | **YES** — Shortcut checks `version.json` before creating droplet. If `minShortcutVersion` > current, prompt user to update Shortcut. |
+| Q5 | Should safe mode support multi-agent configs, or always fall back to single-agent? | Reliability | Panel | **MULTI-AGENT FIRST** — Try multi-agent minimal, then single-agent as last resort (R4.6.6) |
+| Q6 | Is RDP fully removed in v5.0, or kept as a fallback alongside VNC? | Architecture | User | **KEEP AS FALLBACK** — VNC primary, RDP retained for compatibility (R7.4.3) |
+
+### New Open Questions (Judge Addition)
+
 | # | Question | Impact | Owner |
 |---|----------|--------|-------|
-| Q1 | Should we support HTTPS for noVNC automatically when HABITAT_DOMAIN is set? | Security, UX | Panel |
-| Q2 | What's the minimum viable set of Phase 2 packages? Can we trim the apt-get install lists? | Speed, size | Panel |
-| Q3 | Should the status API expose a cost estimate (uptime × droplet size hourly rate)? | UX | User |
-| Q4 | Do we need a mechanism for the iOS Shortcut to check for YAML updates? | Accessibility | User |
-| Q5 | Should safe mode support multi-agent configs, or always fall back to single-agent? | Reliability | Panel |
-| Q6 | Is RDP fully removed in v5.0, or kept as a fallback alongside VNC? | Architecture | User |
+| Q7 | Should we bundle a clawdbot .tgz in the release tarball as npm-down fallback? | Reliability | Implementation |
+| Q8 | How do we handle the YAML template itself being out of date? (User has old Shortcut with old YAML cached) | Accessibility | User |
+| Q9 | Should Phase 2 reboot be eliminated? (Currently reboots to trigger post-boot-check; could use systemd instead) | Speed | Implementation |
 
 ---
 
@@ -605,6 +654,37 @@ If a release tarball fails to download:
 | F11 | parse-habitat.py fallback insufficient | MEDIUM | §4.5 | Addressed |
 | F12 | API keys in systemd Environment= | CRITICAL | §7.3 | Addressed |
 | F13 | set -e causes silent exits | HIGH | §4.4 | Addressed |
+
+---
+
+## Judge's Review Notes (v1.1)
+
+### What's Strong
+- Architecture evolution (§3) is well-structured with a clear migration path
+- Bootstrap flow diagram is excellent — clear critical path
+- All 13 findings traced to specific requirements in the appendix
+- Phased rollout (v4.5 → v4.6 → v5.0) is pragmatic — no big bang
+- Test coverage plan is thorough, especially build-config.py edge cases
+
+### What I Changed (v1.0 → v1.1)
+1. **Added Risks & Mitigations table** (§2) — GitHub down, Telegram down, npm down, dpkg corruption
+2. **Fixed R4.4.1** — `set -e` with ERR trap is fine; bare `set -e` without trap is the problem
+3. **Added §4.7 Script Robustness** — idempotency (R4.7.1), proper dpkg lock handling instead of killall -9 (R4.7.2), log rotation (R4.7.3)
+4. **Added R4.6.6** — Multi-agent safe mode before single-agent fallback
+5. **Added R4.6.7** — Config-upgraded marker to prevent re-running post-boot-check
+6. **Specified noVNC implementation** (R7.1.5-7) — websockify built-in, no nginx needed
+7. **Resolved Q1** (YES auto-HTTPS), **Q4** (YES version check), **Q5** (multi-agent first), **Q6** (keep RDP as fallback)
+8. **Defined version.json schema** (R7.5.1) — full dependency pinning structure
+9. **Specified generation counter implementation** (R6.2.5) — DO metadata API
+10. **Added integration test secrets** — what GitHub Secrets are needed
+11. **Added Q7-Q9** — npm fallback, stale YAML, Phase 2 reboot elimination
+12. **Kept RDP** as fallback (R7.4.3) — VNC primary, RDP for compatibility
+
+### What's Still Missing (future PRD revisions)
+- Detailed wizard Shortcut specification (§9.1 is aspirational, needs Shortcut-level requirements)
+- Monitoring beyond Telegram (Uptime Robot, DO monitoring, etc.)
+- Cost optimization analysis (which DO droplet size, when to downsize)
+- Documentation for contributors (CONTRIBUTING.md)
 
 ---
 
