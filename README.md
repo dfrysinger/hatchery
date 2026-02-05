@@ -58,7 +58,7 @@ GET https://raw.githubusercontent.com/dfrysinger/hatchery/main/version.json
 | Shortcut | Description |
 |---|---|
 | Create Habitat Firewall | Set up DO firewall rules |
-| Repair Habitat Firewall | Fix firewall if misconfigured |
+| Repair Habitat Firewall | Refresh firewall rules (e.g. when your IP changes) |
 | Test Habitat Firewall | Verify firewall rules |
 | Update Habitat DDNS | Update dynamic DNS records |
 | Test Habitat DNS | Verify DNS resolution |
