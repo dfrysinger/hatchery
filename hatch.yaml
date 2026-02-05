@@ -622,8 +622,7 @@ write_files:
         MV="AGENT${i}_MODEL"; MODEL="${!MV}"
         [ $i -gt 1 ] && AL="$AL,"
         IS_DEFAULT="false"; [ $i -eq 1 ] && IS_DEFAULT="true"
-        THINK=""; [ -n "$CJ" ] && [ "$NAME" = "$CJ" ] && THINK=",\"thinking\":\"high\""
-        AL="$AL{\"id\":\"agent${i}\",\"default\":${IS_DEFAULT},\"name\":\"${NAME}\",\"model\":\"${MODEL}\"${THINK},\"workspace\":\"$H/clawd/agents/agent${i}\",\"groupChat\":{\"mentionPatterns\":[\"${NAME},\",\"${NAME}:\"]}}"
+        AL="$AL{\"id\":\"agent${i}\",\"default\":${IS_DEFAULT},\"name\":\"${NAME}\",\"model\":\"${MODEL}\",\"workspace\":\"$H/clawd/agents/agent${i}\",\"groupChat\":{\"mentionPatterns\":[\"${NAME},\",\"${NAME}:\"]}}"
       done
       AL="$AL]"
       BD="["
