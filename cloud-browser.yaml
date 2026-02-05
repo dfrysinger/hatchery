@@ -1,16 +1,13 @@
 #cloud-config
-# version: 4.0
-
+# version: 4.2
 package_update: false
 package_upgrade: false
-
 bootcmd:
   - [ bash, -lc, "mkdir -p /var/lib/init-status; [ -f /var/lib/init-status/setup-complete ] && exit 0; echo '0' > /var/lib/init-status/stage; echo '1' > /var/lib/init-status/phase; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\" >> /var/log/init-stages.log" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/phase2-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; mkdir -p /tmp/downloads; curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz & echo $! > /tmp/downloads/node.pid; wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb & echo $! > /tmp/downloads/chrome.pid" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '11' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
-
 write_files:
   - path: /etc/droplet.env
     owner: root:root
@@ -44,65 +41,57 @@ write_files:
       OPENAI_ACCOUNT_ID_B64="[[OPENAI_ACCOUNT_ID_B64]]"
       HABITAT_B64="[[HABITAT_B64]]"
       AGENT_LIB_B64="[[AGENT_LIB_B64]]"
-
   - path: /etc/needrestart/conf.d/99-autorestart.conf
     permissions: "0644"
     content: |
       $nrconf{restart} = 'a';
       $nrconf{blacklist_rc} = [qr/^cloud-init/, qr/^cloud-final/, qr/^cloud-config/];
-
+  - path: /etc/ssh/sshd_config.d/99-password-auth.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication yes
+      PermitRootLogin prohibit-password
   - path: /usr/local/bin/set-stage.sh
     permissions: "0755"
     content: |
       #!/bin/bash
       echo "$1" > /var/lib/init-status/stage
       echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) STAGE=$1 PHASE=$(cat /var/lib/init-status/phase 2>/dev/null || echo 1) DESC=$2" >> /var/log/init-stages.log
-
   - path: /usr/local/bin/set-phase.sh
     permissions: "0755"
     content: |
       #!/bin/bash
       echo "$1" > /var/lib/init-status/phase
       echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) PHASE=$1 DESC=$2" >> /var/log/init-stages.log
-
   - path: /usr/local/bin/parse-habitat.py
     permissions: "0755"
     content: |
       #!/usr/bin/env python3
-      """Parse HABITAT_B64 + AGENT_LIB_B64 into /etc/habitat-parsed.env"""
       import json, base64, os, sys
-
       def d(val):
           try: return base64.b64decode(val).decode()
           except: return ""
-
       def b64(s):
           return base64.b64encode((s or "").encode()).decode()
-
       hab_raw = os.environ.get('HABITAT_B64', '')
       lib_raw = os.environ.get('AGENT_LIB_B64', '')
-
       if not hab_raw:
           print("ERROR: HABITAT_B64 not set", file=sys.stderr)
           sys.exit(1)
-
       try:
           hab = json.loads(d(hab_raw))
       except (json.JSONDecodeError, Exception) as e:
           print("ERROR: Failed to parse HABITAT_B64: {}".format(e), file=sys.stderr)
           sys.exit(1)
-
       lib = {}
       if lib_raw:
           try:
               lib = json.loads(d(lib_raw))
           except (json.JSONDecodeError, Exception):
               print("WARN: Failed to parse AGENT_LIB_B64, using empty library", file=sys.stderr)
-
       with open('/etc/habitat.json', 'w') as f:
           json.dump(hab, f, indent=2)
       os.chmod('/etc/habitat.json', 0o600)
-
       with open('/etc/habitat-parsed.env', 'w') as f:
           f.write('HABITAT_NAME="{}"\n'.format(hab["name"]))
           f.write('HABITAT_NAME_B64="{}"\n'.format(b64(hab["name"])))
@@ -111,43 +100,44 @@ write_files:
           f.write('BG_COLOR="{}"\n'.format(hab.get("bgColor", "2D3748")))
           f.write('COUNCIL_GROUP_ID="{}"\n'.format(hab.get("councilGroupId", "")))
           f.write('COUNCIL_GROUP_ID_B64="{}"\n'.format(b64(hab.get("councilGroupId", ""))))
-          f.write('GLOBAL_AGENT_NOTES_B64="{}"\n'.format(b64(hab.get("globalAgentNotes", ""))))
-          f.write('USER_NOTES_B64="{}"\n'.format(b64(hab.get("userNotes", ""))))
           f.write('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
-          f.write('BOOT_INSTRUCTIONS_B64="{}"\n'.format(b64(hab.get("bootInstructions", ""))))
-          f.write('BOOTSTRAP_INSTRUCTIONS_B64="{}"\n'.format(b64(hab.get("bootstrapInstructions", ""))))
-
+          f.write('GLOBAL_IDENTITY_B64="{}"\n'.format(b64(hab.get("globalIdentity", ""))))
+          f.write('GLOBAL_BOOT_B64="{}"\n'.format(b64(hab.get("globalBoot", ""))))
+          f.write('GLOBAL_BOOTSTRAP_B64="{}"\n'.format(b64(hab.get("globalBootstrap", ""))))
+          f.write('GLOBAL_SOUL_B64="{}"\n'.format(b64(hab.get("globalSoul", ""))))
+          f.write('GLOBAL_AGENTS_B64="{}"\n'.format(b64(hab.get("globalAgents", ""))))
+          f.write('GLOBAL_USER_B64="{}"\n'.format(b64(hab.get("globalUser", ""))))
           agents = hab.get("agents", [])
           f.write('AGENT_COUNT={}\n'.format(len(agents)))
-
           for i, agent_ref in enumerate(agents):
               n = i + 1
               name = agent_ref["agent"]
               lib_entry = lib.get(name, {})
               model = agent_ref.get("model") or lib_entry.get("model", "anthropic/claude-opus-4-5")
-              soul = lib_entry.get("soul", "")
               identity = lib_entry.get("identity", "")
-              notes = lib_entry.get("notes", "")
-              agents_md = lib_entry.get("agentsMd", "# Agent: {}\nBe helpful and natural.".format(name))
-
+              soul = lib_entry.get("soul", "")
+              agents_md = lib_entry.get("agents", "")
+              boot = lib_entry.get("boot", "")
+              bootstrap = lib_entry.get("bootstrap", "")
+              user = lib_entry.get("user", "")
               f.write('AGENT{}_NAME="{}"\n'.format(n, name))
               f.write('AGENT{}_NAME_B64="{}"\n'.format(n, b64(name)))
               f.write('AGENT{}_BOT_TOKEN="{}"\n'.format(n, agent_ref["botToken"]))
               f.write('AGENT{}_BOT_TOKEN_B64="{}"\n'.format(n, b64(agent_ref["botToken"])))
               f.write('AGENT{}_MODEL="{}"\n'.format(n, model))
-              f.write('AGENT{}_SOUL_B64="{}"\n'.format(n, b64(soul)))
               f.write('AGENT{}_IDENTITY_B64="{}"\n'.format(n, b64(identity)))
-              f.write('AGENT{}_NOTES_B64="{}"\n'.format(n, b64(notes)))
-              f.write('AGENT{}_AGENTS_MD_B64="{}"\n'.format(n, b64(agents_md)))
-
+              f.write('AGENT{}_SOUL_B64="{}"\n'.format(n, b64(soul)))
+              f.write('AGENT{}_AGENTS_B64="{}"\n'.format(n, b64(agents_md)))
+              f.write('AGENT{}_BOOT_B64="{}"\n'.format(n, b64(boot)))
+              f.write('AGENT{}_BOOTSTRAP_B64="{}"\n'.format(n, b64(bootstrap)))
+              f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
       os.chmod('/etc/habitat-parsed.env', 0o600)
       print("Parsed habitat '{}' with {} agents".format(hab['name'], len(agents)))
-
   - path: /usr/local/bin/tg-notify.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
@@ -158,7 +148,6 @@ write_files:
       curl -sf --max-time 10 "https://api.telegram.org/bot${TBT}/sendMessage" \
         -d "chat_id=${TUI}" \
         -d "text=${MSG}" > /dev/null 2>&1
-
   - path: /etc/systemd/system/api-server.service
     permissions: "0644"
     content: |
@@ -172,7 +161,6 @@ write_files:
       User=root
       [Install]
       WantedBy=multi-user.target
-
   - path: /usr/local/bin/api-server.py
     permissions: "0755"
     content: |
@@ -225,16 +213,14 @@ write_files:
           else:self.send_response(404);self.end_headers()
       class R(socketserver.TCPServer):allow_reuse_address=True
       with R(("",PORT),H) as h:h.serve_forever()
-
   - path: /usr/local/sbin/phase1-critical.sh
     permissions: "0755"
     content: |
       #!/bin/bash
       set -e
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       if ! python3 /usr/local/bin/parse-habitat.py; then
-        echo "FATAL: Failed to parse habitat config" >> "$LOG"
         echo 'HABITAT_NAME="broken"' > /etc/habitat-parsed.env
         echo 'AGENT_COUNT=1' >> /etc/habitat-parsed.env
         echo 'AGENT1_NAME="Claude"' >> /etc/habitat-parsed.env
@@ -244,33 +230,23 @@ write_files:
       S="/usr/local/bin/set-stage.sh"
       TG="/usr/local/bin/tg-notify.sh"
       LOG="/var/log/phase1.log"
-      echo "=== Phase 1 Start: $(date) ===" > "$LOG"
       START=$(date +%s)
-
-      $TG "[INIT] Droplet starting up. Phase 1 in progress..."
-
+      $TG "[INIT] Droplet starting up. Phase 1 in progress..." || true
       $S 1 "preparing"
       NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
       [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
-
       if [ -f /tmp/downloads/node.tar.xz ]; then
         tar -xJf /tmp/downloads/node.tar.xz -C /usr/local --strip-components=1 >> "$LOG" 2>&1
         rm -f /tmp/downloads/node.tar.xz
-        echo "Node installed: $(node --version)" >> "$LOG"
       else
-        echo "ERROR: Node download failed, falling back to apt" >> "$LOG"
         apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
       fi
-
       $S 2 "installing-bot"
       npm install -g clawdbot@latest >> "$LOG" 2>&1
-      echo "Clawdbot installed: $(clawdbot --version 2>/dev/null || echo 'unknown')" >> "$LOG"
-
       PW=$(d "$PASSWORD_B64")
       id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
       echo "$USERNAME:$PW" | chpasswd
       echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
-
       AK=$(d "$ANTHROPIC_KEY_B64")
       TBT="$AGENT1_BOT_TOKEN"
       TUI=$(d "$TELEGRAM_USER_ID_B64")
@@ -278,12 +254,9 @@ write_files:
       A1N="$AGENT1_NAME"
       H="/home/$USERNAME"
       GT=$(openssl rand -hex 24)
-
       mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
       echo "$GT" > $H/.clawdbot/gateway-token.txt
-
       ln -sf "$H/clawd/HEARTBEAT.md" "$H/clawd/agents/agent1/HEARTBEAT.md"
-
       cat > $H/.clawdbot/clawdbot.json <<CFG
       {
         "env": {
@@ -329,25 +302,19 @@ write_files:
         }
       }
       CFG
-
       cp $H/.clawdbot/clawdbot.json $H/.clawdbot/clawdbot.minimal.json
-
       echo "ANTHROPIC_API_KEY=${AK}" > $H/.clawdbot/.env
       [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.clawdbot/.env
       GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
       [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.clawdbot/.env
-
       echo -e "# Agent: ${A1N}\nModel: Claude Sonnet\nBe helpful. Desktop setup in progress..." > $H/clawd/agents/agent1/AGENTS.md
-
       cat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'
       Desktop setup in progress. RDP will be ready soon.
       If nothing needs attention, reply with ONLY: NO_REPLY.
       BOOTMD
-
       chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
       chmod 700 $H/.clawdbot
       chmod 600 $H/.clawdbot/clawdbot.json
-
       cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
@@ -367,12 +334,10 @@ write_files:
       [Install]
       WantedBy=multi-user.target
       SVC
-
       systemctl daemon-reload
       systemctl enable clawdbot
       systemctl start clawdbot
       ufw allow 18789/tcp
-
       BOT_OK=false
       for i in {1..30}; do
         if systemctl is-active --quiet clawdbot; then
@@ -381,80 +346,63 @@ write_files:
         fi
         sleep 1
       done
-
       if [ "$BOT_OK" = "true" ]; then
         $S 3 "bot-online"
-        $TG "[OK] Bot online! Phase 1 complete. Starting desktop setup..."
+        $TG "[OK] Bot online! Phase 1 complete. Starting desktop setup..." || true
       else
-        echo "WARNING: Bot failed to start" >> "$LOG"
         journalctl -u clawdbot -n 50 >> "$LOG" 2>&1
-        $TG "[WARN] Bot may not be running. Check logs: journalctl -u clawdbot"
+        $TG "[WARN] Bot may not be running. Check logs: journalctl -u clawdbot" || true
       fi
-
       touch /var/lib/init-status/phase1-complete
       echo "$START" > /var/lib/init-status/phase1-time
-
       END=$(date +%s)
-      echo "=== Phase 1 Complete: $((END - START)) seconds ===" >> "$LOG"
-
       /usr/local/bin/set-phase.sh 2 "background-setup"
       nohup /usr/local/sbin/phase2-background.sh >> /var/log/phase2.log 2>&1 &
       disown
-
   - path: /usr/local/sbin/phase2-background.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
       S="/usr/local/bin/set-stage.sh"
       LOG="/var/log/phase2.log"
-      echo "=== Phase 2 Start: $(date) ===" >> "$LOG"
       START=$(date +%s)
       H="/home/$USERNAME"
-
       CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
       [ -n "$CHROME_PID" ] && wait $CHROME_PID 2>/dev/null || true
-
       systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
       killall -9 apt apt-get dpkg 2>/dev/null || true
       sleep 2
       rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
       dpkg --configure -a 2>/dev/null || true
-
       $S 4 "desktop-environment"
       apt-get update -qq >> "$LOG" 2>&1
       DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
         xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
         xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme \
         >> "$LOG" 2>&1
-
       $S 5 "developer-tools"
       DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
         build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
         thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils \
         python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
         >> "$LOG" 2>&1
-
       rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
       apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
-
       $S 6 "browser-tools"
       [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
       rm -f /tmp/downloads/chrome.deb
       apt-get -f install -y >> "$LOG" 2>&1
-
       mkdir -p $H/.config/chrome-debug/Default
       echo '{"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}' > "$H/.config/chrome-debug/Local State"
       echo '{"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}' > "$H/.config/chrome-debug/Default/Preferences"
       touch "$H/.config/chrome-debug/First Run"
       chown -R $USERNAME:$USERNAME $H/.config/chrome-debug
-
       PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
-
       $S 7 "desktop-services"
       cat > /etc/systemd/system/xvfb.service <<SVC
       [Unit]
@@ -468,7 +416,6 @@ write_files:
       [Install]
       WantedBy=multi-user.target
       SVC
-
       cat > /etc/systemd/system/desktop.service <<SVC
       [Unit]
       Description=XFCE Desktop
@@ -486,7 +433,6 @@ write_files:
       [Install]
       WantedBy=multi-user.target
       SVC
-
       cat > /etc/systemd/system/x11vnc.service <<SVC
       [Unit]
       Description=x11vnc
@@ -502,10 +448,8 @@ write_files:
       [Install]
       WantedBy=multi-user.target
       SVC
-
       mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
       chown -R $USERNAME:$USERNAME $H/.config
-
       systemctl daemon-reload
       systemctl enable xvfb desktop x11vnc
       systemctl start xvfb
@@ -513,7 +457,6 @@ write_files:
       systemctl start desktop
       sleep 3
       systemctl start x11vnc
-
       mkdir -p $H/Desktop
       cat > $H/Desktop/google-chrome.desktop <<'DESK'
       [Desktop Entry]
@@ -535,14 +478,12 @@ write_files:
       DESK
       chmod +x $H/Desktop/*.desktop
       chown -R $USERNAME:$USERNAME $H/Desktop
-
       $S 8 "skills-apps"
       npm install -g clawhub@latest >> "$LOG" 2>&1
       for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
         su - $USERNAME -c "cd $H/clawd && clawhub install $s" >> "$LOG" 2>&1 || true
       done
       find $H/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
-
       DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
       IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
       mkdir -p $H/.config/{himalaya,rclone,gh}
@@ -560,7 +501,6 @@ write_files:
       backend.auth.raw = "${EP}"
       HIM
       [ -n "$GHT" ] && echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml
-
       CU=$(d "$CALDAV_URL_B64"); CUN=$(d "$CALDAV_USER_B64"); CP=$(d "$CALDAV_PASSWORD_B64")
       if [ -n "$CU" ] && [ -n "$CUN" ]; then
         mkdir -p $H/.config/vdirsyncer $H/.config/khal
@@ -603,11 +543,8 @@ write_files:
         chown -R $USERNAME:$USERNAME $H/.config/vdirsyncer $H/.config/khal $H/.local/share/vdirsyncer $H/.local/share/khal
         su - $USERNAME -c "yes | vdirsyncer discover" >> "$LOG" 2>&1 || true
         su - $USERNAME -c "vdirsyncer sync" >> "$LOG" 2>&1 || true
-        echo "Calendar configured (vdirsyncer + khal)" >> "$LOG"
       fi
-
       chown -R $USERNAME:$USERNAME $H/.config
-
       $S 9 "remote-access"
       adduser xrdp ssl-cert 2>/dev/null || true
       cat >> /etc/xrdp/xrdp.ini <<'XI'
@@ -633,63 +570,48 @@ write_files:
       systemctl restart xrdp
       ufw allow 3389/tcp
       ufw allow 5900/tcp
-
       $S 10 "finalizing"
       /usr/local/bin/restore-clawdbot-state.sh
-
       /usr/local/sbin/build-full-config.sh
-
       systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
       systemctl enable clawdbot-sync.timer 2>/dev/null || true
       systemctl start clawdbot-sync.timer 2>/dev/null || true
-
       touch /var/lib/init-status/phase2-complete
       touch /var/lib/init-status/needs-post-boot-check
-
       GT=$(cat /home/bot/.clawdbot/gateway-token.txt 2>/dev/null)
       [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
         -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
         -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
-
       END=$(date +%s)
       DURATION=$((END - START))
-      echo "=== Phase 2 Complete: ${DURATION} seconds ===" >> "$LOG"
-
       TG="/usr/local/bin/tg-notify.sh"
       HN="${HABITAT_NAME:-default}"
       HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-      $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!"
-
+      $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
       sleep 5
       reboot
-
   - path: /usr/local/sbin/build-full-config.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
       H="/home/$USERNAME"
-
       AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
       OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
       TUI=$(d "$TELEGRAM_USER_ID_B64")
       HN="${HABITAT_NAME:-default}"
-      GAN=$(d "$GLOBAL_AGENT_NOTES_B64")
-      UN=$(d "$USER_NOTES_B64")
+      GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
+      GSO=$(d "$GLOBAL_SOUL_B64"); GAG=$(d "$GLOBAL_AGENTS_B64"); GU=$(d "$GLOBAL_USER_B64")
       URN=$(d "$USER_REALNAME_B64"); UL=$(d "$USER_LOCATION_B64")
-      BI=$(d "$BOOT_INSTRUCTIONS_B64")
-      BSI=$(d "$BOOTSTRAP_INSTRUCTIONS_B64")
       CGI="$COUNCIL_GROUP_ID"
       GT=$(cat $H/.clawdbot/gateway-token.txt)
       AC=${AGENT_COUNT:-1}
-
       mkdir -p $H/.clawdbot/credentials
       for i in $(seq 1 $AC); do
         mkdir -p "$H/clawd/agents/agent${i}/memory"
       done
-
       AL="["
       for i in $(seq 1 $AC); do
         NV="AGENT${i}_NAME"; NAME="${!NV}"
@@ -699,26 +621,21 @@ write_files:
         AL="$AL{\"id\":\"agent${i}\",\"default\":${IS_DEFAULT},\"name\":\"${NAME}\",\"model\":\"${MODEL}\",\"workspace\":\"$H/clawd/agents/agent${i}\",\"groupChat\":{\"mentionPatterns\":[\"${NAME},\",\"${NAME}:\"]}}"
       done
       AL="$AL]"
-
       BD="["
       for i in $(seq 2 $AC); do
         [ "$BD" != "[" ] && BD="$BD,"
         BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
       done
       BD="$BD]"
-
       TA="\"default\":{\"botToken\":\"${AGENT1_BOT_TOKEN}\"}"
       for i in $(seq 2 $AC); do
         TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"
         [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK}\"}"
       done
-
       TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
-
       AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
       [ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
       [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
-
       cat > $H/.clawdbot/clawdbot.full.json <<CFG
       {
         "env": {
@@ -783,19 +700,22 @@ write_files:
         }
       }
       CFG
-
+      # --- Generate per-agent MD files with global+agent layering ---
       for i in $(seq 1 $AC); do
         AD="$H/clawd/agents/agent${i}"
         NV="AGENT${i}_NAME"; ANAME="${!NV}"
-        NTV="AGENT${i}_NOTES_B64"; ANOTES=$(d "${!NTV}")
         IDV="AGENT${i}_IDENTITY_B64"; AIDENT=$(d "${!IDV}")
-        cat > "$AD/IDENTITY.md" <<IDMD
-      - Name: ${ANAME}
+        SV="AGENT${i}_SOUL_B64"; ASOUL=$(d "${!SV}")
+        AGV="AGENT${i}_AGENTS_B64"; AAGENTS=$(d "${!AGV}")
+        BOV="AGENT${i}_BOOT_B64"; ABOOT=$(d "${!BOV}")
+        BSV="AGENT${i}_BOOTSTRAP_B64"; ABOOTSTRAP=$(d "${!BSV}")
+        AUV="AGENT${i}_USER_B64"; AUSER=$(d "${!AUV}")
 
-      ${GAN}
-
-      ${ANOTES}
-      ${AIDENT}
+        # IDENTITY.md: global + agent identity + project context
+        { echo "- Name: ${ANAME}"
+          [ -n "$GI" ] && printf '\n%s\n' "$GI"
+          [ -n "$AIDENT" ] && printf '\n%s\n' "$AIDENT"
+          cat <<IDMD
 
       ## Project Context
       This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.
@@ -806,41 +726,28 @@ write_files:
       - Habitat configs: dropbox:Droplets/habitats/
       - Previous transcripts restored from Dropbox on boot
       IDMD
-      done
+        } > "$AD/IDENTITY.md"
 
-      for i in $(seq 1 $AC); do
-        AD="$H/clawd/agents/agent${i}"
-        AMV="AGENT${i}_AGENTS_MD_B64"; AMD=$(d "${!AMV}")
-        if [ -n "$AMD" ]; then
-          echo "$AMD" > "$AD/AGENTS.md"
-        else
-          NV="AGENT${i}_NAME"; echo -e "# Agent: ${!NV}\nBe helpful and natural." > "$AD/AGENTS.md"
+        # SOUL.md: global + agent soul
+        if [ -n "$GSO" ] || [ -n "$ASOUL" ]; then
+          { [ -n "$GSO" ] && printf '%s\n' "$GSO"
+            [ -n "$GSO" ] && [ -n "$ASOUL" ] && echo ""
+            [ -n "$ASOUL" ] && printf '%s\n' "$ASOUL"
+          } > "$AD/SOUL.md"
         fi
-      done
 
-      for i in $(seq 1 $AC); do
-        AD="$H/clawd/agents/agent${i}"
-        SV="AGENT${i}_SOUL_B64"; ASOUL=$(d "${!SV}")
-        [ -n "$ASOUL" ] && echo "$ASOUL" > "$AD/SOUL.md"
-      done
+        # AGENTS.md: global + agent agents (fallback to default)
+        if [ -n "$GAG" ] || [ -n "$AAGENTS" ]; then
+          { [ -n "$GAG" ] && printf '%s\n' "$GAG"
+            [ -n "$GAG" ] && [ -n "$AAGENTS" ] && echo ""
+            [ -n "$AAGENTS" ] && printf '%s\n' "$AAGENTS"
+          } > "$AD/AGENTS.md"
+        else
+          echo -e "# Agent: ${ANAME}\nBe helpful and natural." > "$AD/AGENTS.md"
+        fi
 
-      for i in $(seq 1 $AC); do
-        AD="$H/clawd/agents/agent${i}"
-        ln -sf "$H/clawd/TOOLS.md" "$AD/TOOLS.md" 2>/dev/null || true
-        ln -sf "$H/clawd/USER.md" "$AD/USER.md" 2>/dev/null || true
-        ln -sf "$H/clawd/HEARTBEAT.md" "$AD/HEARTBEAT.md" 2>/dev/null || true
-      done
-
-      cat > $H/clawd/USER.md <<USERMD
-      $([ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (learn)")
-      $([ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (learn)")
-      $([ -n "$UN" ] && echo -e "\n$UN")
-      USERMD
-
-      for i in $(seq 1 $AC); do
-        AD="$H/clawd/agents/agent${i}"
+        # BOOT.md: hardcoded system health + global + agent custom instructions
         cat > "$AD/BOOT.md" <<'BOOTMD'
-
       ## System Health (DO NOT MODIFY)
       If this is your first message since the system started, announce yourself:
       "[ONLINE] Ready and operational."
@@ -869,30 +776,47 @@ write_files:
       After sending with the message tool, reply with ONLY: NO_REPLY.
       If nothing needs attention, reply with ONLY: NO_REPLY.
       BOOTMD
-        [ -n "$BI" ] && printf '\n## Custom Instructions\n%s\n' "$BI" >> "$AD/BOOT.md"
-      done
+        if [ -n "$GBO" ] || [ -n "$ABOOT" ]; then
+          printf '\n## Custom Instructions\n' >> "$AD/BOOT.md"
+          [ -n "$GBO" ] && printf '%s\n' "$GBO" >> "$AD/BOOT.md"
+          [ -n "$GBO" ] && [ -n "$ABOOT" ] && echo "" >> "$AD/BOOT.md"
+          [ -n "$ABOOT" ] && printf '%s\n' "$ABOOT" >> "$AD/BOOT.md"
+        fi
+        printf '\nIf BOOT.md asks you to send a message, use the message tool (action=send with channel + target).\nUse the `target` field (not `to`) for message tool destinations.\nAfter sending with the message tool, reply with ONLY: NO_REPLY.\nIf nothing needs attention, reply with ONLY: NO_REPLY.\n' >> "$AD/BOOT.md"
 
-      BSPRE="You are a new instance with no prior context. Before doing anything else:
+        # BOOTSTRAP.md: hardcoded preamble + global + agent custom instructions
+        BSPRE="You are a new instance with no prior context. Before doing anything else:
       1. Find chat transcripts from previous sessions: find ~ -path '*/sessions/*.jsonl' -name '*.jsonl' 2>/dev/null
       2. Read through the last ~100 messages from the most recent transcript
       3. Note any ongoing tasks, preferences, or decisions
       4. Use this context to inform your responses going forward"
-      for i in $(seq 1 $AC); do
-        AD="$H/clawd/agents/agent${i}"
         printf '%s\n' "$BSPRE" > "$AD/BOOTSTRAP.md"
-        [ -n "$BSI" ] && printf '\n## Custom Instructions\n%s\n' "$BSI" >> "$AD/BOOTSTRAP.md"
-      done
+        if [ -n "$GBS" ] || [ -n "$ABOOTSTRAP" ]; then
+          printf '\n## Custom Instructions\n' >> "$AD/BOOTSTRAP.md"
+          [ -n "$GBS" ] && printf '%s\n' "$GBS" >> "$AD/BOOTSTRAP.md"
+          [ -n "$GBS" ] && [ -n "$ABOOTSTRAP" ] && echo "" >> "$AD/BOOTSTRAP.md"
+          [ -n "$ABOOTSTRAP" ] && printf '%s\n' "$ABOOTSTRAP" >> "$AD/BOOTSTRAP.md"
+        fi
 
+        # USER.md: structured fields + global + agent user notes
+        { [ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (learn)"
+          [ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (learn)"
+          [ -n "$GU" ] && printf '\n%s\n' "$GU"
+          [ -n "$AUSER" ] && printf '\n%s\n' "$AUSER"
+        } > "$AD/USER.md"
+
+        # Shared symlinks (TOOLS.md, HEARTBEAT.md)
+        ln -sf "$H/clawd/TOOLS.md" "$AD/TOOLS.md" 2>/dev/null || true
+        ln -sf "$H/clawd/HEARTBEAT.md" "$AD/HEARTBEAT.md" 2>/dev/null || true
+      done
       mkdir -p $H/.clawdbot/agents/main/agent
       cat > $H/.clawdbot/agents/main/agent/auth-profiles.json <<APJ
       {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
       APJ
-
       for i in $(seq 1 $AC); do
         mkdir -p "$H/.clawdbot/agents/agent${i}/agent"
         ln -sf "$H/.clawdbot/agents/main/agent/auth-profiles.json" "$H/.clawdbot/agents/agent${i}/agent/auth-profiles.json"
       done
-
       cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
@@ -919,9 +843,7 @@ write_files:
       [Install]
       WantedBy=multi-user.target
       SVC
-
       systemctl daemon-reload
-
       if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
         R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
         G=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc))
@@ -932,11 +854,9 @@ write_files:
       <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="${R}"/><value type="double" value="${G}"/><value type="double" value="${B}"/><value type="double" value="1"/></property></property></property></property></property></channel>
       BGXML
       fi
-
       chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
       chmod 700 $H/.clawdbot
       chmod 600 $H/.clawdbot/clawdbot.json $H/.clawdbot/clawdbot.full.json $H/.clawdbot/clawdbot.minimal.json 2>/dev/null || true
-
   - path: /etc/systemd/system/post-boot-check.service
     permissions: "0644"
     content: |
@@ -950,107 +870,84 @@ write_files:
       RemainAfterExit=yes
       [Install]
       WantedBy=multi-user.target
-
   - path: /usr/local/bin/post-boot-check.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      AC=${AGENT_COUNT:-1}
       H="/home/$USERNAME"
       TG="/usr/local/bin/tg-notify.sh"
       LOG="/var/log/post-boot-check.log"
-
-      echo "=== Post-boot check: $(date) ===" >> "$LOG"
-
       [ ! -f /var/lib/init-status/needs-post-boot-check ] && {
-        echo "No post-boot check needed" >> "$LOG"
         exit 0
       }
-
       sleep 15
-
       if [ ! -f "$H/.clawdbot/clawdbot.full.json" ]; then
-        echo "No full config found, skipping upgrade" >> "$LOG"
         rm -f /var/lib/init-status/needs-post-boot-check
         exit 0
       fi
-
-      echo "Applying full config..." >> "$LOG"
       cp "$H/.clawdbot/clawdbot.full.json" "$H/.clawdbot/clawdbot.json"
       chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
       chmod 600 "$H/.clawdbot/clawdbot.json"
       systemctl restart clawdbot
-
       HEALTHY=false
       for i in $(seq 1 12); do
         sleep 5
-        echo "Health check attempt $i/12..." >> "$LOG"
-
         if ! systemctl is-active --quiet clawdbot; then
-          echo "  Service not active" >> "$LOG"
           continue
         fi
-
         if curl -sf http://127.0.0.1:18789/ >> "$LOG" 2>&1; then
-          echo "  Gateway responding (attempt $i)" >> "$LOG"
           HEALTHY=true
           break
         fi
-
-        echo "  Gateway not responding yet" >> "$LOG"
       done
-
       if [ "$HEALTHY" = "true" ]; then
-        echo "Full config applied successfully" >> "$LOG"
         rm -f /var/lib/init-status/needs-post-boot-check
         rm -f /var/lib/init-status/safe-mode
-        rm -f "$H/clawd/agents/agent1/SAFE_MODE.md"
+        for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
         touch /var/lib/init-status/setup-complete
         echo '11' > /var/lib/init-status/stage
         echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready" >> /var/log/init-stages.log
         touch /var/lib/init-status/boot-complete
-
         HN="${HABITAT_NAME:-default}"
         HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-        $TG "[OK] ${HN}${HDOM} fully operational. Full config applied. All systems ready."
-
+        $TG "[OK] ${HN}${HDOM} fully operational. Full config applied. All systems ready." || true
       else
-        echo "Full config FAILED, reverting to safe mode" >> "$LOG"
-
         cp "$H/.clawdbot/clawdbot.minimal.json" "$H/.clawdbot/clawdbot.json"
         chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
         chmod 600 "$H/.clawdbot/clawdbot.json"
-
         touch /var/lib/init-status/safe-mode
-
-        cat > "$H/clawd/agents/agent1/SAFE_MODE.md" <<'SAFEMD'
+        for si in $(seq 1 $AC); do
+        cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<'SAFEMD'
+      # SAFE MODE - Full config failed health checks
+      The full clawdbot config failed to start. You are running minimal config.
+      Try: sudo /usr/local/bin/try-full-config.sh
+      Check: journalctl -u clawdbot -n 100
+      If that fails, check clawdbot.full.json for errors.
       SAFEMD
-        chown $USERNAME:$USERNAME "$H/clawd/agents/agent1/SAFE_MODE.md"
-
+        chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
+      done
         systemctl restart clawdbot
         sleep 5
-
         rm -f /var/lib/init-status/needs-post-boot-check
-
-        $TG "[SAFE MODE] Running minimal config. Full config failed health checks. Bot is attempting repairs."
+        $TG "[SAFE MODE] Running minimal config. Full config failed health checks. Bot is attempting repairs." || true
       fi
-
   - path: /usr/local/bin/try-full-config.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      AC=${AGENT_COUNT:-1}
       H="/home/$USERNAME"
-
       echo "Attempting full config at $(date)"
-
       cp "$H/.clawdbot/clawdbot.full.json" "$H/.clawdbot/clawdbot.json"
       chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
       chmod 600 "$H/.clawdbot/clawdbot.json"
       systemctl restart clawdbot
-
       HEALTHY=false
       for i in $(seq 1 12); do
         sleep 5
@@ -1061,9 +958,8 @@ write_files:
           fi
         fi
       done
-
       if [ "$HEALTHY" = "true" ]; then
-        rm -f "$H/clawd/agents/agent1/SAFE_MODE.md"
+        for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
         rm -f /var/lib/init-status/safe-mode
         echo "SUCCESS: Full config now active"
         exit 0
@@ -1075,17 +971,14 @@ write_files:
         echo "FAILED: Restored minimal config. Check logs: journalctl -u clawdbot"
         exit 1
       fi
-
   - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
     defer: true
     content: |
       <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="0.17647"/><value type="double" value="0.21569"/><value type="double" value="0.28235"/><value type="double" value="1"/></property></property></property></property></property></channel>
-
   - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
     defer: true
     content: |
       <?xml version="1.0"?><channel name="xsettings" version="1.0"><property name="Net" type="empty"><property name="ThemeName" type="string" value="Adwaita-dark"/><property name="IconThemeName" type="string" value="Yaru-blue-dark"/></property></channel>
-
   - path: /home/bot/clawd/TOOLS.md
     defer: true
     content: |
@@ -1125,7 +1018,6 @@ write_files:
       Type=oneshot
       ExecStart=/usr/local/bin/sync-clawdbot-state.sh
       User=root
-
   - path: /etc/systemd/system/clawdbot-sync.timer
     permissions: "0644"
     content: |
@@ -1136,12 +1028,10 @@ write_files:
       OnUnitActiveSec=2min
       [Install]
       WantedBy=timers.target
-
   - path: /usr/local/bin/gmail-api.py
     permissions: "0755"
     content: |
       #!/usr/bin/env python3
-      """Gmail API CLI - Use on DO where SMTP is blocked"""
       import argparse,base64,os,sys,mimetypes
       from email.mime.text import MIMEText
       from email.mime.multipart import MIMEMultipart
@@ -1214,13 +1104,12 @@ write_files:
         pr=sub.add_parser('read');pr.add_argument('id')
         args=p.parse_args();{'send':cmd_send,'list':cmd_list,'read':cmd_read}[args.cmd](args)
       if __name__=='__main__':main()
-
   - path: /usr/local/bin/set-council-group.sh
     permissions: "0755"
     content: |
       #!/bin/bash
       [ -z "$1" ] && { echo "Usage: set-council-group.sh <group_id>"; exit 1; }
-      GID="$1"; source /etc/droplet.env
+      GID="$1"; set -a; source /etc/droplet.env; set +a
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
       H="/home/$USERNAME"; CFG="$H/.clawdbot/clawdbot.json"
       [ ! -f "$CFG" ] && { echo "Config not found"; exit 1; }
@@ -1236,7 +1125,6 @@ write_files:
       systemctl restart clawdbot
       sleep 3
       systemctl is-active --quiet clawdbot && echo "Council group set to $GID. Clawdbot restarted." || { echo "Restart failed, restoring backup"; cp "$CFG.bak" "$CFG"; systemctl restart clawdbot; exit 1; }
-
   - path: /usr/local/bin/mount-dropbox.sh
     permissions: "0755"
     content: |
@@ -1244,19 +1132,22 @@ write_files:
       mkdir -p "$HOME/Dropbox"; fusermount -uz "$HOME/Dropbox" 2>/dev/null || true
       rclone mount dropbox: "$HOME/Dropbox" --vfs-cache-mode writes --daemon
       sleep 2 && thunar "$HOME/Dropbox"
-
   - path: /usr/local/bin/restore-clawdbot-state.sh
     permissions: "0755"
     content: |
       #!/bin/bash
       LOG="/var/log/clawdbot-restore.log"
       exec > >(tee -a "$LOG") 2>&1
-      echo "=== Restore started at $(date -u) ==="
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      TG="/usr/local/bin/tg-notify.sh"
       DBT=$(d "$DROPBOX_TOKEN_B64")
-      if [ -z "$DBT" ]; then echo "SKIP: no Dropbox token"; exit 0; fi
+      if [ -z "$DBT" ]; then
+        echo "SKIP: no Dropbox token"
+        $TG "[WARN] Memory restore skipped - no Dropbox token provided. Bot will start with empty memory." || true
+        exit 0
+      fi
       HN="${HABITAT_NAME:-default}"
       H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
       AC=${AGENT_COUNT:-1}
@@ -1281,6 +1172,7 @@ write_files:
       chown -R $USERNAME:$USERNAME $H/clawd $H/.clawdbot
       TC=$(find $H/.clawdbot -name '*.jsonl' 2>/dev/null | wc -l)
       echo "Restored $TC transcript files ($FAIL warnings)"
+      MC=$(find $H/clawd -name 'MEMORY.md' -o -name 'USER.md' 2>/dev/null | xargs -I{} sh -c '[ -s "{}" ] && echo 1' | wc -l)
       if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
         echo "RETRY: No transcripts restored, retrying in 5s..."
         sleep 5
@@ -1292,14 +1184,17 @@ write_files:
         chown -R $USERNAME:$USERNAME $H/.clawdbot
         TC2=$(find $H/.clawdbot -name '*.jsonl' 2>/dev/null | wc -l)
         echo "After retry: $TC2 transcript files"
+        TC=$TC2
       fi
-      echo "=== Restore finished at $(date -u) ==="
-
+      if [ "$TC" -eq 0 ] && [ "$MC" -eq 0 ]; then
+        echo "WARNING: Nothing restored - possible Dropbox token issue"
+        $TG "[WARN] Memory restore got 0 files. Dropbox token may be invalid. Bot starting with empty memory." || true
+      fi
   - path: /usr/local/bin/sync-clawdbot-state.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
       DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
@@ -1315,33 +1210,30 @@ write_files:
         a="agent${i}"; TD="$H/.clawdbot/agents/$a/sessions"
         [ -d "$TD" ] && su - $USERNAME -c "rclone copy '$TD/' '$R/agents/${a}/sessions/' --include '*.jsonl' 2>/dev/null" || true
       done
-
   - path: /usr/local/bin/schedule-destruct.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
       M="$DESTRUCT_MINS"
       [ -n "$M" ] && [ "$M" != "0" ] && [ "$M" -gt 0 ] 2>/dev/null && systemd-run --unit=self-destruct --on-active=${M}m /usr/local/bin/kill-droplet.sh
-
   - path: /usr/local/bin/kill-droplet.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
       /usr/local/bin/sync-clawdbot-state.sh
       curl -X DELETE -H "Authorization: Bearer $(d "$DO_TOKEN_B64")" "https://api.digitalocean.com/v2/droplets?tag_name=${HABITAT_NAME}"
-
   - path: /usr/local/bin/rename-telegram-bots.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      source /etc/droplet.env
+      set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
@@ -1349,16 +1241,15 @@ write_files:
       for i in $(seq 1 $AC); do
         NV="AGENT${i}_NAME"; NAME="${!NV}"
         TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"
-        [ -n "$TOK" ] && curl -s "https://api.telegram.org/bot${TOK}/setMyName" -d "name=${NAME}Bot" > /dev/null
+        HN="${HABITAT_NAME:-}"
+        DN="${NAME}Bot"; [ -n "$HN" ] && DN="${NAME}Bot (${HN})"
+        [ -n "$TOK" ] && curl -s "https://api.telegram.org/bot${TOK}/setMyName" -d "name=${DN}" > /dev/null
       done
-
 users:
   - default
-
 runcmd:
   - [ bash, -lc, "systemctl daemon-reload; systemctl enable --now api-server; ufw allow 8080/tcp" ]
   - [ bash, -lc, "systemctl enable post-boot-check.service" ]
   - [ bash, -lc, "/usr/local/bin/schedule-destruct.sh" ]
   - [ bash, -lc, "/usr/local/sbin/phase1-critical.sh" ]
   - [ bash, -lc, "/usr/local/bin/rename-telegram-bots.sh" ]
-
