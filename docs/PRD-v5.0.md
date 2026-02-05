@@ -1,0 +1,611 @@
+# Hatchery v5.0 — Product Requirements Document
+
+**Version:** 1.0 (Draft)
+**Date:** 2026-02-05
+**Authors:** Council Review Panel (Claude, ChatGPT, Gemini) · Facilitated by Opus
+**Status:** Draft — Pending Panel Review
+
+---
+
+## Table of Contents
+
+1. [Executive Summary](#1-executive-summary)
+2. [Goals & Non-Goals](#2-goals--non-goals)
+3. [Architecture Evolution](#3-architecture-evolution)
+4. [Reliability & Stability](#4-reliability--stability)
+5. [Speed of Bring-up](#5-speed-of-bring-up)
+6. [Context Restoration](#6-context-restoration)
+7. [Security](#7-security)
+8. [CI/CD & Testing](#8-cicd--testing)
+9. [Accessibility](#9-accessibility)
+10. [Migration Path](#10-migration-path)
+11. [Open Questions](#11-open-questions)
+12. [Appendix: Round 1 Findings Traceability](#appendix-round-1-findings-traceability)
+
+---
+
+## 1. Executive Summary
+
+Hatchery provisions ephemeral DigitalOcean droplets as AI-powered Cloud Browser workstations via iOS Shortcuts. The current v4.4 release works but carries significant technical debt: a 57KB monolithic YAML with inline bash/python scripts, fragile JSON generation via string concatenation, race conditions in downloads, unauthenticated services, and no automated testing.
+
+v5.0 is a structural overhaul that addresses all 13 findings from the council code review while evolving the architecture toward a maintainable, testable, and accessible system. The YAML shrinks from 57KB to ~10-15KB. Scripts move to individually testable files in the repo. A CI/CD pipeline validates every change. The user experience remains unchanged — tap a Shortcut, get a droplet.
+
+---
+
+## 2. Goals & Non-Goals
+
+### Goals
+
+| # | Goal | Success Metric |
+|---|------|---------------|
+| G1 | Eliminate all 13 Round 1 reliability/security findings | Zero critical/high findings in post-implementation review |
+| G2 | Reduce YAML to ≤15KB | Measured after externalization |
+| G3 | Bot online with memory context in ≤2 minutes | Time from droplet creation to first contextual Telegram response |
+| G4 | All scripts individually testable via CI | 100% of scripts have at least one test |
+| G5 | Non-technical user can deploy via wizard Shortcut | No terminal commands required for standard deployment |
+| G6 | Safe mode is bulletproof | Bot recoverable from any failure state without user SSH access |
+
+### Non-Goals
+
+- **Custom DO image (Packer)** — Deferred to v6.0. Worth pursuing but adds pipeline complexity.
+- **Multi-droplet coordination** — Identified as a blind spot; deferred to future version.
+- **Upstream clawdbot changes** — v5.0 must work with clawdbot as-is. No dependency on new upstream features.
+- **Migration tooling for v4.4 → v5.0** — Users create fresh droplets; migration is not required.
+
+---
+
+## 3. Architecture Evolution
+
+### 3.1 Current Architecture (v4.4)
+
+```
+┌─────────────────────────────────┐
+│         hatch.yaml (57KB)       │
+│  ┌───────────────────────────┐  │
+│  │ /etc/droplet.env          │  │
+│  │ parse-habitat.py          │  │
+│  │ phase1-critical.sh        │  │
+│  │ phase2-background.sh      │  │
+│  │ build-full-config.sh      │  │
+│  │ api-server.py             │  │
+│  │ restore/sync scripts      │  │
+│  │ post-boot-check.sh        │  │
+│  │ helper scripts (8+)       │  │
+│  │ template files (4+)       │  │
+│  │ systemd units (6+)        │  │
+│  └───────────────────────────┘  │
+└─────────────────────────────────┘
+```
+
+Everything inline. Untestable. One change requires editing a 57KB YAML.
+
+### 3.2 Target Architecture (v5.0)
+
+```
+┌────────────────────┐     ┌──────────────────────────────┐
+│  hatch.yaml (~12KB)│     │  GitHub Release (hatchery)    │
+│  ┌──────────────┐  │     │  ┌──────────────────────┐    │
+│  │ droplet.env  │  │ ──> │  │ scripts/             │    │
+│  │ bootstrap.sh │  │     │  │   phase1.sh           │    │
+│  │ parse-hab.py │  │     │  │   phase2.sh           │    │
+│  │ set-stage.sh │  │     │  │   build-config.py     │    │
+│  │ tg-notify.sh │  │     │  │   api-server.py       │    │
+│  │ systemd units│  │     │  │   restore.sh / sync.sh│    │
+│  └──────────────┘  │     │  │   post-boot-check.sh  │    │
+└────────────────────┘     │  │   try-full-config.sh   │    │
+                           │  │   kill-droplet.sh      │    │
+┌────────────────────┐     │  │   rename-bots.sh       │    │
+│ iOS Shortcut       │     │  │   vnc-setup.sh         │    │
+│  HABITAT_B64       │     │  ├──────────────────────┐    │
+│  AGENT_LIB_B64     │     │  │ templates/           │    │
+└────────────────────┘     │  │   BOOT.md / TOOLS.md  │    │
+                           │  │   HEARTBEAT.md         │    │
+                           │  │   SAFE_MODE.md         │    │
+                           │  ├──────────────────────┐    │
+                           │  │ schemas/             │    │
+                           │  │   habitat.schema.json │    │
+                           │  │   agents.schema.json  │    │
+                           │  ├──────────────────────┐    │
+                           │  │ tests/               │    │
+                           │  │   (unit + integration)│    │
+                           │  └──────────────────────┘    │
+                           └──────────────────────────────┘
+```
+
+### 3.3 What Stays in the YAML
+
+The YAML retains only what **must** be inline for cloud-init to function before network-fetched scripts are available:
+
+| File | Reason |
+|------|--------|
+| `/etc/droplet.env` | Credentials. Must exist before anything runs. |
+| `parse-habitat.py` | Parses HABITAT_B64 → habitat.json + env file. Required by bootstrap. |
+| `bootstrap.sh` | ~80 lines. Fetches release tarball from GitHub, verifies SHA256, extracts, runs phase1. |
+| `set-stage.sh` / `set-phase.sh` | Tiny (5 lines each). Logging helpers used by bootstrap before scripts are fetched. |
+| `tg-notify.sh` | ~20 lines. Sends Telegram alerts. Needed before bot is online. |
+| Systemd unit files | `api-server.service`, `clawdbot.service` (minimal), `clawdbot-sync.timer` — declarative, small. |
+| `api-server.py` | Status API. Needed before scripts are fetched to report bootstrap progress. |
+
+**Estimated YAML size: 10-15KB** (down from 57KB).
+
+### 3.4 Bootstrap Flow
+
+```
+cloud-init bootcmd
+  ├─ Create /var/lib/init-status/
+  ├─ Stop apt timers (prevent lock contention)
+  └─ Mask xrdp (not used in v5.0)
+
+cloud-init write_files
+  └─ Write: droplet.env, parse-habitat.py, bootstrap.sh,
+            set-stage.sh, tg-notify.sh, api-server.py, systemd units
+
+cloud-init runcmd
+  ├─ Enable api-server (status endpoint available immediately)
+  ├─ Run parse-habitat.py → /etc/habitat.json + /etc/habitat-parsed.env
+  └─ Run bootstrap.sh:
+       ├─ Fetch hatchery release tarball from GitHub (pinned tag)
+       ├─ Verify SHA256 checksum
+       ├─ Extract to /opt/hatchery/
+       └─ Exec /opt/hatchery/scripts/phase1.sh
+            ├─ Install Node.js (from tarball, sequential, no race)
+            ├─ Install clawdbot (pinned version, with retry)
+            ├─ Create user, set up workspace
+            ├─ Install rclone (static binary)
+            ├─ Restore memory from Dropbox (MEMORY.md + latest transcripts)
+            ├─ Generate minimal config (via build-config.py)
+            ├─ Start clawdbot → BOT ONLINE WITH CONTEXT
+            ├─ Schedule self-destruct (timer starts NOW, not at boot)
+            └─ Launch phase2.sh in background
+                 ├─ Desktop environment
+                 ├─ Developer tools
+                 ├─ Browser + Chrome setup
+                 ├─ VNC with password + noVNC web interface
+                 ├─ Skills installation
+                 ├─ Credentials setup (himalaya, gh, khal, rclone)
+                 ├─ Full config generation (via build-config.py)
+                 ├─ Enable sync timer
+                 └─ Reboot → post-boot-check upgrades to full config
+```
+
+### 3.5 File Organization in Repo
+
+```
+hatchery/
+├── hatch.yaml                  # The cloud-init template (~12KB)
+├── version.json                # Version metadata + dependency pins
+├── docs/
+│   └── PRD-v5.0.md            # This document
+├── scripts/
+│   ├── phase1.sh              # Critical path: Node → clawdbot → memory → bot online
+│   ├── phase2.sh              # Background: desktop, tools, VNC, full config
+│   ├── build-config.py        # Python config generator (replaces build-full-config.sh)
+│   ├── api-server.py          # Status/health API
+│   ├── restore-state.sh       # Restore memory + transcripts from Dropbox
+│   ├── sync-state.sh          # Periodic sync to Dropbox
+│   ├── post-boot-check.sh     # Config upgrade + health verification
+│   ├── try-full-config.sh     # Manual safe-mode recovery
+│   ├── kill-droplet.sh        # Self-destruct
+│   ├── rename-bots.sh         # Telegram bot display names
+│   ├── schedule-destruct.sh   # Timer setup
+│   ├── mount-dropbox.sh       # Desktop shortcut helper
+│   └── set-council-group.sh   # Council group config
+├── templates/
+│   ├── BOOT.md
+│   ├── HEARTBEAT.md
+│   ├── TOOLS.md
+│   ├── SAFE_MODE.md
+│   └── BOOTSTRAP.md
+├── schemas/
+│   ├── habitat.schema.json    # JSON Schema for habitat config
+│   └── agents.schema.json     # JSON Schema for agent library
+├── tests/
+│   ├── unit/
+│   │   ├── test_build_config.py    # pytest: JSON generation edge cases
+│   │   ├── test_parse_habitat.py   # pytest: input validation
+│   │   └── test_scripts.bats       # bats: shell script tests
+│   ├── integration/
+│   │   └── test_deploy.sh          # Spin up real droplet, validate
+│   └── fixtures/
+│       ├── habitat-valid.json
+│       ├── habitat-unicode.json
+│       ├── habitat-missing-fields.json
+│       ├── agents-special-chars.json
+│       └── agents-empty.json
+└── .github/
+    └── workflows/
+        ├── pr-validate.yml         # Lint + unit tests on every PR
+        ├── integration-test.yml    # Real droplet test on merge
+        ├── dependency-update.yml   # Weekly version bump checks
+        └── release.yml             # Build + publish release tarball
+```
+
+---
+
+## 4. Reliability & Stability
+
+### 4.1 Config Generation Rewrite (Finding #2)
+
+**Problem:** `build-full-config.sh` constructs JSON via bash string concatenation. Special characters in agent names, identities, or soul text produce invalid JSON → safe mode.
+
+**Solution:** Replace with `build-config.py`.
+
+**Requirements:**
+- R4.1.1: All JSON output MUST be generated via `json.dumps()` — no string concatenation.
+- R4.1.2: All workspace files (IDENTITY.md, AGENTS.md, BOOT.md, BOOTSTRAP.md, USER.md, SOUL.md) MUST be generated via Python string formatting with proper escaping.
+- R4.1.3: Input habitat JSON and agent library MUST be validated against JSON Schemas before processing.
+- R4.1.4: On validation failure, generate a detailed error message listing every invalid field, and send via Telegram.
+- R4.1.5: On validation failure, still generate a minimal working config for agent1 (graceful degradation).
+- R4.1.6: Output configs MUST be validated (parse the generated JSON back) before writing to disk.
+- R4.1.7: Script MUST be callable as: `build-config.py --habitat /etc/habitat.json --output-dir /home/bot --mode minimal|full`
+- R4.1.8: Unit tests MUST cover: quotes in names, newlines in identity text, unicode agent names, empty agent library, missing optional fields, 1/3/10 agents, council present/absent.
+
+### 4.2 Download Race Condition Fix (Finding #7)
+
+**Problem:** Downloads backgrounded in bootcmd use cross-shell `wait` which silently fails. `tar` may operate on incomplete files.
+
+**Solution:** Eliminate cross-shell downloads. Move Node.js download into phase1.sh (sequential). Chrome download stays in phase2.sh (not time-critical). Both use completion markers.
+
+**Requirements:**
+- R4.2.1: Node.js download MUST be sequential within phase1.sh. No cross-shell PID passing.
+- R4.2.2: Chrome download in bootcmd MUST write a `.done` marker file on completion: `wget ... && touch /tmp/downloads/chrome.deb.done`
+- R4.2.3: phase2.sh MUST poll for the `.done` marker with a timeout (max 120s), not use `wait`.
+- R4.2.4: If download times out, phase2 MUST re-download directly with error logging.
+
+### 4.3 Memory Sync Safety (Finding #8)
+
+**Problem:** `rclone sync` is destructive — mirrors local to Dropbox, deleting remote files not present locally. If restore fails, first sync wipes Dropbox.
+
+**Solution:** Replace `rclone sync` with `rclone copy` + restore guard file.
+
+**Requirements:**
+- R4.3.1: sync-state.sh MUST use `rclone copy` (never `rclone sync`) for all uploads.
+- R4.3.2: A guard file `/var/lib/init-status/restore-ok` MUST be created only after successful memory restore.
+- R4.3.3: sync-state.sh MUST refuse to upload memory if the restore-ok guard file does not exist.
+- R4.3.4: sync-state.sh MUST check rclone exit code. After 3 consecutive failures, send Telegram notification.
+
+### 4.4 Error Handling (Finding #13)
+
+**Problem:** `set -e` in phase1-critical.sh causes silent aborts on any non-zero exit.
+
+**Solution:** Replace with trap-based error handler.
+
+**Requirements:**
+- R4.4.1: No script SHALL use `set -e`.
+- R4.4.2: All scripts MUST define a trap handler: `trap 'error_handler $LINENO "$BASH_COMMAND"' ERR`
+- R4.4.3: The error handler MUST: log the failed command + line number, send Telegram notification, continue for non-critical failures, abort only for fatal failures (Node install, clawdbot install).
+- R4.4.4: Each script MUST define which commands are fatal vs. non-fatal.
+- R4.4.5: On fatal failure, the handler MUST write a diagnostic SAFE_MODE.md with the specific error before exiting.
+
+### 4.5 Input Validation (Finding #11)
+
+**Problem:** parse-habitat.py fallback on bad input leaves bot with incomplete config.
+
+**Solution:** JSON Schema validation + graduated fallback.
+
+**Requirements:**
+- R4.5.1: parse-habitat.py MUST validate HABITAT_B64 against `schemas/habitat.schema.json`.
+- R4.5.2: parse-habitat.py MUST validate AGENT_LIB_B64 against `schemas/agents.schema.json`.
+- R4.5.3: Validation errors MUST list every failing field with expected type/format.
+- R4.5.4: On partial failure (some fields valid, some not): use valid fields, substitute safe defaults for invalid ones, log every substitution.
+- R4.5.5: On complete failure (not valid base64, not valid JSON): extract bot token via regex as last resort, generate emergency config, send detailed Telegram error.
+
+### 4.6 Safe Mode Improvements
+
+**Requirements:**
+- R4.6.1: Safe mode MUST result in a working bot that can respond to Telegram messages.
+- R4.6.2: SAFE_MODE.md MUST contain the specific error that triggered safe mode, not generic instructions.
+- R4.6.3: The bot in safe mode MUST be able to run `try-full-config.sh` when asked by the user via Telegram.
+- R4.6.4: try-full-config.sh MUST send Telegram notifications for success/failure.
+- R4.6.5: Safe mode MUST be recoverable without SSH access (Telegram-only recovery).
+
+---
+
+## 5. Speed of Bring-up
+
+### 5.1 Phase 1 Critical Path
+
+**Target:** Bot online with memory context in ≤2 minutes from droplet creation.
+
+**Critical path sequence:**
+1. cloud-init writes files (~2s)
+2. parse-habitat.py (~1s)
+3. bootstrap.sh fetches + extracts release tarball (~5s)
+4. Node.js download + extract (~15s)
+5. `npm install -g clawdbot@<pinned>` with retry (~30s)
+6. User creation + workspace setup (~2s)
+7. rclone binary download (~5s)
+8. Memory restore from Dropbox — MEMORY.md + 2 newest transcripts (~10s)
+9. build-config.py minimal config (~1s)
+10. Start clawdbot + verify health (~10s)
+
+**Estimated total: ~80s**
+
+**Requirements:**
+- R5.1.1: npm install MUST retry up to 3 times with 5s backoff.
+- R5.1.2: rclone MUST be installed as a static binary download (not via apt) to avoid package manager contention.
+- R5.1.3: Memory restore in Phase 1 MUST be lightweight: only MEMORY.md, USER.md, and the 2 most recent transcript files per agent. Full transcript restore deferred to Phase 2.
+- R5.1.4: If memory restore fails (Dropbox error, no token), Phase 1 MUST continue. Bot starts without context rather than blocking.
+- R5.1.5: Self-destruct timer MUST be scheduled after Phase 1 completes (not at boot).
+
+### 5.2 Phase 2 Background
+
+**Requirements:**
+- R5.2.1: Phase 2 MUST NOT block or interfere with the running bot.
+- R5.2.2: Phase 2 MUST report progress via set-stage.sh (visible in /status API).
+- R5.2.3: Full transcript restore MUST happen in Phase 2.
+- R5.2.4: Phase 2 completion MUST trigger a clawdbot wake event to notify the bot.
+
+---
+
+## 6. Context Restoration
+
+### 6.1 Phase 1 Memory Restore (Finding #9)
+
+**Problem:** In v4.4, the bot starts in Phase 1 but memory isn't restored until Phase 2. The bot's first interactions lack any prior context.
+
+**Solution:** Lightweight memory restore in Phase 1, before clawdbot starts.
+
+**Requirements:**
+- R6.1.1: Phase 1 MUST restore MEMORY.md and USER.md for all agents before starting clawdbot.
+- R6.1.2: Phase 1 MUST restore the 2 most recent transcript files (.jsonl) per agent.
+- R6.1.3: Remaining transcripts MUST be restored in Phase 2 (background).
+- R6.1.4: BOOTSTRAP.md MUST be written before clawdbot starts, instructing the bot to read restored transcripts for context.
+- R6.1.5: If Dropbox is unreachable, Phase 1 MUST continue without blocking. Log the failure and retry in Phase 2.
+
+### 6.2 Sync Reliability
+
+**Requirements:**
+- R6.2.1: Periodic sync (every 2 min) MUST use `rclone copy` (additive, never deletes).
+- R6.2.2: Sync MUST NOT run until restore-ok guard file exists.
+- R6.2.3: Shutdown sync (ExecStop) MUST have a 30s timeout to prevent hung shutdowns.
+- R6.2.4: Sync failures MUST be counted. After 3 consecutive failures, notify via Telegram.
+- R6.2.5: Sync MUST include a generation counter (droplet creation timestamp) to prevent older droplets from overwriting newer droplet state. The newest generation always wins.
+
+---
+
+## 7. Security
+
+### 7.1 VNC Access (Finding #1)
+
+**Problem:** x11vnc runs with no password and port 5900 is open to the internet.
+
+**Solution:** Two access methods — native VNC with password + noVNC browser-based access.
+
+**Requirements:**
+
+**Native VNC (port 5900):**
+- R7.1.1: x11vnc MUST require a password, derived from the user's droplet password (PASSWORD_B64).
+- R7.1.2: Password file MUST be stored at `/home/bot/.vnc/passwd` with 0600 permissions.
+- R7.1.3: x11vnc MUST be started with `-rfbauth /home/bot/.vnc/passwd` (replacing `-nopw`).
+- R7.1.4: Port 5900 remains open via ufw for direct VNC client access (Jump, Screens, etc.).
+
+**noVNC Web Interface (port 6080):**
+- R7.1.5: Install noVNC and websockify.
+- R7.1.6: Run websockify on port 6080, proxying to localhost:5900.
+- R7.1.7: noVNC MUST be served behind nginx or a basic HTTP auth layer using the droplet password.
+- R7.1.8: Port 6080 open via ufw. Users access via `http://<droplet-ip>:6080/vnc.html`.
+- R7.1.9: If a domain is configured (HABITAT_DOMAIN), set up Let's Encrypt for HTTPS.
+
+### 7.2 API Server Auth (Finding #3)
+
+**Requirements:**
+- R7.2.1: GET endpoints (`/status`, `/health`, `/stages`) MUST remain public (no secrets exposed).
+- R7.2.2: POST endpoints (`/sync`, `/prepare-shutdown`) MUST require `Authorization: Bearer <gateway-token>`.
+- R7.2.3: Unauthorized POST requests MUST return 401 with no information leakage.
+
+### 7.3 Secrets Management (Finding #12)
+
+**Problem:** API keys in systemd `Environment=` lines are readable by any local user.
+
+**Requirements:**
+- R7.3.1: All secrets MUST be stored in `/home/bot/.clawdbot/.env` (existing file, 0600).
+- R7.3.2: Systemd service files MUST use `EnvironmentFile=/home/bot/.clawdbot/.env` instead of inline `Environment=` for secrets.
+- R7.3.3: Non-secret environment variables (NODE_ENV, DISPLAY, PATH) MAY remain as inline `Environment=`.
+- R7.3.4: No secret values SHALL appear in systemd unit files, clawdbot.json, or any file readable by other users.
+
+### 7.4 Firewall Hardening
+
+**Requirements:**
+- R7.4.1: Phase 1 MUST run `ufw default deny incoming` and `ufw --force enable` before opening any ports.
+- R7.4.2: Allowed ports: 22 (SSH), 5900 (VNC), 6080 (noVNC), 8080 (status API), 18789 (clawdbot gateway).
+- R7.4.3: Port 3389 (RDP) SHALL NOT be opened. RDP is removed in v5.0 (VNC is primary).
+
+### 7.5 Supply Chain (Findings #4, #5)
+
+**Requirements:**
+- R7.5.1: clawdbot version MUST be pinned in `version.json`. Format: `{"clawdbot": "5.x.x"}`.
+- R7.5.2: himalaya MUST be installed from a pinned release URL with SHA256 verification. Hash stored in `version.json`.
+- R7.5.3: Node.js version MUST be pinned in `version.json`. URL and SHA256 hash included.
+- R7.5.4: No script SHALL use `curl | sh` or `wget | sh` patterns.
+- R7.5.5: CI workflow MUST check for dependency updates weekly and open PRs with updated pins + hashes.
+
+---
+
+## 8. CI/CD & Testing
+
+### 8.1 GitHub Actions Workflows
+
+**Workflow 1: PR Validation** (`pr-validate.yml`) — Runs on every PR.
+
+| Check | Tool | Target |
+|-------|------|--------|
+| Shell linting | ShellCheck | All `.sh` files |
+| Python linting | ruff | All `.py` files |
+| YAML linting | yamllint | `hatch.yaml` |
+| JSON Schema validation | jsonschema (Python) | Test fixtures against schemas |
+| Unit tests (Python) | pytest | `tests/unit/test_build_config.py`, `test_parse_habitat.py` |
+| Unit tests (Shell) | bats | `tests/unit/test_scripts.bats` |
+| Template rendering | pytest | Verify workspace files generate correctly |
+
+**Workflow 2: Integration Test** (`integration-test.yml`) — Runs on merge to main.
+
+| Step | Action | Timeout |
+|------|--------|---------|
+| 1 | Create DO droplet (s-1vcpu-2gb) with test credentials | 60s |
+| 2 | Poll `/status` endpoint until `phase1_complete` | 3min |
+| 3 | Verify: clawdbot responds to API health check | 30s |
+| 4 | Poll `/status` until `setup_complete` | 10min |
+| 5 | Verify: VNC accessible with password | 30s |
+| 6 | Verify: all expected systemd services active | 30s |
+| 7 | Verify: memory files exist in expected locations | 10s |
+| 8 | Destroy droplet | 30s |
+
+**Estimated cost:** ~$0.03 per run (s-1vcpu-2gb for ~15 min).
+
+**Workflow 3: Dependency Updates** (`dependency-update.yml`) — Weekly cron.
+
+- Check npm registry for new clawdbot version
+- Check GitHub releases for new himalaya version
+- Check Node.js release schedule for LTS updates
+- Auto-create PR with updated `version.json` (new pins + SHA256 hashes)
+- PR triggers Workflow 1 (lint + unit tests)
+- If green, auto-triggers Workflow 2 (integration test)
+- If green, auto-merge
+
+**Workflow 4: Release** (`release.yml`) — Triggered on version tag push.
+
+- Build release tarball from repo contents
+- Compute SHA256 of tarball
+- Create GitHub Release with tarball attached
+- Update `version.json` on main with new release tag
+
+### 8.2 Unit Test Coverage
+
+**build-config.py tests** (highest priority):
+
+```
+test_agent_name_with_quotes        # O'Brien → valid JSON
+test_agent_name_with_double_quotes # Agent "Test" → valid JSON
+test_identity_with_newlines        # Multi-line identity text → correct .md file
+test_unicode_agent_name            # Claude 🤖 → valid JSON
+test_empty_agent_library           # No library → uses defaults
+test_missing_optional_fields       # Minimal habitat → works
+test_single_agent                  # 1 agent → correct config
+test_three_agents                  # 3 agents → correct bindings
+test_ten_agents                    # 10 agents → correct config
+test_council_present               # Council config → judge/panelist protocols generated
+test_council_absent                # No council → no council sections
+test_minimal_mode                  # --mode minimal → minimal config output
+test_full_mode                     # --mode full → full config with all sections
+test_output_json_is_valid          # Every generated JSON file parses successfully
+test_special_chars_in_soul         # Backticks, brackets, etc. in soul text
+```
+
+**parse-habitat.py tests:**
+
+```
+test_valid_input                   # Happy path
+test_invalid_base64                # Garbage B64 → specific error message
+test_invalid_json                  # Valid B64, invalid JSON → specific error
+test_missing_required_fields       # No "name" → error with field name
+test_missing_agents                # No agents array → error
+test_empty_agent_library           # AGENT_LIB_B64 empty → warning, continue
+test_partial_failure               # Some fields valid → use valid, default others
+test_legacy_councilGroupId         # Old field name → still works
+```
+
+**Shell script tests (bats):**
+
+```
+test_set_stage_writes_file         # set-stage.sh writes to /var/lib/init-status/stage
+test_tg_notify_handles_missing_env # tg-notify.sh exits cleanly without tokens
+test_sync_refuses_without_guard    # sync-state.sh exits if restore-ok missing
+test_sync_counts_failures          # sync-state.sh increments failure counter
+```
+
+---
+
+## 9. Accessibility
+
+### 9.1 Wizard Shortcut Experience
+
+The iOS Shortcut remains the primary deployment interface. User experience:
+
+1. Open Shortcut → Pick habitat (or create new)
+2. Pick agents from library (or use defaults)
+3. Tap "Launch" → Shortcut creates droplet via DO API
+4. Receive Telegram message: "Droplet starting up..."
+5. Receive Telegram message: "Bot online! Memory restored." (~2 min)
+6. Receive Telegram message: "Desktop ready. VNC: <ip>:5900 / Web: <ip>:6080" (~8 min)
+
+### 9.2 Error Communication
+
+**Requirements:**
+- R9.2.1: All user-facing error messages MUST be non-technical. Instead of "parse-habitat.py failed with KeyError: 'agents'", say: "Your habitat config is missing the agents list. Please check your Shortcut settings and try again."
+- R9.2.2: Safe mode notification MUST include: what went wrong, what still works, and what to do next.
+- R9.2.3: Phase 2 failures MUST be reported individually. "Desktop installed, but VNC setup failed. The bot is working. Attempting to fix VNC..."
+- R9.2.4: The /status API MUST include a human-readable `message` field alongside the machine-readable status.
+
+### 9.3 Input Validation at the Shortcut Level
+
+**Requirements:**
+- R9.3.1: JSON Schemas for habitat and agent configs MUST be published in the repo for the iOS Shortcut to validate against (where feasible).
+- R9.3.2: Required fields MUST be clearly documented in schemas with descriptions.
+- R9.3.3: version.json MUST include the minimum compatible Shortcut version to enable version-mismatch warnings.
+
+---
+
+## 10. Migration Path
+
+### 10.1 Versioned Releases
+
+v5.0 introduces proper versioning via GitHub Releases.
+
+**Version strategy:**
+- YAML embeds a `HATCHERY_VERSION` variable (e.g., "5.0.0")
+- bootstrap.sh reads this version and fetches the matching GitHub Release tarball
+- For development: `HATCHERY_VERSION=main` fetches from the main branch (unstable)
+
+### 10.2 Rollback
+
+If a release tarball fails to download:
+1. bootstrap.sh retries 3 times
+2. On final failure: fall back to a bundled minimal inline script in the YAML itself (emergency mode)
+3. Emergency mode: installs Node + clawdbot, generates minimal config, starts bot
+4. Bot notifies user: "Setup ran in emergency mode. GitHub may be unreachable."
+
+### 10.3 Phased Rollout
+
+| Phase | Version | Changes |
+|-------|---------|---------|
+| 1 | v4.5 | Quick wins: rclone copy, destruct timer fix, EnvironmentFile, VNC password, error handling |
+| 2 | v4.6 | build-config.py, externalize scripts (still in YAML for now), input validation, noVNC |
+| 3 | v5.0 | Full architecture: thin YAML, GitHub releases, CI/CD pipeline, all scripts external |
+
+---
+
+## 11. Open Questions
+
+| # | Question | Impact | Owner |
+|---|----------|--------|-------|
+| Q1 | Should we support HTTPS for noVNC automatically when HABITAT_DOMAIN is set? | Security, UX | Panel |
+| Q2 | What's the minimum viable set of Phase 2 packages? Can we trim the apt-get install lists? | Speed, size | Panel |
+| Q3 | Should the status API expose a cost estimate (uptime × droplet size hourly rate)? | UX | User |
+| Q4 | Do we need a mechanism for the iOS Shortcut to check for YAML updates? | Accessibility | User |
+| Q5 | Should safe mode support multi-agent configs, or always fall back to single-agent? | Reliability | Panel |
+| Q6 | Is RDP fully removed in v5.0, or kept as a fallback alongside VNC? | Architecture | User |
+
+---
+
+## Appendix: Round 1 Findings Traceability
+
+| # | Finding | Severity | v5.0 Section | Status |
+|---|---------|----------|-------------|--------|
+| F1 | VNC unauthenticated + internet-exposed | CRITICAL | §7.1 | Addressed |
+| F2 | JSON generation via bash string concat | CRITICAL | §4.1 | Addressed |
+| F3 | API server POST endpoints unauthenticated | CRITICAL | §7.2 | Addressed |
+| F4 | npm install @latest unpinned | HIGH | §7.5 | Addressed |
+| F5 | curl\|sh supply chain risk (himalaya) | HIGH | §7.5 | Addressed |
+| F6 | Scripts should be externalized from YAML | HIGH | §3.2-3.5 | Addressed |
+| F7 | Cross-shell wait race condition | HIGH | §4.2 | Addressed |
+| F8 | rclone sync can delete memory data | HIGH | §4.3 | Addressed |
+| F9 | Phase 1 Amnesia: bot before memory | HIGH | §6.1 | Addressed |
+| F10 | Self-destruct timer from boot | MEDIUM | §5.1 (R5.1.5) | Addressed |
+| F11 | parse-habitat.py fallback insufficient | MEDIUM | §4.5 | Addressed |
+| F12 | API keys in systemd Environment= | CRITICAL | §7.3 | Addressed |
+| F13 | set -e causes silent exits | HIGH | §4.4 | Addressed |
+
+---
+
+*This PRD is a living document. Updates will be tracked via Git history in the hatchery repo.*
