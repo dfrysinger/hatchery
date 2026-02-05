@@ -6,6 +6,7 @@ have proper shebangs, and can be parsed without syntax errors.
 """
 
 import os
+import re
 import stat
 import subprocess
 import pytest
@@ -280,6 +281,61 @@ class TestScriptContent:
         assert "/health" in content
         assert "/stages" in content
         assert "8080" in content
+
+
+class TestVariableOrdering:
+    """Verify critical variables are defined before first use in bash scripts."""
+
+    CRITICAL_VARS = {
+        "phase1-critical.sh": {
+            "H": {"assign": r'^\s*H=', "use": r'\$H[/\s"\']'},
+            "USERNAME": {"assign": r'^\s*USERNAME=|source /etc/droplet\.env', "use": r'\$USERNAME'},
+        },
+        "phase2-background.sh": {
+            "H": {"assign": r'^\s*H=', "use": r'\$H[/\s"\']'},
+        },
+        "build-full-config.sh": {
+            "H": {"assign": r'^\s*H=', "use": r'\$H[/\s"\']'},
+        },
+    }
+
+    @pytest.mark.parametrize("script_name", CRITICAL_VARS.keys())
+    def test_variables_defined_before_use(self, script_name):
+        """Critical variables must be assigned before their first use."""
+        path = os.path.join(SCRIPTS_DIR, script_name)
+        if not os.path.isfile(path):
+            pytest.skip(f"{script_name} does not exist")
+
+        with open(path, "r") as f:
+            lines = f.readlines()
+
+        for var_name, patterns in self.CRITICAL_VARS[script_name].items():
+            assign_pattern = re.compile(patterns["assign"])
+            use_pattern = re.compile(patterns["use"])
+
+            first_assign = None
+            first_use = None
+
+            for i, line in enumerate(lines, 1):
+                # Skip comments
+                stripped = line.lstrip()
+                if stripped.startswith("#"):
+                    continue
+                if first_assign is None and assign_pattern.search(line):
+                    first_assign = i
+                if first_use is None and use_pattern.search(line):
+                    # Don't count the assignment line itself as a use
+                    if not assign_pattern.search(line):
+                        first_use = i
+
+            assert first_assign is not None, (
+                f"{script_name}: variable ${var_name} is never assigned"
+            )
+            if first_use is not None:
+                assert first_assign < first_use, (
+                    f"{script_name}: ${var_name} used on line {first_use} "
+                    f"before assignment on line {first_assign}"
+                )
 
 
 class TestReadme:
