@@ -1,17 +1,17 @@
 #cloud-config
-# version: 2.48
-# Cloud Browser Config v2.48 - 2026-02-01
-# Fixed: BG_COLOR now extracted to user-readable ~/.config/bg-color.env (was failing because /etc/droplet.env is root-only)
-# Added: Stage logging + AGENT_GEN fallback to gen-1 to /var/log/cloud-init-stages.log and /var/log/api-server-requests.log
+# version: 2.49
+# Cloud Browser Config v2.49 - 2026-02-01
+# Fixed: Status API persists across reboots, BG_COLOR placeholder handled
+# Changed: BOOT.md -> BOOTSTRAP.md (one-time bootstrap)
 package_update: false
 package_upgrade: false
 
 bootcmd:
-  - [ bash, -lc, "mkdir -p /var/lib/cloud-browser; [ -f /var/lib/cloud-browser/setup-complete ] && exit 0; echo '0' > /var/run/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 DESC=init\" >> /var/log/cloud-init-stages.log" ]
+  - [ bash, -lc, "mkdir -p /var/lib/cloud-browser; [ -f /var/lib/cloud-browser/setup-complete ] && exit 0; echo '0' > /var/lib/cloud-browser/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 DESC=init\" >> /var/log/cloud-init-stages.log" ]
   - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
   - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
   - [ bash, -lc, "mkdir -p /etc/needrestart/conf.d && echo \"\\$nrconf{restart} = 'a';\" > /etc/needrestart/conf.d/99-autorestart.conf" ]
-  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && [ ! -f /var/lib/cloud-browser/boot-complete ] && echo '10' > /var/run/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=10 DESC=ready\" >> /var/log/cloud-init-stages.log && touch /var/lib/cloud-browser/boot-complete || true" ]
+  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && [ ! -f /var/lib/cloud-browser/boot-complete ] && echo '10' > /var/lib/cloud-browser/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=10 DESC=ready\" >> /var/log/cloud-init-stages.log && touch /var/lib/cloud-browser/boot-complete || true" ]
 
 write_files:
   - path: /etc/droplet.env
@@ -376,7 +376,7 @@ write_files:
         source "$HOME/.config/bg-color.env"
       fi
       sleep 3
-      HEX="${BG_COLOR:-2d3748}"
+      HEX="${BG_COLOR:-2d3748}"; [ "$HEX" = "BGCLR" ] && HEX="2d3748"
       HEX="${HEX#\#}"
       R=$(printf "scale=4; %d/255\n" 0x${HEX:0:2} | bc)
       G=$(printf "scale=4; %d/255\n" 0x${HEX:2:2} | bc)
@@ -726,7 +726,7 @@ write_files:
       # Helper script to set stage with logging
       STAGE="$1"
       DESC="$2"
-      echo "$STAGE" > /var/run/cloud-init-stage
+      echo "$STAGE" > /var/lib/cloud-browser/cloud-init-stage
       TS=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
       echo "$TS STAGE=$STAGE DESC=$DESC" >> /var/log/cloud-init-stages.log
 
@@ -934,8 +934,8 @@ write_files:
       echo "---" >> $HOMEDIR/clawd/IDENTITY.md
       echo "*This file is yours to evolve as you discover who you are.*" >> $HOMEDIR/clawd/IDENTITY.md
       if [ -n "$BOOT_INSTRUCTIONS" ]; then
-        echo "$BOOT_INSTRUCTIONS" | base64 -d > $HOMEDIR/clawd/BOOT.md
-        chown $USERNAME:$USERNAME $HOMEDIR/clawd/BOOT.md
+        echo "$BOOT_INSTRUCTIONS" | base64 -d > $HOMEDIR/clawd/BOOTSTRAP.md
+        chown $USERNAME:$USERNAME $HOMEDIR/clawd/BOOTSTRAP.md
       fi
       chmod 700 $HOMEDIR/.clawdbot
       chmod 600 $HOMEDIR/.clawdbot/clawdbot.json
@@ -1105,7 +1105,7 @@ write_files:
                   pass
           stage = 0
           try:
-              with open('/var/run/cloud-init-stage', 'r') as f:
+              with open('/var/lib/cloud-browser/cloud-init-stage', 'r') as f:
                   stage = int(f.read().strip())
           except:
               pass
