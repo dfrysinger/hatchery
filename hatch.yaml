@@ -1,5 +1,5 @@
 #cloud-config
-# version: 4.4.1
+# version: 4.5.0
 package_update: false
 package_upgrade: false
 bootcmd:
@@ -1313,22 +1313,53 @@ write_files:
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
       /usr/local/bin/sync-clawdbot-state.sh
       curl -X DELETE -H "Authorization: Bearer $(d "$DO_TOKEN_B64")" "https://api.digitalocean.com/v2/droplets?tag_name=${HABITAT_NAME}"
-  - path: /usr/local/bin/rename-telegram-bots.sh
+  - path: /usr/local/bin/rename-bots.sh
     permissions: "0755"
     content: |
       #!/bin/bash
+      # Platform-aware bot renaming script.
+      # Renames Telegram bots via API when platform includes telegram.
+      # Discord bot names are set in the Developer Portal (not via API).
       set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
       AC=${AGENT_COUNT:-1}
-      for i in $(seq 1 $AC); do
-        NV="AGENT${i}_NAME"; NAME="${!NV}"
-        TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"
-        HN="${HABITAT_NAME:-}"
-        DN="${NAME}Bot"; [ -n "$HN" ] && DN="${NAME}Bot (${HN})"
-        [ -n "$TOK" ] && curl -s "https://api.telegram.org/bot${TOK}/setMyName" -d "name=${DN}" > /dev/null
-      done
+      HN="${HABITAT_NAME:-}"
+      rename_telegram() {
+        for i in $(seq 1 $AC); do
+          NV="AGENT${i}_NAME"; NAME="${!NV}"
+          TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"
+          DN="${NAME}Bot"; [ -n "$HN" ] && DN="${NAME}Bot (${HN})"
+          if [ -n "$TOK" ]; then
+            curl -s "https://api.telegram.org/bot${TOK}/setMyName" -d "name=${DN}" > /dev/null
+            echo "[rename-bots] Telegram: renamed agent${i} to '${DN}'"
+          else
+            echo "[rename-bots] Telegram: skipping agent${i} (no bot token)"
+          fi
+        done
+      }
+      log_discord_skip() {
+        echo "[rename-bots] Discord: bot display names are configured in the Discord Developer Portal, not via API. Skipping."
+      }
+      case "$PLATFORM" in
+        telegram)
+          rename_telegram
+          ;;
+        discord)
+          log_discord_skip
+          ;;
+        both)
+          rename_telegram
+          log_discord_skip
+          ;;
+        *)
+          echo "[rename-bots] Unknown platform '${PLATFORM}', defaulting to telegram"
+          rename_telegram
+          ;;
+      esac
+      exit 0
 users:
   - default
 runcmd:
@@ -1336,4 +1367,4 @@ runcmd:
   - [ bash, -lc, "systemctl enable post-boot-check.service" ]
   - [ bash, -lc, "/usr/local/bin/schedule-destruct.sh" ]
   - [ bash, -lc, "/usr/local/sbin/phase1-critical.sh" ]
-  - [ bash, -lc, "/usr/local/bin/rename-telegram-bots.sh" ]
+  - [ bash, -lc, "/usr/local/bin/rename-bots.sh" ]
