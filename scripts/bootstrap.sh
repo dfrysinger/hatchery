@@ -72,7 +72,33 @@ else
   rm -f "$TARBALL" "$SUMFILE"
 fi
 
-chmod +x "$INSTALL_DIR"/scripts/*.sh
+chmod +x "$INSTALL_DIR"/scripts/*.sh 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Install scripts to system paths
+# ---------------------------------------------------------------------------
+for f in "$INSTALL_DIR"/scripts/*.sh; do
+  [ -f "$f" ] || continue
+  bn=$(basename "$f")
+  case "$bn" in
+    phase1-critical.sh|phase2-background.sh|build-full-config.sh)
+      cp "$f" /usr/local/sbin/
+      ;;
+    *)
+      cp "$f" /usr/local/bin/
+      ;;
+  esac
+done
+
+for f in "$INSTALL_DIR"/scripts/*.py; do
+  [ -f "$f" ] && cp "$f" /usr/local/bin/ && chmod 755 "/usr/local/bin/$(basename "$f")"
+done
+
+[ -f "$INSTALL_DIR/gmail-api.py" ] && cp "$INSTALL_DIR/gmail-api.py" /usr/local/bin/gmail-api.py && chmod 755 /usr/local/bin/gmail-api.py
+[ -f "$INSTALL_DIR/set-council-group.sh" ] && cp "$INSTALL_DIR/set-council-group.sh" /usr/local/bin/set-council-group.telegram.sh && chmod 755 /usr/local/bin/set-council-group.telegram.sh
+
+chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null || true
+
 notify "bootstrap: hatchery ${VERSION} installed — starting phase1"
 log "Handing off to phase1-critical.sh"
-exec "$INSTALL_DIR/scripts/phase1-critical.sh"
+exec /usr/local/sbin/phase1-critical.sh
