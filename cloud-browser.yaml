@@ -406,7 +406,7 @@ write_files:
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
       for sc in gmail-api.py set-council-group.sh; do
-        curl -sf -o "/usr/local/bin/$sc" "https://raw.githubusercontent.com/dfrysinger/cloud-browser-scripts/main/$sc" && chmod 755 "/usr/local/bin/$sc" >> "$LOG" 2>&1 || echo "WARN: Failed to download $sc" >> "$LOG"
+        curl -sf -o "/usr/local/bin/$sc" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/$sc" && chmod 755 "/usr/local/bin/$sc" >> "$LOG" 2>&1 || echo "WARN: Failed to download $sc" >> "$LOG"
       done
       $S 7 "desktop-services"
       cat > /etc/systemd/system/xvfb.service <<SVC
