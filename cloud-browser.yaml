@@ -1,15 +1,16 @@
 #cloud-config
-# version: 2.45
-# Cloud Browser Config v2.45 - 2025-02-01
+# version: 2.46
+# Cloud Browser Config v2.46 - 2026-02-01
+# Added: Stage change logging to /var/log/cloud-init-stages.log and /var/log/api-server-requests.log
 package_update: false
 package_upgrade: false
 
 bootcmd:
-  - [ bash, -lc, "mkdir -p /var/lib/cloud-browser; [ -f /var/lib/cloud-browser/setup-complete ] && exit 0; echo '0' > /var/run/cloud-init-stage" ]
+  - [ bash, -lc, "mkdir -p /var/lib/cloud-browser; [ -f /var/lib/cloud-browser/setup-complete ] && exit 0; echo '0' > /var/run/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 DESC=init\" >> /var/log/cloud-init-stages.log" ]
   - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
   - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
   - [ bash, -lc, "mkdir -p /etc/needrestart/conf.d && echo \"\\$nrconf{restart} = 'a';\" > /etc/needrestart/conf.d/99-autorestart.conf" ]
-  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && [ ! -f /var/lib/cloud-browser/boot-complete ] && echo '10' > /var/run/cloud-init-stage && touch /var/lib/cloud-browser/boot-complete || true" ]
+  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && [ ! -f /var/lib/cloud-browser/boot-complete ] && echo '10' > /var/run/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=10 DESC=ready\" >> /var/log/cloud-init-stages.log && touch /var/lib/cloud-browser/boot-complete || true" ]
 
 write_files:
   - path: /etc/droplet.env
@@ -407,12 +408,11 @@ write_files:
         exit 0
       fi
       
-      if [ -z "$AGENT_GEN" ]; then
-        echo "No AGENT_GEN set, skipping restore" >> "$LOG"
-        exit 0
-      fi
-      
       MY_GEN="$AGENT_GEN"
+      if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
+        MY_GEN="1"
+        echo "AGENT_GEN not set, defaulting to gen-1" >> "$LOG"
+      fi
       PREV_GEN=$((MY_GEN - 1))
       
       echo "I am gen-${MY_GEN}, restoring from gen-${PREV_GEN}" >> "$LOG"
@@ -452,12 +452,14 @@ write_files:
       fi
       
       MY_GEN="$AGENT_GEN"
-      if [ -z "$MY_GEN" ] && [ -f "$HOMEDIR/clawd/.gen" ]; then
-        MY_GEN=$(cat "$HOMEDIR/clawd/.gen")
+      if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
+        if [ -f "$HOMEDIR/clawd/.gen" ]; then
+          MY_GEN=$(cat "$HOMEDIR/clawd/.gen")
+        fi
       fi
       
-      if [ -z "$MY_GEN" ]; then
-        exit 0
+      if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
+        MY_GEN="1"
       fi
       
       su - $USERNAME -c "rclone sync '$HOMEDIR/clawd/memory' '$REMOTE/gen-${MY_GEN}/memory' --exclude 'archive/**' 2>/dev/null"
@@ -710,6 +712,19 @@ write_files:
       #!/bin/bash
       source /etc/droplet.env
       curl -X DELETE -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/droplets?tag_name=cloud-browser"
+
+
+  - path: /usr/local/bin/set-stage.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Helper script to set stage with logging
+      STAGE="$1"
+      DESC="$2"
+      echo "$STAGE" > /var/run/cloud-init-stage
+      TS=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+      echo "$TS STAGE=$STAGE DESC=$DESC" >> /var/log/cloud-init-stages.log
 
   - path: /usr/local/sbin/setup-xvfb.sh
     owner: root:root
@@ -1096,21 +1111,43 @@ write_files:
               "errors": errors
           }
       
+      LOG_FILE = "/var/log/api-server-requests.log"
+      
+      def log_request(path, status, client):
+          try:
+              from datetime import datetime
+              with open(LOG_FILE, 'a') as f:
+                  ts = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+                  f.write(f"{ts} {path} stage={status.get('stage','-')} desc={status.get('desc','-')} client={client}\n")
+          except:
+              pass
+      
       class Handler(http.server.BaseHTTPRequestHandler):
           def log_message(self, *args):
               pass
           def do_GET(self):
               if self.path == '/status':
+                  status = get_status()
+                  log_request('/status', status, self.client_address[0])
                   self.send_response(200)
                   self.send_header('Content-type', 'application/json')
                   self.end_headers()
-                  self.wfile.write(json.dumps(get_status()).encode())
+                  self.wfile.write(json.dumps(status).encode())
               elif self.path == '/timer':
                   self.send_response(200)
                   self.send_header('Content-type', 'application/json')
                   self.end_headers()
                   m = get_min_to_dest()
                   self.wfile.write(json.dumps({"min_to_dest": m, "enabled": m > 0}).encode())
+              elif self.path == '/stages':
+                  self.send_response(200)
+                  self.send_header('Content-type', 'text/plain')
+                  self.end_headers()
+                  try:
+                      with open('/var/log/cloud-init-stages.log', 'r') as f:
+                          self.wfile.write(f.read().encode())
+                  except:
+                      self.wfile.write(b"No stage log available")
               else:
                   self.send_response(404)
                   self.end_headers()
@@ -1164,17 +1201,17 @@ users:
 
 runcmd:
   - [ bash, -lc, "systemctl daemon-reload; systemctl enable --now api-server; ufw allow 8080/tcp" ]
-  - [ bash, -lc, "echo '1' > /var/run/cloud-init-stage; /usr/local/sbin/install-packages.sh" ]
-  - [ bash, -lc, "echo '2' > /var/run/cloud-init-stage; /usr/local/sbin/apply-credentials.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 1 packages; /usr/local/sbin/install-packages.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 2 credentials; /usr/local/sbin/apply-credentials.sh" ]
   - [ bash, -lc, "/usr/local/bin/schedule-destruct.sh" ]
-  - [ bash, -lc, "echo '3' > /var/run/cloud-init-stage; /usr/local/sbin/configure-chrome.sh" ]
-  - [ bash, -lc, "echo '4' > /var/run/cloud-init-stage; /usr/local/sbin/setup-desktop.sh; /usr/local/sbin/setup-xvfb.sh" ]
-  - [ bash, -lc, "echo '5' > /var/run/cloud-init-stage; /usr/local/sbin/setup-clawdbot.sh" ]
-  - [ bash, -lc, "echo '6' > /var/run/cloud-init-stage; /usr/local/sbin/setup-productivity-tools.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 3 chrome; /usr/local/sbin/configure-chrome.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 4 desktop; /usr/local/sbin/setup-desktop.sh; /usr/local/sbin/setup-xvfb.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 5 clawdbot; /usr/local/sbin/setup-clawdbot.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 6 productivity; /usr/local/sbin/setup-productivity-tools.sh" ]
   - [ bash, -lc, "/usr/local/bin/restore-clawdbot-state.sh" ]
   - [ bash, -lc, "systemctl enable clawdbot-sync.timer; systemctl start clawdbot-sync.timer" ]
-  - [ bash, -lc, "echo '7' > /var/run/cloud-init-stage; apt-get purge -y xfce4-screensaver light-locker 2>/dev/null || true; ufw allow 18789/tcp" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 7 cleanup; apt-get purge -y xfce4-screensaver light-locker 2>/dev/null || true; ufw allow 18789/tcp" ]
   - [ bash, -lc, "touch /var/lib/cloud-browser/setup-complete" ]
-  - [ bash, -lc, "echo '8' > /var/run/cloud-init-stage; /usr/local/sbin/configure-xrdp.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 8 xrdp; /usr/local/sbin/configure-xrdp.sh" ]
   - [ bash, -lc, "systemctl enable unattended-upgrades; systemctl enable apt-daily.timer apt-daily-upgrade.timer" ]
-  - [ bash, -lc, "echo '9' > /var/run/cloud-init-stage; reboot" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 9 reboot; reboot" ]
