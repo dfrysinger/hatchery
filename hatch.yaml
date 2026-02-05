@@ -725,7 +725,7 @@ write_files:
       ## Project Context
       This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.
       - Habitat: ${HN}$([ -n "$HABITAT_DOMAIN" ] && echo " (${HABITAT_DOMAIN})")
-      - YAML configs: dropbox:Droplets/yaml/ (current: hatch.yaml)
+      - YAML configs: dropbox:Droplets/yaml/ (current: cloud-browser-v3.20.yaml)
       - Project docs: dropbox:Droplets/yaml/CONTEXT.md
       - Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
       - Habitat configs: dropbox:Droplets/habitats/
