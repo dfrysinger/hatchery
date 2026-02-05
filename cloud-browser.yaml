@@ -1,7 +1,7 @@
 #cloud-config
-# version: 2.46
-# Cloud Browser Config v2.46 - 2026-02-01
-# Added: Stage change logging to /var/log/cloud-init-stages.log and /var/log/api-server-requests.log
+# version: 2.47
+# Cloud Browser Config v2.47 - 2026-02-01
+# Added: Stage logging + AGENT_GEN fallback to gen-1 to /var/log/cloud-init-stages.log and /var/log/api-server-requests.log
 package_update: false
 package_upgrade: false
 
