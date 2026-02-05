@@ -175,13 +175,62 @@ write_files:
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-      TBT="${AGENT1_BOT_TOKEN}"
-      TUI=$(d "$TELEGRAM_USER_ID_B64")
-      [ -z "$TBT" ] || [ -z "$TUI" ] && exit 1
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
       MSG="$1"
-      curl -sf --max-time 10 "https://api.telegram.org/bot${TBT}/sendMessage" \
-        -d "chat_id=${TUI}" \
-        -d "text=${MSG}" > /dev/null 2>&1
+      [ -z "$MSG" ] && exit 1
+      TG_OK=0; DC_OK=0
+      # --- Telegram notification ---
+      send_telegram() {
+        local TBT="${AGENT1_BOT_TOKEN}"
+        local TUI=$(d "$TELEGRAM_USER_ID_B64")
+        [ -z "$TBT" ] || [ -z "$TUI" ] && return 1
+        curl -sf --max-time 10 "https://api.telegram.org/bot${TBT}/sendMessage" \
+          -d "chat_id=${TUI}" \
+          -d "text=${MSG}" > /dev/null 2>&1
+      }
+      # --- Discord notification ---
+      send_discord() {
+        local DBT="${AGENT1_DISCORD_BOT_TOKEN}"
+        local DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
+        [ -z "$DBT" ] || [ -z "$DOI" ] && return 1
+        # Create DM channel with owner
+        local DM_RESP
+        DM_RESP=$(curl -sf --max-time 10 \
+          -X POST "https://discord.com/api/v10/users/@me/channels" \
+          -H "Authorization: Bot ${DBT}" \
+          -H "Content-Type: application/json" \
+          -d "{\"recipient_id\":\"${DOI}\"}" 2>/dev/null)
+        [ -z "$DM_RESP" ] && return 1
+        local CHANNEL_ID
+        CHANNEL_ID=$(echo "$DM_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+        [ -z "$CHANNEL_ID" ] && return 1
+        # Send message to DM channel
+        curl -sf --max-time 10 \
+          -X POST "https://discord.com/api/v10/channels/${CHANNEL_ID}/messages" \
+          -H "Authorization: Bot ${DBT}" \
+          -H "Content-Type: application/json" \
+          -d "{\"content\":$(echo "$MSG" | python3 -c 'import sys,json;print(json.dumps(sys.stdin.read().strip()))')}" > /dev/null 2>&1
+      }
+      case "$PLATFORM" in
+        telegram)
+          send_telegram; TG_OK=$?
+          [ $TG_OK -ne 0 ] && exit 1
+          ;;
+        discord)
+          send_discord; DC_OK=$?
+          [ $DC_OK -ne 0 ] && exit 1
+          ;;
+        both)
+          send_telegram; TG_OK=$?
+          send_discord; DC_OK=$?
+          # Succeed if at least one platform worked
+          [ $TG_OK -ne 0 ] && [ $DC_OK -ne 0 ] && exit 1
+          ;;
+        *)
+          send_telegram; exit $?
+          ;;
+      esac
+      exit 0
   - path: /etc/systemd/system/api-server.service
     permissions: "0644"
     content: |
@@ -284,14 +333,46 @@ write_files:
       chown $USERNAME:$USERNAME $H
       AK=$(d "$ANTHROPIC_KEY_B64")
       TBT="$AGENT1_BOT_TOKEN"
+      DBT="$AGENT1_DISCORD_BOT_TOKEN"
       TUI=$(d "$TELEGRAM_USER_ID_B64")
+      DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
+      DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
       GK=$(d "$GOOGLE_API_KEY_B64")
       A1N="$AGENT1_NAME"
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
       H="/home/$USERNAME"
       GT=$(openssl rand -hex 24)
       mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
       echo "$GT" > $H/.clawdbot/gateway-token.txt
       ln -sf "$H/clawd/HEARTBEAT.md" "$H/clawd/agents/agent1/HEARTBEAT.md"
+      # Determine platform flags
+      TG_ENABLED="false"; DC_ENABLED="false"
+      case "$PLATFORM" in
+        telegram) TG_ENABLED="true" ;;
+        discord)  DC_ENABLED="true" ;;
+        both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
+        *)        TG_ENABLED="true" ;;
+      esac
+      # Build plugins entries
+      PLUGINS_JSON="\"telegram\":{\"enabled\":${TG_ENABLED}},\"discord\":{\"enabled\":${DC_ENABLED}}"
+      # Build telegram channel config
+      TG_CHANNEL=""
+      if [ "$TG_ENABLED" = "true" ]; then
+        TG_CHANNEL="\"telegram\":{\"enabled\":true,\"dmPolicy\":\"allowlist\",\"allowFrom\":[\"${TUI}\"],\"accounts\":{\"default\":{\"botToken\":\"${TBT}\"}}}"
+      else
+        TG_CHANNEL="\"telegram\":{\"enabled\":false}"
+      fi
+      # Build discord channel config
+      DC_CHANNEL=""
+      if [ "$DC_ENABLED" = "true" ]; then
+        DC_DM_ALLOW=""
+        [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI}\"]"
+        DC_GUILD=""
+        [ -n "$DGI" ] && DC_GUILD=",\"guilds\":{\"${DGI}\":{\"requireMention\":true}}"
+        DC_CHANNEL="\"discord\":{\"enabled\":true,\"groupPolicy\":\"allowlist\",\"accounts\":{\"default\":{\"botToken\":\"${DBT}\"}},\"dm\":{\"enabled\":true,\"policy\":\"pairing\"${DC_DM_ALLOW}}${DC_GUILD}}"
+      else
+        DC_CHANNEL="\"discord\":{\"enabled\":false}"
+      fi
       cat > $H/.clawdbot/clawdbot.json <<CFG
       {
         "env": {
@@ -322,18 +403,12 @@ write_files:
         },
         "plugins": {
           "entries": {
-            "telegram": {"enabled": true}
+            ${PLUGINS_JSON}
           }
         },
         "channels": {
-          "telegram": {
-            "enabled": true,
-            "dmPolicy": "allowlist",
-            "allowFrom": ["${TUI}"],
-            "accounts": {
-              "default": {"botToken": "${TBT}"}
-            }
-          }
+          ${TG_CHANNEL},
+          ${DC_CHANNEL}
         }
       }
       CFG
