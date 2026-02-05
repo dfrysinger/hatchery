@@ -33,12 +33,49 @@ Version check:
 GET https://raw.githubusercontent.com/dfrysinger/hatchery/main/version.json
 ```
 
-## TODO
+## iOS Shortcuts
 
-- [ ] Publish and link iOS Shortcuts used in this project
-  - Habitat provisioning shortcut (create droplet)
-  - Habitat status checker
-  - Habitat destroyer
+> **TODO:** Publish and link shortcuts below
+
+### Lifecycle
+| Shortcut | Description |
+|---|---|
+| Create Habitat | Provision a new habitat from `hatch.yaml` |
+| Open Habitat | Connect to a running habitat |
+| Shutdown Habitat | Graceful shutdown with state sync |
+| Destroy Habitat | Tear down a habitat |
+| Destroy All Droplets | Nuclear option — destroy everything |
+
+### Monitoring
+| Shortcut | Description |
+|---|---|
+| Get Habitat Status | Poll the status API (`/status`) |
+| Get Habitat Installation Status | Track boot progress through phases |
+| Keepalive Habitat | Prevent idle destruction |
+| Test Habitat RDP | Verify remote desktop connectivity |
+
+### Networking
+| Shortcut | Description |
+|---|---|
+| Create Habitat Firewall | Set up DO firewall rules |
+| Repair Habitat Firewall | Fix firewall if misconfigured |
+| Test Habitat Firewall | Verify firewall rules |
+| Update Habitat DDNS | Update dynamic DNS records |
+| Test Habitat DNS | Verify DNS resolution |
+| Destroy Habitat Firewall | Remove firewall rules |
+
+### Helpers
+| Shortcut | Description |
+|---|---|
+| Get Habitat Info | Fetch droplet metadata from DO API |
+| Get Habitat Variable | Read a specific habitat config value |
+| Get Habitat Filename | Resolve the YAML template filename |
+| Get Habitat Status Filename | Resolve status log filename |
+| Get Habitat Name | Get the habitat's display name |
+| Get Habitat Selection Filename | Multi-habitat selector |
+| Get Elapsed Time | Calculate provisioning duration |
+| Get Token | Retrieve API authentication token |
+| Creating Droplet | Droplet creation sub-routine |
 
 ## Version History
 
