@@ -1,1 +1,1 @@
-{"version":"4.4.1","file":"hatch.yaml"}
+{"version":"4.5.0","file":"hatch.yaml","changelog":{"4.5.0":"Dual-platform support: platform-aware bot renaming, Discord+Telegram notifications, per-platform config routing","4.4.1":"Council protocol updates, multi-agent improvements"}}
