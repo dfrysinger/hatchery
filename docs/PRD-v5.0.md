@@ -18,9 +18,10 @@
 7. [Security](#7-security)
 8. [CI/CD & Testing](#8-cicd--testing)
 9. [Accessibility](#9-accessibility)
-10. [Migration Path](#10-migration-path)
-11. [Open Questions](#11-open-questions)
-12. [Appendix: Round 1 Findings Traceability](#appendix-round-1-findings-traceability)
+10. [Council UX Improvements](#10-council-ux-improvements)
+11. [Migration Path](#11-migration-path)
+12. [Open Questions](#12-open-questions)
+13. [Appendix: Round 1 Findings Traceability](#appendix-round-1-findings-traceability)
 
 ---
 
@@ -609,7 +610,77 @@ The iOS Shortcut remains the primary deployment interface. User experience:
 
 ---
 
-## 10. Migration Path
+## 10. Council UX Improvements
+
+The multi-agent council deliberation protocol works well structurally but fights against Telegram's platform limitations. This section defines improvements based on a council self-review.
+
+### 10.1 Report Delivery: Summary + File
+
+**Problem:** Telegram's 4096 char limit splits reports into 3-7 messages, creating an unreadable wall of text.
+
+**Requirements:**
+- R10.1.1: Panelists MUST write full reports to `~/clawd/shared/reports/Round{N}_{AgentName}.md`.
+- R10.1.2: Panelists MUST post a 3-5 bullet executive summary (≤1 message) to the group chat with a reference to the full report file.
+- R10.1.3: The Judge MUST read panelist reports from the filesystem, not from chat messages.
+- R10.1.4: The `reports/` directory is created automatically per-topic.
+
+### 10.2 Coordination Protocol
+
+**Problem:** Judge manually @mentions or sessions_sends each panelist, waits, checks, re-pings. Panelists silently drop messages.
+
+**Requirements:**
+- R10.2.1: The Judge MUST dispatch work to panelists via `sessions_send` with a structured message containing `COUNCIL:PROCEED` token, topic description, scope bounds, and round number.
+- R10.2.2: Panelists MUST acknowledge within 60 seconds: "Received, working on report." If a panelist's AGENTS.md contains `COUNCIL:PROCEED`, it MUST NOT respond with NO_REPLY.
+- R10.2.3: If no ACK after 60s, Judge re-pings once. If still no ACK after another 60s, proceed without that panelist and note their absence.
+- R10.2.4: Reports have a 5-minute deadline from PROCEED signal. Judge sends a reminder at 4 minutes. At 5 minutes, Judge synthesizes with available reports.
+- R10.2.5: All council messages in the group chat MUST include a header: `[topic:<slug> round:<n> role:<panelist|judge>]` for parseability.
+
+### 10.3 Template Improvements (AGENTS.md)
+
+**Requirements:**
+- R10.3.1: Standardized report skeleton: Summary → Analysis (by priority) → Considerations → Open Questions.
+- R10.3.2: Explicit trigger phrase: Panelists wait for "please proceed with your reports" (or `COUNCIL:PROCEED` via backchannel).
+- R10.3.3: Disagreement handling: Panelists MUST flag contradictions with peers as `DISSENT: [position]` with evidence for both sides.
+- R10.3.4: Inter-panelist questions: Allow `QUESTION for [Panelist]: [question]` — addressee responds in next round.
+- R10.3.5: Scope bounds: Judge sets explicit scope in the dispatch message. Panelists must stay within bounds or flag scope expansion explicitly.
+
+### 10.4 Automation (skill-council)
+
+**Short-term (v4.5):** Shell scripts in the hatchery repo:
+- `council-start.sh <topic>` — creates round folder, dispatches to panelists via sessions_send
+- `council-status.sh` — checks which panelists have filed reports
+- `council-archive.sh` — writes DECISIONS.md entry from synthesis
+
+**Long-term (v5.0+):** ClawdHub skill `skill-council`:
+- `council start <topic>` → creates folder, pings panelists, sets state to CLARIFYING
+- `council proceed` → dispatches COUNCIL:PROCEED, sets state to REPORTING, starts timeout
+- `council status` → shows who has reported, time remaining
+- `council synthesize` → pre-loads all reports into Judge's context
+- `council archive` → compiles DECISIONS.md + updates KNOWLEDGE.md
+- State machine: CLARIFYING → REPORTING → SYNTHESIS → DECISION → ARCHIVED
+
+### 10.5 Platform Roadmap
+
+**v4.5 (now):** Stay on Telegram. Apply delivery model changes (files + summaries), structured dispatch, timeouts.
+
+**v5.0+:** Add Discord as deliberation channel option. Discord advantages: threading (forum channels), 2000 char + file embeds, better bot-to-bot visibility. Telegram remains as user-facing notification channel. Judge bridges between platforms.
+
+**Habitat config addition:**
+```json
+{
+  "council": {
+    "groupId": "...",
+    "groupName": "The Council",
+    "judge": "Opus",
+    "platform": "telegram",
+    "deliveryMode": "summary+file"
+  }
+}
+```
+
+---
+
+## 11. Migration Path
 
 ### 10.1 Versioned Releases
 
