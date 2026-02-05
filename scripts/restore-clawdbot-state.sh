@@ -1,17 +1,17 @@
 #!/bin/bash
 # =============================================================================
-# restore-clawdbot-state.sh — Restore bot memory and transcripts from Dropbox
+# restore-clawdbot-state.sh -- Restore bot memory and transcripts from Dropbox
 # =============================================================================
 # Purpose:  Restores MEMORY.md, USER.md, agent memory dirs, and session
 #           transcripts (*.jsonl) from Dropbox cloud storage on boot.
 #           Retries once if initial restore gets zero transcripts.
 #
-# Inputs:   /etc/droplet.env — DROPBOX_TOKEN_B64
-#           /etc/habitat-parsed.env — HABITAT_NAME, AGENT_COUNT, USERNAME
+# Inputs:   /etc/droplet.env -- DROPBOX_TOKEN_B64
+#           /etc/habitat-parsed.env -- HABITAT_NAME, AGENT_COUNT, USERNAME
 #
-# Outputs:  $HOME/clawd/MEMORY.md, USER.md — shared memory files
-#           $HOME/clawd/agents/*/memory/ — per-agent memory
-#           $HOME/.clawdbot/agents/*/sessions/*.jsonl — chat transcripts
+# Outputs:  $HOME/clawd/MEMORY.md, USER.md -- shared memory files
+#           $HOME/clawd/agents/*/memory/ -- per-agent memory
+#           $HOME/.clawdbot/agents/*/sessions/*.jsonl -- chat transcripts
 #
 # Dependencies: rclone, tg-notify.sh, parse-habitat.py
 #

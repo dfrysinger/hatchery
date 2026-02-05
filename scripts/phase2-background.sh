@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# phase2-background.sh — Background setup: desktop, tools, remote access
+# phase2-background.sh -- Background setup: desktop, tools, remote access
 # =============================================================================
 # Purpose:  Second phase of droplet provisioning, runs in the background after
 #           phase1 gets the bot online. Installs desktop environment (XFCE),
@@ -8,12 +8,12 @@
 #           installs skills, sets up email/calendar/Dropbox, builds full
 #           clawdbot config, and reboots.
 #
-# Inputs:   /etc/droplet.env — all B64-encoded secrets and config
-#           /etc/habitat-parsed.env — parsed habitat config
+# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
+#           /etc/habitat-parsed.env -- parsed habitat config
 #
 # Outputs:  Desktop environment on :10, XRDP on port 3389, VNC on 5900
 #           Skills installed, full config built, state restored from Dropbox
-#           /var/lib/init-status/phase2-complete — completion marker
+#           /var/lib/init-status/phase2-complete -- completion marker
 #
 # Dependencies: apt-get, npm, set-stage.sh, build-full-config.sh,
 #               restore-clawdbot-state.sh, tg-notify.sh

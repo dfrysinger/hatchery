@@ -80,3 +80,16 @@ GET https://raw.githubusercontent.com/dfrysinger/hatchery/main/version.json
 ## Version History
 
 See [git log](https://github.com/dfrysinger/hatchery/commits/main) for full history. Current: **v4.3**
+
+## Contributing Rules
+
+### ⚠️ ASCII Only in Cloud-Init Files
+**All `.yaml`, `.sh`, and `.py` files must contain only ASCII characters (bytes 0-127).**
+
+DigitalOcean's cloud-init parser silently fails on Unicode. Common offenders:
+- `—` (em dash) → use `--`
+- `→` (arrow) → use `->`
+- `…` (ellipsis) → use `...`
+- `'` `'` (curly quotes) → use `'`
+
+CI enforces this automatically via `tests/test_ascii.py`.

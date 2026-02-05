@@ -1,19 +1,19 @@
 #!/bin/bash
 # =============================================================================
-# post-boot-check.sh — Post-reboot health check and config upgrade
+# post-boot-check.sh -- Post-reboot health check and config upgrade
 # =============================================================================
 # Purpose:  Runs after reboot (via systemd oneshot). Upgrades from minimal
 #           config to full config, validates health, and enters safe mode
 #           if full config fails health checks.
 #
-# Inputs:   /etc/droplet.env — all B64-encoded secrets and config
-#           /etc/habitat-parsed.env — parsed habitat config
-#           $HOME/.clawdbot/clawdbot.full.json — full config to apply
-#           /var/lib/init-status/needs-post-boot-check — trigger file
+# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
+#           /etc/habitat-parsed.env -- parsed habitat config
+#           $HOME/.clawdbot/clawdbot.full.json -- full config to apply
+#           /var/lib/init-status/needs-post-boot-check -- trigger file
 #
-# Outputs:  /var/lib/init-status/setup-complete — on success
-#           /var/lib/init-status/safe-mode — on failure (fallback to minimal)
-#           SAFE_MODE.md in agent workspaces — on failure
+# Outputs:  /var/lib/init-status/setup-complete -- on success
+#           /var/lib/init-status/safe-mode -- on failure (fallback to minimal)
+#           SAFE_MODE.md in agent workspaces -- on failure
 #
 # Dependencies: tg-notify.sh, systemctl, curl
 #

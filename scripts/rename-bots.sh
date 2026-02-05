@@ -1,13 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# rename-bots.sh — Rename Telegram bots via API
+# rename-bots.sh -- Rename Telegram bots via API
 # =============================================================================
 # Purpose:  Platform-aware bot renaming. Renames Telegram bots to include
 #           the habitat name (e.g., "ClaudeBot (MyHabitat)").
 #           Discord bot names are set in the Developer Portal, not via API.
 #
-# Inputs:   /etc/droplet.env — secrets and config
-#           /etc/habitat-parsed.env — AGENT_COUNT, AGENT*_NAME, AGENT*_BOT_TOKEN,
+# Inputs:   /etc/droplet.env -- secrets and config
+#           /etc/habitat-parsed.env -- AGENT_COUNT, AGENT*_NAME, AGENT*_BOT_TOKEN,
 #                                      HABITAT_NAME, PLATFORM
 #
 # Outputs:  Telegram bot display names updated via setMyName API

@@ -1,20 +1,20 @@
 #!/bin/bash
 # =============================================================================
-# build-full-config.sh — Generate full clawdbot.json with all features
+# build-full-config.sh -- Generate full clawdbot.json with all features
 # =============================================================================
 # Purpose:  Builds the complete clawdbot configuration with multi-agent
 #           support, browser config, auth profiles, skills, council setup,
 #           desktop integration, and all per-agent workspace files
 #           (IDENTITY.md, SOUL.md, AGENTS.md, BOOT.md, BOOTSTRAP.md, USER.md).
 #
-# Inputs:   /etc/droplet.env — all B64-encoded secrets and config
-#           /etc/habitat-parsed.env — parsed habitat config
-#           $HOME/.clawdbot/gateway-token.txt — gateway auth token
+# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
+#           /etc/habitat-parsed.env -- parsed habitat config
+#           $HOME/.clawdbot/gateway-token.txt -- gateway auth token
 #
-# Outputs:  $HOME/.clawdbot/clawdbot.full.json — full config
-#           $HOME/.clawdbot/agents/*/agent/auth-profiles.json — auth creds
+# Outputs:  $HOME/.clawdbot/clawdbot.full.json -- full config
+#           $HOME/.clawdbot/agents/*/agent/auth-profiles.json -- auth creds
 #           $HOME/clawd/agents/*/IDENTITY.md, SOUL.md, AGENTS.md, etc.
-#           /etc/systemd/system/clawdbot.service — updated systemd unit
+#           /etc/systemd/system/clawdbot.service -- updated systemd unit
 #
 # Dependencies: /etc/droplet.env, /etc/habitat-parsed.env, bc (for bg color)
 #

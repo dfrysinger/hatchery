@@ -1,13 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# try-full-config.sh — Manually attempt switch to full clawdbot config
+# try-full-config.sh -- Manually attempt switch to full clawdbot config
 # =============================================================================
 # Purpose:  Interactive tool to switch from minimal/safe-mode config to full
 #           config. Validates health and rolls back on failure.
 #
-# Inputs:   /etc/droplet.env — secrets and config
-#           /etc/habitat-parsed.env — parsed habitat config
-#           $HOME/.clawdbot/clawdbot.full.json — full config to try
+# Inputs:   /etc/droplet.env -- secrets and config
+#           /etc/habitat-parsed.env -- parsed habitat config
+#           $HOME/.clawdbot/clawdbot.full.json -- full config to try
 #
 # Outputs:  Removes SAFE_MODE.md and safe-mode marker on success
 #           Restores minimal config on failure
