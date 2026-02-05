@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# bootstrap.sh — fetch hatchery release tarball from GitHub and hand off to phase1
+set -euo pipefail
+
+REPO="dfrysinger/hatchery"
+INSTALL_DIR="/opt/hatchery"
+VERSION="${HATCHERY_VERSION:-}"
+[ -z "$VERSION" ] && [ -f /etc/hatchery-version ] && VERSION=$(cat /etc/hatchery-version)
+VERSION="${VERSION:-5.0.0}"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+notify() {
+  local msg="$1"
+  [ -x "$INSTALL_DIR/scripts/tg-notify.sh" ] && \
+    "$INSTALL_DIR/scripts/tg-notify.sh" "$msg" 2>/dev/null || true
+}
+
+log() { echo "[bootstrap] $*"; }
+
+# ---------------------------------------------------------------------------
+# fetch URL DEST — download with 3 retries & exponential backoff
+# ---------------------------------------------------------------------------
+fetch() {
+  local url="$1" dest="$2"
+  local delays=(5 15 30)
+  local attempt=0
+  while [ $attempt -lt 3 ]; do
+    if curl -fSL --max-time 60 -o "$dest" "$url"; then
+      return 0
+    fi
+    log "Attempt $((attempt+1)) failed; retrying in ${delays[$attempt]}s…"
+    sleep "${delays[$attempt]}"
+    attempt=$((attempt + 1))
+  done
+  notify "bootstrap: fetch failed after 3 retries — $url"
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+mkdir -p "$INSTALL_DIR"
+
+if [ "$VERSION" = "main" ]; then
+  # Dev mode — pull HEAD archive
+  log "Dev mode: fetching main branch archive"
+  TARBALL=$(mktemp)
+  fetch "https://github.com/${REPO}/archive/refs/heads/main.tar.gz" "$TARBALL"
+  tar -xzf "$TARBALL" --strip-components=1 -C "$INSTALL_DIR"
+  rm -f "$TARBALL"
+else
+  # Release mode — fetch versioned tarball + checksum
+  log "Release mode: fetching v${VERSION}"
+  TARBALL=$(mktemp)
+  SUMFILE=$(mktemp)
+  BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
+  fetch "${BASE_URL}/hatchery-${VERSION}.tar.gz" "$TARBALL"
+  fetch "${BASE_URL}/sha256sums.txt" "$SUMFILE"
+
+  # Verify SHA256
+  EXPECTED=$(grep "hatchery-${VERSION}.tar.gz" "$SUMFILE" | awk '{print $1}')
+  ACTUAL=$(sha256sum "$TARBALL" | awk '{print $1}')
+  if [ "$EXPECTED" != "$ACTUAL" ]; then
+    notify "bootstrap: SHA256 mismatch (expected $EXPECTED, got $ACTUAL)"
+    log "SHA256 verification failed!"; exit 1
+  fi
+  log "SHA256 verified OK"
+
+  tar -xzf "$TARBALL" -C "$INSTALL_DIR"
+  rm -f "$TARBALL" "$SUMFILE"
+fi
+
+chmod +x "$INSTALL_DIR"/scripts/*.sh
+notify "bootstrap: hatchery ${VERSION} installed — starting phase1"
+log "Handing off to phase1-critical.sh"
+exec "$INSTALL_DIR/scripts/phase1-critical.sh"
