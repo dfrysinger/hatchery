@@ -40,3 +40,29 @@ def test_sha256_verification():
     """Release mode verifies SHA256 checksum."""
     assert "sha256sum" in SRC
     assert "SHA256" in SRC  # log/notify references
+
+
+def test_no_self_overwrite():
+    """Bootstrap must skip copying itself during script installation.
+
+    The inline bootstrap.sh (minified) extracts the repo and copies
+    scripts/*.sh to system paths. If it copies the repo's bootstrap.sh
+    (expanded) over itself, bash reads the wrong bytes mid-execution
+    and crashes with a syntax error. The copy loop MUST skip bootstrap.sh.
+    """
+    # Check both the expanded repo version and inline YAML version
+    assert re.search(r'bootstrap\.sh\)', SRC), \
+        "bootstrap.sh copy loop must have a case to skip 'bootstrap.sh)'"
+
+    # Also verify the inline version in hatch-slim.yaml
+    slim = pathlib.Path(__file__).resolve().parent.parent / "hatch-slim.yaml"
+    if slim.exists():
+        slim_src = slim.read_text()
+        assert "bootstrap.sh)" in slim_src, \
+            "hatch-slim.yaml inline bootstrap must skip copying bootstrap.sh"
+
+
+def test_scripts_copy_loop_exists():
+    """Bootstrap copies scripts to /usr/local/bin and /usr/local/sbin."""
+    assert "/usr/local/sbin/" in SRC
+    assert "/usr/local/bin/" in SRC
