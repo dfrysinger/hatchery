@@ -1,5 +1,5 @@
 #cloud-config
-# version: 4.3
+# version: 4.4
 package_update: false
 package_upgrade: false
 bootcmd:
@@ -33,8 +33,6 @@ write_files:
       GMAIL_CLIENT_ID_B64="[[GMAIL_CLIENT_ID_B64]]"
       GMAIL_CLIENT_SECRET_B64="[[GMAIL_CLIENT_SECRET_B64]]"
       GMAIL_REFRESH_TOKEN_B64="[[GMAIL_REFRESH_TOKEN_B64]]"
-      USER_REALNAME_B64="[[USER_REALNAME_B64]]"
-      USER_LOCATION_B64="[[USER_LOCATION_B64]]"
       OPENAI_ACCESS_B64="[[OPENAI_ACCESS_B64]]"
       OPENAI_REFRESH_B64="[[OPENAI_REFRESH_B64]]"
       OPENAI_EXPIRES_B64="[[OPENAI_EXPIRES_B64]]"
@@ -609,7 +607,6 @@ write_files:
       HN="${HABITAT_NAME:-default}"
       GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
       GSO=$(d "$GLOBAL_SOUL_B64"); GAG=$(d "$GLOBAL_AGENTS_B64"); GU=$(d "$GLOBAL_USER_B64")
-      URN=$(d "$USER_REALNAME_B64"); UL=$(d "$USER_LOCATION_B64")
       CGI="$COUNCIL_GROUP_ID"
       CGN="$COUNCIL_GROUP_NAME"
       CJ="$COUNCIL_JUDGE"
@@ -830,9 +827,7 @@ write_files:
           [ -n "$GBS" ] && [ -n "$ABOOTSTRAP" ] && echo "" >> "$AD/BOOTSTRAP.md"
           [ -n "$ABOOTSTRAP" ] && printf '%s\n' "$ABOOTSTRAP" >> "$AD/BOOTSTRAP.md"
         fi
-        { [ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (learn)"
-          [ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (learn)"
-          [ -n "$GU" ] && printf '\n%s\n' "$GU"
+        { [ -n "$GU" ] && printf '%s\n' "$GU" || echo "- Name: (learn)"
           [ -n "$AUSER" ] && printf '\n%s\n' "$AUSER"
         } > "$AD/USER.md"
         ln -sf "$H/clawd/TOOLS.md" "$AD/TOOLS.md" 2>/dev/null || true
