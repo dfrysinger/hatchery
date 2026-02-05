@@ -1,5 +1,5 @@
 #cloud-config
-# version: 4.4
+# version: 4.4.1
 package_update: false
 package_upgrade: false
 bootcmd:
@@ -247,6 +247,7 @@ write_files:
       id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
       echo "$USERNAME:$PW" | chpasswd
       echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
+      chown $USERNAME:$USERNAME $H
       AK=$(d "$ANTHROPIC_KEY_B64")
       TBT="$AGENT1_BOT_TOKEN"
       TUI=$(d "$TELEGRAM_USER_ID_B64")
@@ -429,9 +430,10 @@ write_files:
       User=$USERNAME
       Environment=DISPLAY=:10
       Environment=HOME=$H
-      Environment=DBUS_SESSION_BUS_ADDRESS=autolaunch:
+      Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
+      ExecStartPre=/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
       ExecStartPre=/bin/sleep 2
-      ExecStart=/usr/bin/xfce4-session
+      ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
       Restart=on-failure
       [Install]
       WantedBy=multi-user.target
