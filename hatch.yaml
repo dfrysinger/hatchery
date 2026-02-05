@@ -231,6 +231,30 @@ write_files:
           ;;
       esac
       exit 0
+  - path: /usr/local/bin/set-council-group.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Platform-safe wrapper.
+      # The upstream set-council-group.sh is Telegram-specific; running it on discord habitats can corrupt config.
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      case "$PLATFORM" in
+        discord)
+          echo "[set-council-group] PLATFORM=discord; skipping Telegram-only council config" >&2
+          exit 0
+          ;;
+        both|telegram|*)
+          if [ -x /usr/local/bin/set-council-group.telegram.sh ]; then
+            exec /usr/local/bin/set-council-group.telegram.sh "$@"
+          fi
+          echo "[set-council-group] Missing /usr/local/bin/set-council-group.telegram.sh" >&2
+          exit 1
+          ;;
+      esac
+
   - path: /etc/systemd/system/api-server.service
     permissions: "0644"
     content: |
@@ -513,9 +537,11 @@ write_files:
       PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
-      for sc in gmail-api.py set-council-group.sh; do
+      # Download helper scripts (keep council helper telegram-only, but never let it corrupt discord configs)
+      for sc in gmail-api.py; do
         curl -sf -o "/usr/local/bin/$sc" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/$sc" && chmod 755 "/usr/local/bin/$sc" >> "$LOG" 2>&1 || echo "WARN: Failed to download $sc" >> "$LOG"
       done
+      curl -sf -o "/usr/local/bin/set-council-group.telegram.sh" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/set-council-group.sh"         && chmod 755 "/usr/local/bin/set-council-group.telegram.sh" >> "$LOG" 2>&1         || echo "WARN: Failed to download set-council-group.sh" >> "$LOG"
       $S 7 "desktop-services"
       cat > /etc/systemd/system/xvfb.service <<SVC
       [Unit]
@@ -723,6 +749,7 @@ write_files:
         telegram) TG_ENABLED="true" ;;
         discord)  DC_ENABLED="true" ;;
         both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
+        *)        TG_ENABLED="true" ;;  # safe default for typos/empty
       esac
       HN="${HABITAT_NAME:-default}"
       GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
