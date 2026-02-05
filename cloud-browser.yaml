@@ -1,5 +1,5 @@
 #cloud-config
-# version: 3.18
+# version: 3.19
 
 package_update: false
 package_upgrade: false
@@ -9,7 +9,7 @@ bootcmd:
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/phase2-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; mkdir -p /tmp/downloads; curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz & echo $! > /tmp/downloads/node.pid; wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb & echo $! > /tmp/downloads/chrome.pid" ]
-  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '99' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=99 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '11' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
 
 write_files:
   - path: /etc/droplet.env
@@ -119,8 +119,8 @@ write_files:
       #!/usr/bin/env python3
       import http.server,socketserver,subprocess,json,os,base64
       PORT=8080
-      P1_STAGES={0:"init",1:"nodejs",2:"clawdbot-install",3:"config",4:"starting",5:"bot-online"}
-      P2_STAGES={10:"packages",11:"chrome",12:"pip",13:"desktop",14:"skills",15:"productivity",16:"xrdp",17:"finalize",18:"reboot",99:"ready"}
+      P1_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
+      P2_STAGES={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
       def check_service(name):
         try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
         except:return False
@@ -181,7 +181,7 @@ write_files:
 
       $TG "[INIT] Droplet starting up. Phase 1 in progress..."
 
-      $S 1 "nodejs"
+      $S 1 "preparing"
       NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
       [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
 
@@ -194,11 +194,10 @@ write_files:
         apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
       fi
 
-      $S 2 "clawdbot-install"
+      $S 2 "installing-bot"
       npm install -g clawdbot@latest >> "$LOG" 2>&1
       echo "Clawdbot installed: $(clawdbot --version 2>/dev/null || echo 'unknown')" >> "$LOG"
 
-      $S 3 "config"
       PW=$(d "$PASSWORD_B64")
       id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
       echo "$USERNAME:$PW" | chpasswd
@@ -331,7 +330,6 @@ write_files:
       WantedBy=multi-user.target
       SVC
 
-      $S 4 "starting"
       systemctl daemon-reload
       systemctl enable clawdbot
       systemctl start clawdbot
@@ -347,7 +345,7 @@ write_files:
       done
 
       if [ "$BOT_OK" = "true" ]; then
-        $S 5 "bot-online"
+        $S 3 "bot-online"
         $TG "[OK] Bot online! Phase 1 complete. Starting desktop setup..."
       else
         echo "WARNING: Bot failed to start" >> "$LOG"
@@ -386,11 +384,15 @@ write_files:
       rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
       dpkg --configure -a 2>/dev/null || true
 
-      $S 10 "packages"
+      $S 4 "desktop-environment"
       apt-get update -qq >> "$LOG" 2>&1
       DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
         xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
-        xfce4 xfce4-goodies xfce4-terminal \
+        xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme \
+        >> "$LOG" 2>&1
+
+      $S 5 "developer-tools"
+      DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
         build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
         thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils \
         python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
@@ -399,7 +401,7 @@ write_files:
       rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
       apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
 
-      $S 11 "chrome"
+      $S 6 "browser-tools"
       [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
       rm -f /tmp/downloads/chrome.deb
       apt-get -f install -y >> "$LOG" 2>&1
@@ -410,12 +412,11 @@ write_files:
       touch "$H/.config/chrome-debug/First Run"
       chown -R $USERNAME:$USERNAME $H/.config/chrome-debug
 
-      $S 12 "pip"
       PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
 
-      $S 13 "desktop"
+      $S 7 "desktop-services"
       cat > /etc/systemd/system/xvfb.service <<SVC
       [Unit]
       Description=Xvfb on :10
@@ -457,7 +458,7 @@ write_files:
       User=$USERNAME
       Environment=DISPLAY=:10
       ExecStartPre=/bin/sleep 3
-      ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -localhost
+      ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
       Restart=on-failure
       [Install]
       WantedBy=multi-user.target
@@ -496,14 +497,13 @@ write_files:
       chmod +x $H/Desktop/*.desktop
       chown -R $USERNAME:$USERNAME $H/Desktop
 
-      $S 14 "skills"
+      $S 8 "skills-apps"
       npm install -g clawhub@latest >> "$LOG" 2>&1
       for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
         su - $USERNAME -c "cd $H/clawd && clawhub install $s" >> "$LOG" 2>&1 || true
       done
       find $H/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
-      $S 15 "productivity"
       DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
       IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
       mkdir -p $H/.config/{himalaya,rclone,gh}
@@ -569,41 +569,34 @@ write_files:
 
       chown -R $USERNAME:$USERNAME $H/.config
 
-      $S 16 "xrdp"
-      cat > /etc/xrdp/xrdp.ini <<'XI'
-      [Globals]
-      ini_version=1
-      fork=true
-      port=3389
-      tcp_nodelay=true
-      security_layer=rdp
-      crypt_level=high
-      max_bpp=32
-      [Logging]
-      LogFile=xrdp.log
-      LogLevel=INFO
-      [Channels]
-      rdpdr=true
-      rdpsnd=true
-      cliprdr=true
-      [vnc-any]
-      name=Desktop
+      $S 9 "remote-access"
+      adduser xrdp ssl-cert 2>/dev/null || true
+      cat >> /etc/xrdp/xrdp.ini <<'XI'
+
+      [vnc-local]
+      name=Shared Desktop (:10)
       lib=libvnc.so
       ip=127.0.0.1
       port=5900
       username=na
       password=ask
+      delay_ms=50
+      xserverbpp=24
+      disabled_encodings_mask=0
       XI
-      echo -e "#!/bin/sh\nexec sleep infinity" > /etc/xrdp/startwm.sh
+      sed -i 's/^autorun=$/autorun=vnc-local/' /etc/xrdp/xrdp.ini
+      echo -e "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nunset XDG_RUNTIME_DIR\nexec dbus-launch --exit-with-session startxfce4" > /etc/xrdp/startwm.sh
       chmod 755 /etc/xrdp/startwm.sh
+      sed -i 's/^X11DisplayOffset=.*/X11DisplayOffset=10/' /etc/xrdp/sesman.ini
       systemctl unmask xrdp xrdp-sesman
       systemctl daemon-reload
       systemctl enable xrdp
       systemctl restart xrdp
       ufw allow 3389/tcp
+      ufw allow 5900/tcp
 
-      $S 17 "finalize"
-      /usr/local/bin/restore-clawdbot-state.sh 2>/dev/null || true
+      $S 10 "finalizing"
+      /usr/local/bin/restore-clawdbot-state.sh
 
       /usr/local/sbin/build-full-config.sh
 
@@ -614,6 +607,12 @@ write_files:
       touch /var/lib/init-status/phase2-complete
       touch /var/lib/init-status/needs-post-boot-check
 
+      # Trigger immediate heartbeat so BOOT.md runs before reboot
+      GT=$(cat /home/bot/.clawdbot/gateway-token.txt 2>/dev/null)
+      [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
+        -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
+        -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
+
       END=$(date +%s)
       DURATION=$((END - START))
       echo "=== Phase 2 Complete: ${DURATION} seconds ===" >> "$LOG"
@@ -622,7 +621,6 @@ write_files:
       $TG "[SETUP COMPLETE] Desktop ready. Phase 2 finished in ${DURATION}s. Rebooting for clean state... Back shortly!"
 
       sleep 5
-      $S 18 "reboot"
       reboot
 
   - path: /usr/local/sbin/build-full-config.sh
@@ -656,7 +654,7 @@ write_files:
       [ -n "$A4T" ] && mkdir -p $H/clawd/agents/agent4/memory
 
       AL="[{\"id\":\"agent1\",\"default\":true,\"name\":\"${A1N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent1\",\"groupChat\":{\"mentionPatterns\":[\"${A1N},\",\"${A1N}:\"]}}"
-      [ -n "$A2T" ] && AL="$AL,{\"id\":\"agent2\",\"name\":\"${A2N}\",\"model\":\"openai/gpt-5.2\",\"workspace\":\"$H/clawd/agents/agent2\",\"groupChat\":{\"mentionPatterns\":[\"${A2N},\",\"${A2N}:\"]}}"
+      [ -n "$A2T" ] && AL="$AL,{\"id\":\"agent2\",\"name\":\"${A2N}\",\"model\":\"openai-codex/gpt-5.2\",\"workspace\":\"$H/clawd/agents/agent2\",\"groupChat\":{\"mentionPatterns\":[\"${A2N},\",\"${A2N}:\"]}}"
       [ -n "$A3T" ] && AL="$AL,{\"id\":\"agent3\",\"name\":\"${A3N}\",\"model\":\"google/gemini-3-pro-preview\",\"workspace\":\"$H/clawd/agents/agent3\",\"groupChat\":{\"mentionPatterns\":[\"${A3N},\",\"${A3N}:\"]}}"
       [ -n "$A4T" ] && AL="$AL,{\"id\":\"agent4\",\"name\":\"${A4N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent4\",\"groupChat\":{\"mentionPatterns\":[\"${A4N},\",\"${A4N}:\"]}}"
       AL="$AL]"
@@ -697,6 +695,7 @@ write_files:
             "model": {"primary": "anthropic/claude-opus-4-5"},
             "maxConcurrent": 4,
             "workspace": "$H/clawd",
+            "heartbeat": {"every": "30m", "session": "heartbeat"},
             "models": {
               "openai/gpt-5.2": {"params": {"reasoning_effort": "high"}}
             }
@@ -754,7 +753,7 @@ write_files:
 
       ## Project Context
       This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.
-      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.18.yaml)
+      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.19.yaml)
       - Project docs: dropbox:droplets/yaml/CONTEXT.md
       - Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
       - Previous transcripts restored from Dropbox on boot
@@ -794,8 +793,8 @@ write_files:
 
       BSPRE="You are a new instance with no prior context. Before doing anything else:"
       BSPRE="$BSPRE
-      1. Check for chat transcripts from previous sessions in your sessions directory
-      2. Read through the last ~100 messages to understand what was being worked on
+      1. Find chat transcripts from previous sessions in the runtime folder (look for .jsonl files under sessions/): find ~ -path '*/sessions/*.jsonl' -name '*.jsonl' 2>/dev/null
+      2. Read through the last ~100 messages from the most recent transcript to understand what was being worked on
       3. Note any ongoing tasks, preferences, or decisions from those conversations
       4. Use this context to inform your responses going forward
       After reading transcripts, proceed with any other bootstrap instructions below."
@@ -918,6 +917,9 @@ write_files:
         rm -f /var/lib/init-status/safe-mode
         rm -f "$H/clawd/agents/agent1/SAFE_MODE.md"
         touch /var/lib/init-status/setup-complete
+        echo '11' > /var/lib/init-status/stage
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready" >> /var/log/init-stages.log
+        touch /var/lib/init-status/boot-complete
 
         $TG "[OK] Fully operational. Full config applied. All systems ready. RDP: port 3389."
 
@@ -1015,6 +1017,11 @@ write_files:
     defer: true
     content: |
       <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="0.17647"/><value type="double" value="0.21569"/><value type="double" value="0.28235"/><value type="double" value="1"/></property></property></property></property></property></channel>
+
+  - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
+    defer: true
+    content: |
+      <?xml version="1.0"?><channel name="xsettings" version="1.0"><property name="Net" type="empty"><property name="ThemeName" type="string" value="Adwaita-dark"/><property name="IconThemeName" type="string" value="Yaru-blue-dark"/></property></channel>
 
   - path: /home/bot/clawd/TOOLS.md
     defer: true
@@ -1178,21 +1185,47 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
+      LOG="/var/log/clawdbot-restore.log"
+      exec > >(tee -a "$LOG") 2>&1
+      echo "=== Restore started at $(date -u) ==="
       source /etc/droplet.env
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-      DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
+      DBT=$(d "$DROPBOX_TOKEN_B64")
+      if [ -z "$DBT" ]; then echo "SKIP: no Dropbox token"; exit 0; fi
       HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
       H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
-      for f in MEMORY.md USER.md; do su - $USERNAME -c "rclone copy '$R/$f' '$H/clawd/' 2>/dev/null" || true; done
+      FAIL=0
+      echo "Restoring from $R"
+      for f in MEMORY.md USER.md; do
+        echo "  memory: $f"
+        su - $USERNAME -c "rclone copy '$R/$f' '$H/clawd/' -v" || { echo "  WARN: $f failed"; FAIL=$((FAIL+1)); }
+      done
       for a in agent1 agent2 agent3 agent4; do
         AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
-        su - $USERNAME -c "rclone copy '$R/agents/${a}/memory/' '$AD/memory/' 2>/dev/null" || true
+        echo "  agent memory: $a"
+        su - $USERNAME -c "rclone copy '$R/agents/${a}/memory/' '$AD/memory/' -v" || { echo "  WARN: $a memory failed"; FAIL=$((FAIL+1)); }
       done
       for a in agent1 agent2 agent3 agent4; do
         TD="$H/.clawdbot/agents/$a/sessions"; mkdir -p "$TD"
-        su - $USERNAME -c "rclone copy '$R/agents/${a}/sessions/' '$TD/' --include '*.jsonl' 2>/dev/null" || true
+        echo "  sessions: $a"
+        su - $USERNAME -c "rclone copy '$R/agents/${a}/sessions/' '$TD/' --include '*.jsonl' -v" || { echo "  WARN: $a sessions failed"; FAIL=$((FAIL+1)); }
       done
       chown -R $USERNAME:$USERNAME $H/clawd $H/.clawdbot
+      # Verify transcripts landed
+      TC=$(find $H/.clawdbot -name '*.jsonl' 2>/dev/null | wc -l)
+      echo "Restored $TC transcript files ($FAIL warnings)"
+      if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
+        echo "RETRY: No transcripts restored, retrying in 5s..."
+        sleep 5
+        for a in agent1 agent2 agent3 agent4; do
+          TD="$H/.clawdbot/agents/$a/sessions"; mkdir -p "$TD"
+          su - $USERNAME -c "rclone copy '$R/agents/${a}/sessions/' '$TD/' --include '*.jsonl' -v" || true
+        done
+        chown -R $USERNAME:$USERNAME $H/.clawdbot
+        TC2=$(find $H/.clawdbot -name '*.jsonl' 2>/dev/null | wc -l)
+        echo "After retry: $TC2 transcript files"
+      fi
+      echo "=== Restore finished at $(date -u) ==="
 
   - path: /usr/local/bin/sync-clawdbot-state.sh
     permissions: "0755"
