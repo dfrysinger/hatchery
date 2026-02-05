@@ -1,9 +1,47 @@
 #cloud-config
-# version: 3
-# Droplet Init Config v3.0 - 2026-02-01
-# Major refactor: [[PLACEHOLDER]] format, direct paths, simplified scripts
-# Renamed: /var/lib/init-status/, stage file
-# Note: gmail-api.py removed for size - install separately if needed
+# version: 3.1
+# Droplet Init Config v3.1 - 2026-02-01
+#
+# === PLACEHOLDER REFERENCE ===
+# Token placeholders (sanitize flow):
+#   [[USERNAME]]
+#   [[SSH_KEY]]
+#   [[DO_TOKEN]]
+#   [[PASSWORD]]
+#   [[DESTRUCT_MINS]]
+#   [[TELEGRAM_BOT_TOKEN]]
+#   [[TELEGRAM_USER_ID]]
+#   [[ANTHROPIC_KEY]]
+#   [[BRAVE_KEY]]
+#   [[GPLACES_KEY]]
+#   [[DROPBOX_TOKEN]]
+#   [[EMAIL]]
+#   [[IMAP_HOST]]
+#   [[SMTP_HOST]]
+#   [[EMAIL_PASSWORD]]
+#   [[CALDAV_URL]]
+#   [[CALDAV_USER]]
+#   [[CALDAV_PASSWORD]]
+#   [[BG_COLOR]]
+#   [[AGENT_GEN]]
+#   [[GH_TOKEN]]
+#   [[GMAIL_CLIENT_ID]]
+#   [[GMAIL_CLIENT_SECRET]]
+#   [[GMAIL_REFRESH_TOKEN]]
+#   [[DROPLET_TAG]]
+#
+# Base64 placeholders (encode flow):
+#   [[USER_REALNAME_B64]]
+#   [[USER_LOCATION_B64]]
+#   [[USER_NOTES_B64]]
+#   [[BOT_NAME_B64]]
+#   [[BOT_NOTES_B64]]
+#   [[BOOT_INSTRUCTIONS_B64]]
+#
+# === CHANGELOG ===
+# v3.1: Single display (:10), permission fix, placeholder index, keepalive response fix
+# v3.0: [[PLACEHOLDER]] format, direct paths, /var/lib/init-status/
+#
 package_update: false
 package_upgrade: false
 
@@ -114,13 +152,51 @@ write_files:
     permissions: "0644"
     content: |
       [Unit]
-      Description=Xvfb Virtual Framebuffer
+      Description=Xvfb Virtual Framebuffer on :10
       After=network.target
       [Service]
       Type=simple
       User=[[USERNAME]]
-      ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -ac
+      ExecStart=/usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac
       Restart=always
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/desktop.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=XFCE Desktop Session on :10
+      After=xvfb.service
+      Requires=xvfb.service
+      [Service]
+      Type=simple
+      User=[[USERNAME]]
+      Environment=DISPLAY=:10
+      Environment=HOME=/home/[[USERNAME]]
+      Environment=DBUS_SESSION_BUS_ADDRESS=autolaunch:
+      ExecStartPre=/bin/sleep 2
+      ExecStart=/usr/bin/xfce4-session
+      Restart=on-failure
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/x11vnc.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=x11vnc VNC Server for :10
+      After=desktop.service
+      Requires=desktop.service
+      [Service]
+      Type=simple
+      User=[[USERNAME]]
+      Environment=DISPLAY=:10
+      ExecStartPre=/bin/sleep 3
+      ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -localhost
+      Restart=on-failure
+      RestartSec=5
       [Install]
       WantedBy=multi-user.target
 
@@ -179,18 +255,6 @@ write_files:
       Categories=Network;WebBrowser;
       MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
 
-  - path: /home/[[USERNAME]]/Desktop/view-automation.desktop
-    permissions: "0755"
-    defer: true
-    content: |
-      [Desktop Entry]
-      Version=1.0
-      Type=Application
-      Name=View Automation Display
-      Exec=xfce4-terminal -e "bash -c 'x11vnc -display :99 -nopw -forever -rfbport 5900; exec bash'"
-      Icon=video-display
-      Terminal=false
-
   - path: /home/[[USERNAME]]/Desktop/thunderbird.desktop
     permissions: "0755"
     defer: true
@@ -241,9 +305,9 @@ write_files:
     defer: true
     content: |
       ### Environment
-      - Running on cloud VM (Ubuntu) as `[[USERNAME]]` user
-      - User has RDP access on display :10
-      - Virtual display :99 (Xvfb) for invisible automation
+      - Running on cloud VM (Ubuntu) as `[[USERNAME]]`
+      - Single shared display :10 (you and user see the same desktop)
+      - User connects via RDP; you both work on :10
       - Chrome at `/usr/bin/google-chrome-stable`
 
       ### Email
@@ -254,7 +318,7 @@ write_files:
       Desktop Chrome has remote debugging on port 18800.
       Launch programmatically:
           DISPLAY=:10 google-chrome-stable --remote-debugging-port=18800 --user-data-dir=/home/[[USERNAME]]/.config/chrome-debug <url> &
-      For invisible automation on :99: `x11vnc -display :99 -nopw -forever &`
+      User will see what you do since you share display :10.
 
       ### Tools
       - **Chrome**: Remote debugging (port 18800)
@@ -424,8 +488,8 @@ write_files:
                   except Exception as e:self.wfile.write(json.dumps({"ok":False,"error":str(e)}).encode())
               elif self.path=='/keepalive':
                   self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-                  try:subprocess.run("systemctl stop self-destruct.timer self-destruct.service 2>/dev/null;systemctl reset-failed self-destruct.timer 2>/dev/null;/usr/local/bin/schedule-destruct.sh",shell=True);self.wfile.write(json.dumps({"ok":True}).encode())
-                  except Exception as e:self.wfile.write(json.dumps({"ok":False,"error":str(e)}).encode())
+                  try:subprocess.run("systemctl stop self-destruct.timer self-destruct.service 2>/dev/null;systemctl reset-failed self-destruct.timer 2>/dev/null;/usr/local/bin/schedule-destruct.sh",shell=True);self.wfile.write(json.dumps({"status":"success"}).encode())
+                  except Exception as e:self.wfile.write(json.dumps({"status":"error","error":str(e)}).encode())
       class R(socketserver.TCPServer):allow_reuse_address=True
       with R(("",PORT),H) as h:h.serve_forever()
 
@@ -463,13 +527,14 @@ write_files:
       #!/bin/bash
       source /etc/droplet.env
       id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
+      chown $USERNAME:$USERNAME /home/$USERNAME
       [ -n "$SSH_KEY" ] && { mkdir -p /home/$USERNAME/.ssh; echo "$SSH_KEY" >> /home/$USERNAME/.ssh/authorized_keys; chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh; chmod 700 /home/$USERNAME/.ssh; chmod 600 /home/$USERNAME/.ssh/authorized_keys; }
       echo "$USERNAME:$PASSWORD" | chpasswd
       echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME; chmod 440 /etc/sudoers.d/$USERNAME
       usermod -aG systemd-journal $USERNAME
       [ -n "$GPLACES_KEY" ] && echo "export GOOGLE_PLACES_API_KEY=\"$GPLACES_KEY\"" >> /home/$USERNAME/.bashrc
       [ -n "$BRAVE_KEY" ] && echo "export BRAVE_API_KEY=\"$BRAVE_KEY\"" >> /home/$USERNAME/.bashrc
-      chown $USERNAME:$USERNAME /home/$USERNAME/.bashrc
+      chown -R $USERNAME:$USERNAME /home/$USERNAME
 
   - path: /usr/local/sbin/setup-chrome.sh
     permissions: "0755"
@@ -499,14 +564,14 @@ write_files:
       cd /usr/lib/node_modules/clawdhub && npm install undici >> "$LOG" 2>&1
       mkdir -p $HOMEDIR/.clawdbot/agents/main/{agent,sessions} $HOMEDIR/.clawdbot/credentials $HOMEDIR/clawd/{skills,memory}
       GATEWAY_TOKEN=$(openssl rand -hex 24); echo "$GATEWAY_TOKEN" > $HOMEDIR/.clawdbot/gateway-token.txt
-      CENV="Environment=NODE_ENV=production\nEnvironment=PATH=/usr/bin:/usr/local/bin\nEnvironment=DISPLAY=:99\nEnvironment=ANTHROPIC_API_KEY=${ANTHROPIC_KEY}"
+      CENV="Environment=NODE_ENV=production\nEnvironment=PATH=/usr/bin:/usr/local/bin\nEnvironment=DISPLAY=:10\nEnvironment=ANTHROPIC_API_KEY=${ANTHROPIC_KEY}"
       [ -n "$BRAVE_KEY" ] && CENV="$CENV\nEnvironment=BRAVE_API_KEY=${BRAVE_KEY}"
       [ -n "$GPLACES_KEY" ] && CENV="$CENV\nEnvironment=GOOGLE_PLACES_API_KEY=${GPLACES_KEY}"
       cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
-      After=network.target xvfb.service
-      Requires=xvfb.service
+      After=network.target desktop.service
+      Requires=desktop.service
       [Service]
       Type=simple
       User=$USERNAME
@@ -520,13 +585,13 @@ write_files:
       [Install]
       WantedBy=multi-user.target
       SVC
-      echo -e "ANTHROPIC_API_KEY=${ANTHROPIC_KEY}\nDISPLAY=:99" > $HOMEDIR/.clawdbot/.env
+      echo -e "ANTHROPIC_API_KEY=${ANTHROPIC_KEY}\nDISPLAY=:10" > $HOMEDIR/.clawdbot/.env
       [ -n "$BRAVE_KEY" ] && echo "BRAVE_API_KEY=${BRAVE_KEY}" >> $HOMEDIR/.clawdbot/.env
       [ -n "$GPLACES_KEY" ] && echo "GOOGLE_PLACES_API_KEY=${GPLACES_KEY}" >> $HOMEDIR/.clawdbot/.env
       BJ=""; [ -n "$BRAVE_KEY" ] && BJ="\"BRAVE_API_KEY\":\"${BRAVE_KEY}\","
       GJ=""; [ -n "$GPLACES_KEY" ] && GJ="\"GOOGLE_PLACES_API_KEY\":\"${GPLACES_KEY}\","
       cat > $HOMEDIR/.clawdbot/clawdbot.json <<CFG
-      {"env":{"ANTHROPIC_API_KEY":"${ANTHROPIC_KEY}",${BJ}${GJ}"DISPLAY":":99"},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":false,"noSandbox":true,"defaultProfile":"clawd"},"tools":{"web":{"search":{"enabled":true},"fetch":{"enabled":true}}},"messages":{"ackReactionScope":"group-mentions"},"agents":{"defaults":{"model":{"primary":"anthropic/claude-opus-4-5"},"maxConcurrent":4,"subagents":{"maxConcurrent":8},"compaction":{"mode":"safeguard"},"workspace":"$HOMEDIR/clawd"}},"gateway":{"mode":"local","port":18789,"bind":"lan","controlUi":{"enabled":true,"allowInsecureAuth":true},"auth":{"mode":"token","token":"${GATEWAY_TOKEN}"},"tailscale":{"mode":"off","resetOnExit":false}},"auth":{"profiles":{"anthropic:default":{"provider":"anthropic","mode":"api_key"}}},"plugins":{"entries":{"telegram":{"enabled":true}}},"channels":{"telegram":{"enabled":true,"botToken":"${TELEGRAM_BOT_TOKEN}","dmPolicy":"allowlist","allowFrom":["${TELEGRAM_USER_ID}"]}},"skills":{"install":{"nodeManager":"npm"}},"hooks":{"internal":{"enabled":true,"entries":{"boot-md":{"enabled":true}}}}}
+      {"env":{"ANTHROPIC_API_KEY":"${ANTHROPIC_KEY}",${BJ}${GJ}"DISPLAY":":10"},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":false,"noSandbox":true,"defaultProfile":"clawd"},"tools":{"web":{"search":{"enabled":true},"fetch":{"enabled":true}}},"messages":{"ackReactionScope":"group-mentions"},"agents":{"defaults":{"model":{"primary":"anthropic/claude-opus-4-5"},"maxConcurrent":4,"subagents":{"maxConcurrent":8},"compaction":{"mode":"safeguard"},"workspace":"$HOMEDIR/clawd"}},"gateway":{"mode":"local","port":18789,"bind":"lan","controlUi":{"enabled":true,"allowInsecureAuth":true},"auth":{"mode":"token","token":"${GATEWAY_TOKEN}"},"tailscale":{"mode":"off","resetOnExit":false}},"auth":{"profiles":{"anthropic:default":{"provider":"anthropic","mode":"api_key"}}},"plugins":{"entries":{"telegram":{"enabled":true}}},"channels":{"telegram":{"enabled":true,"botToken":"${TELEGRAM_BOT_TOKEN}","dmPolicy":"allowlist","allowFrom":["${TELEGRAM_USER_ID}"]}},"skills":{"install":{"nodeManager":"npm"}},"hooks":{"internal":{"enabled":true,"entries":{"boot-md":{"enabled":true}}}}}
       CFG
       cat > $HOMEDIR/.clawdbot/agents/main/agent/auth-profiles.json <<AP
       {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${ANTHROPIC_KEY}"}}}
@@ -630,20 +695,101 @@ write_files:
       chown -R $USERNAME:$USERNAME $HOMEDIR/.config $HOMEDIR/.local $HOMEDIR/Desktop
       echo "=== Optional Config Finished: $(date) ===" >> "$LOG"
 
-  - path: /usr/local/sbin/setup-services.sh
+  - path: /usr/local/sbin/setup-display.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      systemctl daemon-reload; systemctl enable xvfb; systemctl start xvfb
+      systemctl daemon-reload
+      systemctl enable xvfb desktop x11vnc
+      systemctl start xvfb
+      sleep 2
+      systemctl start desktop
+      sleep 3
+      systemctl start x11vnc
 
   - path: /usr/local/sbin/configure-xrdp.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      echo -e "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nunset XDG_RUNTIME_DIR\nexec dbus-launch --exit-with-session startxfce4" > /etc/xrdp/startwm.sh
+      source /etc/droplet.env
+      cp /etc/xrdp/xrdp.ini /etc/xrdp/xrdp.ini.bak
+      cat > /etc/xrdp/xrdp.ini <<'XRDPINI'
+      [Globals]
+      ini_version=1
+      fork=true
+      port=3389
+      use_vsock=false
+      tcp_nodelay=true
+      tcp_keepalive=true
+      security_layer=negotiate
+      crypt_level=high
+      certificate=
+      key_file=
+      ssl_protocols=TLSv1.2, TLSv1.3
+      autorun=
+      allow_channels=true
+      allow_multimon=true
+      bitmap_cache=true
+      bitmap_compression=true
+      bulk_compression=true
+      max_bpp=32
+      new_cursors=true
+      use_fastpath=both
+      [Logging]
+      LogFile=xrdp.log
+      LogLevel=INFO
+      EnableSyslog=true
+      SyslogLevel=INFO
+      [Channels]
+      rdpdr=true
+      rdpsnd=true
+      drdynvc=true
+      cliprdr=true
+      rail=false
+      xrdpvr=true
+      tcutils=true
+      [vnc-any]
+      name=Desktop
+      lib=libvnc.so
+      ip=127.0.0.1
+      port=5900
+      username=na
+      password=ask
+      XRDPINI
+      cat > /etc/xrdp/sesman.ini <<'SESMANINI'
+      [Globals]
+      ListenAddress=127.0.0.1
+      ListenPort=3350
+      EnableUserWindowManager=true
+      UserWindowManager=startwm.sh
+      DefaultWindowManager=startwm.sh
+      [Security]
+      AllowRootLogin=true
+      MaxLoginRetry=4
+      TerminalServerUsers=tsusers
+      TerminalServerAdmins=tsadmins
+      AlwaysGroupCheck=false
+      [Sessions]
+      X11DisplayOffset=10
+      MaxSessions=10
+      KillDisconnected=false
+      DisconnectedTimeLimit=0
+      IdleTimeLimit=0
+      Policy=Default
+      [Logging]
+      LogFile=xrdp-sesman.log
+      LogLevel=INFO
+      EnableSyslog=true
+      SyslogLevel=INFO
+      SESMANINI
+      cat > /etc/xrdp/startwm.sh <<'STARTWM'
+      #!/bin/sh
+      exec sleep infinity
+      STARTWM
       chmod 755 /etc/xrdp/startwm.sh
-      sed -i 's/^X11DisplayOffset=.*/X11DisplayOffset=10/' /etc/xrdp/sesman.ini
-      systemctl unmask xrdp xrdp-sesman; systemctl enable xrdp; systemctl restart xrdp
+      systemctl unmask xrdp xrdp-sesman
+      systemctl enable xrdp
+      systemctl restart xrdp
 
 users:
   - default
@@ -654,7 +800,7 @@ runcmd:
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 2 credentials; /usr/local/sbin/setup-user.sh" ]
   - [ bash, -lc, "/usr/local/bin/schedule-destruct.sh" ]
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 3 chrome; /usr/local/sbin/setup-chrome.sh" ]
-  - [ bash, -lc, "/usr/local/bin/set-stage.sh 4 desktop; /usr/local/sbin/setup-services.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 4 desktop; /usr/local/sbin/setup-display.sh" ]
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 5 clawdbot; /usr/local/sbin/setup-clawdbot.sh" ]
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 6 productivity; /usr/local/sbin/setup-optional.sh" ]
   - [ bash, -lc, "/usr/local/bin/restore-clawdbot-state.sh" ]
