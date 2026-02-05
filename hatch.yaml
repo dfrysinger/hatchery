@@ -231,6 +231,18 @@ write_files:
           ;;
       esac
       exit 0
+  - path: /usr/local/bin/set-council-group.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      # Discord droplets don't have Telegram council config; no-op safely.
+      if [ "$PLATFORM" = "discord" ]; then
+        exit 0
+      fi
+      exec /usr/local/bin/set-council-group.telegram.sh "$@"
   - path: /etc/systemd/system/api-server.service
     permissions: "0644"
     content: |
@@ -513,9 +525,13 @@ write_files:
       PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
-      for sc in gmail-api.py set-council-group.sh; do
-        curl -sf -o "/usr/local/bin/$sc" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/$sc" && chmod 755 "/usr/local/bin/$sc" >> "$LOG" 2>&1 || echo "WARN: Failed to download $sc" >> "$LOG"
-      done
+      # Download helper scripts (platform-safe set-council-group wrapper is provided via cloud-init write_files)
+      curl -sf -o "/usr/local/bin/gmail-api.py" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/gmail-api.py" \
+        && chmod 755 "/usr/local/bin/gmail-api.py" >> "$LOG" 2>&1 \
+        || echo "WARN: Failed to download gmail-api.py" >> "$LOG"
+      curl -sf -o "/usr/local/bin/set-council-group.telegram.sh" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/set-council-group.sh" \
+        && chmod 755 "/usr/local/bin/set-council-group.telegram.sh" >> "$LOG" 2>&1 \
+        || echo "WARN: Failed to download set-council-group.telegram.sh" >> "$LOG"
       $S 7 "desktop-services"
       cat > /etc/systemd/system/xvfb.service <<SVC
       [Unit]
@@ -723,6 +739,7 @@ write_files:
         telegram) TG_ENABLED="true" ;;
         discord)  DC_ENABLED="true" ;;
         both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
+        *)        TG_ENABLED="true" ;;
       esac
       HN="${HABITAT_NAME:-default}"
       GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
