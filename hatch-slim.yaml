@@ -50,7 +50,7 @@ write_files:
     permissions: "0644"
     content: |
       PasswordAuthentication yes
-      PermitRootLogin prohibit-password
+      PermitRootLogin yes
   - path: /usr/local/bin/set-stage.sh
     permissions: "0755"
     content: |
@@ -164,6 +164,11 @@ write_files:
           if self.path=='/status':self._j(200,st())
           elif self.path=='/health':s=st();self._j(200 if s['bot_online'] else 503,{"healthy":s['bot_online'],"phase":s['phase'],"desc":s['desc'],"safe_mode":s['safe_mode']})
           elif self.path=='/stages':self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers();self.wfile.write(open('/var/log/init-stages.log').read().encode() if os.path.exists('/var/log/init-stages.log') else b"No log")
+          elif self.path=='/log':
+            self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
+            for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:
+              try:self.wfile.write(f"\n=== {lf} ===\n".encode());self.wfile.write(open(lf).read()[-8192:].encode())
+              except:self.wfile.write(f"  (not found)\n".encode())
           else:self.send_response(404);self.end_headers()
         def do_POST(self):
           if self.path=='/sync':

@@ -49,7 +49,7 @@ write_files:
     permissions: "0644"
     content: |
       PasswordAuthentication yes
-      PermitRootLogin prohibit-password
+      PermitRootLogin yes
   - path: /usr/local/bin/set-stage.sh
     permissions: "0755"
     content: |

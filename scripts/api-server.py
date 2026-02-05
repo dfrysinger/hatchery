@@ -52,6 +52,13 @@ class H(http.server.BaseHTTPRequestHandler):
       try:
         with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
       except:self.wfile.write(b"No log")
+    elif self.path=='/log':
+      self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
+      for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:
+        try:
+          self.wfile.write(f"\n=== {lf} ===\n".encode())
+          with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
+        except:self.wfile.write(f"  (not found)\n".encode())
     else:self.send_response(404);self.end_headers()
   def do_POST(self):
     if self.path=='/sync':
