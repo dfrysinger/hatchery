@@ -1,852 +1,1222 @@
 #cloud-config
-# version: 3.12
-# Droplet Init Config v3.12 - 2026-02-03
+# version: 3.13
+
+# Droplet Init Config v3.13 - 2026-02-03
 # FAST BOOT: Bot online in ~3 min, desktop ready in background
-# Phase 1: nodejs + clawdbot + minimal config -> bot talks
+# Phase 1: nodejs + openclaw + minimal config -> bot talks
 # Phase 2: packages, desktop, xrdp, skills (background)
 #
-# Changes from v3.10:
-# - Two-phase boot: bot priority over desktop
-# - Direct node binary download (skip nodesource 30s)
-# - Background phase2 via systemd-run
-# - Robust status API with phase tracking
-# - needrestart blacklist for cloud-init
-# - No screensaver (removed from autostart before desktop starts)
-# - Optional reboot with bot announcement
+# v3.13 Changes:
+# - FIXED: Added missing plugins/hooks/dmPolicy to openclaw configs
+# - FIXED: Renamed clawdbot -> openclaw throughout
+# - NEW: Post-reboot health check with safe mode fallback
+# - NEW: Bot self-announcement on boot via BOOT.md
+# - NEW: SAFE_MODE.md for self-healing when full config fails
+# - NEW: IDENTITY.md per agent workspace (not root)
+# - NEW: GLOBAL_AGENT_NOTES_B64 for shared agent context
+# - NEW: AGENT1_NOTES_B64 through AGENT4_NOTES_B64 for per-agent identity
+# - REMOVED: BOT_NAME_B64/BOT_NOTES_B64 (use AGENT1_NAME/NOTES instead)
+# - FIXED: No emojis in messages (breaks iOS Shortcuts)
 #
 # === PLACEHOLDER REFERENCE ===
-# (same as v3.10)
-#
+# All placeholders use [[NAME]] format, replaced by iOS Shortcuts
+# Base64 encoded: All _B64 suffix variables
+
 package_update: false
 package_upgrade: false
 
 bootcmd:
- - [ bash, -lc, "mkdir -p /var/lib/init-status; [ -f /var/lib/init-status/setup-complete ] && exit 0; echo '0' > /var/lib/init-status/stage; echo '1' > /var/lib/init-status/phase; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\" >> /var/log/init-stages.log" ]
- - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
- - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
- - [ bash, -lc, "mkdir -p /etc/needrestart/conf.d && echo -e '\\$nrconf{restart} = '\"'\"'a'\"'\"';\\n\\$nrconf{blacklist_rc} = [qr/^cloud-init/, qr/^cloud-final/, qr/^cloud-config/];' > /etc/needrestart/conf.d/99-autorestart.conf" ]
- # Start downloads in parallel during bootcmd
- - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; mkdir -p /tmp/downloads; curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz & echo $! > /tmp/downloads/node.pid; wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb & echo $! > /tmp/downloads/chrome.pid" ]
- - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '99' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=99 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
+  - [ bash, -lc, "mkdir -p /var/lib/init-status; [ -f /var/lib/init-status/setup-complete ] && exit 0; echo '0' > /var/lib/init-status/stage; echo '1' > /var/lib/init-status/phase; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\" >> /var/log/init-stages.log" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
+  - [ bash, -lc, "mkdir -p /etc/needrestart/conf.d && echo \"\\$nrconf{restart} = 'a';\\n\\$nrconf{blacklist_rc} = [qr/^cloud-init/, qr/^cloud-final/, qr/^cloud-config/];\" > /etc/needrestart/conf.d/99-autorestart.conf" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; mkdir -p /tmp/downloads; curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz & echo $! > /tmp/downloads/node.pid; wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb & echo $! > /tmp/downloads/chrome.pid" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '99' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=99 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
 
 write_files:
- - path: /etc/droplet.env
-   owner: root:root
-   permissions: "0600"
-   content: |
-     USERNAME="bot"
-     SSH_KEY_B64=""
-     DO_TOKEN_B64="[[DO_TOKEN_B64]]"
-     PASSWORD_B64="[[PASSWORD_B64]]"
-     DESTRUCT_MINS_B64="[[DESTRUCT_MINS_B64]]"
-     AGENT1_BOT_TOKEN_B64="[[AGENT1_BOT_TOKEN_B64]]"
-     TELEGRAM_USER_ID_B64="[[TELEGRAM_USER_ID_B64]]"
-     ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
-     BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
-     GOOGLE_API_KEY_B64="[[GOOGLE_API_KEY_B64]]"
-     DROPBOX_TOKEN_B64="[[DROPBOX_TOKEN_B64]]"
-     EMAIL_B64="[[EMAIL_B64]]"
-     IMAP_HOST_B64="[[IMAP_HOST_B64]]"
-     SMTP_HOST_B64="[[SMTP_HOST_B64]]"
-     EMAIL_PASSWORD_B64="[[EMAIL_PASSWORD_B64]]"
-     CALDAV_URL_B64="[[CALDAV_URL_B64]]"
-     CALDAV_USER_B64="[[CALDAV_USER_B64]]"
-     CALDAV_PASSWORD_B64="[[CALDAV_PASSWORD_B64]]"
-     AGENT_GEN_B64="[[AGENT_GEN_B64]]"
-     GH_TOKEN_B64="[[GH_TOKEN_B64]]"
-     GMAIL_CLIENT_ID_B64="[[GMAIL_CLIENT_ID_B64]]"
-     GMAIL_CLIENT_SECRET_B64="[[GMAIL_CLIENT_SECRET_B64]]"
-     GMAIL_REFRESH_TOKEN_B64="[[GMAIL_REFRESH_TOKEN_B64]]"
-     DROPLET_TAG_B64="[[DROPLET_TAG_B64]]"
-     USER_REALNAME_B64="[[USER_REALNAME_B64]]"
-     USER_LOCATION_B64="[[USER_LOCATION_B64]]"
-     USER_NOTES_B64="[[USER_NOTES_B64]]"
-     BOT_NAME_B64="[[BOT_NAME_B64]]"
-     BOT_NOTES_B64="[[BOT_NOTES_B64]]"
-     BOOT_INSTRUCTIONS_B64="[[BOOT_INSTRUCTIONS_B64]]"
-     HABITAT_NAME_B64="[[HABITAT_NAME_B64]]"
-     OPENAI_ACCESS_B64="[[OPENAI_ACCESS_B64]]"
-     OPENAI_REFRESH_B64="[[OPENAI_REFRESH_B64]]"
-     OPENAI_EXPIRES_B64="[[OPENAI_EXPIRES_B64]]"
-     OPENAI_ACCOUNT_ID_B64="[[OPENAI_ACCOUNT_ID_B64]]"
-     AGENT1_NAME_B64="[[AGENT1_NAME_B64]]"
-     AGENT2_NAME_B64="[[AGENT2_NAME_B64]]"
-     AGENT2_BOT_TOKEN_B64="[[AGENT2_BOT_TOKEN_B64]]"
-     AGENT3_NAME_B64="[[AGENT3_NAME_B64]]"
-     AGENT3_BOT_TOKEN_B64="[[AGENT3_BOT_TOKEN_B64]]"
-     AGENT4_NAME_B64="[[AGENT4_NAME_B64]]"
-     AGENT4_BOT_TOKEN_B64="[[AGENT4_BOT_TOKEN_B64]]"
-     COUNCIL_GROUP_ID_B64="[[COUNCIL_GROUP_ID_B64]]"
+  - path: /etc/droplet.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+      USERNAME="bot"
+      SSH_KEY_B64=""
+      DO_TOKEN_B64="[[DO_TOKEN_B64]]"
+      PASSWORD_B64="[[PASSWORD_B64]]"
+      DESTRUCT_MINS_B64="[[DESTRUCT_MINS_B64]]"
+      AGENT1_BOT_TOKEN_B64="[[AGENT1_BOT_TOKEN_B64]]"
+      TELEGRAM_USER_ID_B64="[[TELEGRAM_USER_ID_B64]]"
+      ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
+      BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
+      GOOGLE_API_KEY_B64="[[GOOGLE_API_KEY_B64]]"
+      DROPBOX_TOKEN_B64="[[DROPBOX_TOKEN_B64]]"
+      EMAIL_B64="[[EMAIL_B64]]"
+      IMAP_HOST_B64="[[IMAP_HOST_B64]]"
+      SMTP_HOST_B64="[[SMTP_HOST_B64]]"
+      EMAIL_PASSWORD_B64="[[EMAIL_PASSWORD_B64]]"
+      CALDAV_URL_B64="[[CALDAV_URL_B64]]"
+      CALDAV_USER_B64="[[CALDAV_USER_B64]]"
+      CALDAV_PASSWORD_B64="[[CALDAV_PASSWORD_B64]]"
+      AGENT_GEN_B64="[[AGENT_GEN_B64]]"
+      GH_TOKEN_B64="[[GH_TOKEN_B64]]"
+      GMAIL_CLIENT_ID_B64="[[GMAIL_CLIENT_ID_B64]]"
+      GMAIL_CLIENT_SECRET_B64="[[GMAIL_CLIENT_SECRET_B64]]"
+      GMAIL_REFRESH_TOKEN_B64="[[GMAIL_REFRESH_TOKEN_B64]]"
+      DROPLET_TAG_B64="[[DROPLET_TAG_B64]]"
+      USER_REALNAME_B64="[[USER_REALNAME_B64]]"
+      USER_LOCATION_B64="[[USER_LOCATION_B64]]"
+      USER_NOTES_B64="[[USER_NOTES_B64]]"
+      BOOT_INSTRUCTIONS_B64="[[BOOT_INSTRUCTIONS_B64]]"
+      HABITAT_NAME_B64="[[HABITAT_NAME_B64]]"
+      OPENAI_ACCESS_B64="[[OPENAI_ACCESS_B64]]"
+      OPENAI_REFRESH_B64="[[OPENAI_REFRESH_B64]]"
+      OPENAI_EXPIRES_B64="[[OPENAI_EXPIRES_B64]]"
+      OPENAI_ACCOUNT_ID_B64="[[OPENAI_ACCOUNT_ID_B64]]"
+      GLOBAL_AGENT_NOTES_B64="[[GLOBAL_AGENT_NOTES_B64]]"
+      AGENT1_NAME_B64="[[AGENT1_NAME_B64]]"
+      AGENT1_NOTES_B64="[[AGENT1_NOTES_B64]]"
+      AGENT2_NAME_B64="[[AGENT2_NAME_B64]]"
+      AGENT2_NOTES_B64="[[AGENT2_NOTES_B64]]"
+      AGENT2_BOT_TOKEN_B64="[[AGENT2_BOT_TOKEN_B64]]"
+      AGENT3_NAME_B64="[[AGENT3_NAME_B64]]"
+      AGENT3_NOTES_B64="[[AGENT3_NOTES_B64]]"
+      AGENT3_BOT_TOKEN_B64="[[AGENT3_BOT_TOKEN_B64]]"
+      AGENT4_NAME_B64="[[AGENT4_NAME_B64]]"
+      AGENT4_NOTES_B64="[[AGENT4_NOTES_B64]]"
+      AGENT4_BOT_TOKEN_B64="[[AGENT4_BOT_TOKEN_B64]]"
+      COUNCIL_GROUP_ID_B64="[[COUNCIL_GROUP_ID_B64]]"
 
- - path: /etc/needrestart/conf.d/99-autorestart.conf
-   permissions: "0644"
-   content: |
-     $nrconf{restart} = 'a';
-     $nrconf{blacklist_rc} = [qr/^cloud-init/, qr/^cloud-final/, qr/^cloud-config/];
+  - path: /etc/needrestart/conf.d/99-autorestart.conf
+    permissions: "0644"
+    content: |
+      $nrconf{restart} = 'a';
+      $nrconf{blacklist_rc} = [qr/^cloud-init/, qr/^cloud-final/, qr/^cloud-config/];
 
- - path: /usr/local/bin/set-stage.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     echo "$1" > /var/lib/init-status/stage
-     echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) STAGE=$1 PHASE=$(cat /var/lib/init-status/phase 2>/dev/null || echo 1) DESC=$2" >> /var/log/init-stages.log
+  - path: /usr/local/bin/set-stage.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      echo "$1" > /var/lib/init-status/stage
+      echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) STAGE=$1 PHASE=$(cat /var/lib/init-status/phase 2>/dev/null || echo 1) DESC=$2" >> /var/log/init-stages.log
 
- - path: /usr/local/bin/set-phase.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     echo "$1" > /var/lib/init-status/phase
-     echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) PHASE=$1 DESC=$2" >> /var/log/init-stages.log
+  - path: /usr/local/bin/set-phase.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      echo "$1" > /var/lib/init-status/phase
+      echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) PHASE=$1 DESC=$2" >> /var/log/init-stages.log
 
- - path: /etc/systemd/system/api-server.service
-   permissions: "0644"
-   content: |
-     [Unit]
-     Description=Droplet Status API
-     After=network.target
-     [Service]
-     ExecStart=/usr/local/bin/api-server.py
-     Restart=always
-     RestartSec=3
-     User=root
-     [Install]
-     WantedBy=multi-user.target
+  - path: /etc/systemd/system/api-server.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Droplet Status API
+      After=network.target
+      [Service]
+      ExecStart=/usr/local/bin/api-server.py
+      Restart=always
+      RestartSec=3
+      User=root
+      [Install]
+      WantedBy=multi-user.target
 
- - path: /usr/local/bin/api-server.py
-   permissions: "0755"
-   content: |
-     #!/usr/bin/env python3
-     import http.server,socketserver,subprocess,json,re,os,base64
-     PORT=8080
-     P1_STAGES={0:"init",1:"nodejs",2:"clawdbot-install",3:"config",4:"starting",5:"bot-online"}
-     P2_STAGES={10:"packages",11:"chrome",12:"pip",13:"desktop",14:"skills",15:"productivity",16:"xrdp",17:"finalize",18:"reboot",99:"ready"}
-     def d64(s):
-         try:return base64.b64decode(s).decode('utf-8') if s else ""
-         except:return ""
-     def check_service(name):
-         try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
-         except:return False
-     def get_status():
-         s,p=0,1
-         try:
-             with open('/var/lib/init-status/stage','r') as f:s=int(f.read().strip())
-             with open('/var/lib/init-status/phase','r') as f:p=int(f.read().strip())
-         except:pass
-         p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
-         p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
-         setup_done=os.path.exists('/var/lib/init-status/setup-complete')
-         bot_online=check_service('clawdbot')
-         svc={}
-         if p2_done or setup_done:
-             for sv in ['clawdbot','xrdp','desktop','x11vnc']:svc[sv]=check_service(sv)
-         desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
-         return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online,"services":svc if svc else None}
-     class H(http.server.BaseHTTPRequestHandler):
-         def log_message(self,*a):pass
-         def do_GET(self):
-             if self.path=='/status':
-                 self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(get_status()).encode())
-             elif self.path=='/health':
-                 s=get_status();code=200 if s.get('bot_online') else 503;self.send_response(code);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps({"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc')}).encode())
-             elif self.path=='/stages':
-                 self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
-                 try:
-                     with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
-                 except:self.wfile.write(b"No log")
-             else:self.send_response(404);self.end_headers()
-         def do_POST(self):
-             if self.path=='/sync':
-                 self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-                 try:r=subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
-                 except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
-             elif self.path=='/prepare-shutdown':
-                 self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-                 try:subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
-                 except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
-             else:self.send_response(404);self.end_headers()
-     class R(socketserver.TCPServer):allow_reuse_address=True
-     with R(("",PORT),H) as h:h.serve_forever()
+  - path: /usr/local/bin/api-server.py
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      import http.server,socketserver,subprocess,json,os,base64
+      PORT=8080
+      P1_STAGES={0:"init",1:"nodejs",2:"openclaw-install",3:"config",4:"starting",5:"bot-online"}
+      P2_STAGES={10:"packages",11:"chrome",12:"pip",13:"desktop",14:"skills",15:"productivity",16:"xrdp",17:"finalize",18:"reboot",99:"ready"}
+      def check_service(name):
+        try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
+        except:return False
+      def get_status():
+        s,p=0,1
+        try:
+          with open('/var/lib/init-status/stage','r') as f:s=int(f.read().strip())
+          with open('/var/lib/init-status/phase','r') as f:p=int(f.read().strip())
+        except:pass
+        p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
+        p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
+        setup_done=os.path.exists('/var/lib/init-status/setup-complete')
+        bot_online=check_service('openclaw')
+        svc={}
+        if p2_done or setup_done:
+          for sv in ['openclaw','xrdp','desktop','x11vnc']:svc[sv]=check_service(sv)
+        desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
+        safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
+        return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online,"safe_mode":safe_mode,"services":svc if svc else None}
+      class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self,*a):pass
+        def do_GET(self):
+          if self.path=='/status':
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(get_status()).encode())
+          elif self.path=='/health':
+            s=get_status();code=200 if s.get('bot_online') else 503;self.send_response(code);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps({"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc'),"safe_mode":s.get('safe_mode',False)}).encode())
+          elif self.path=='/stages':
+            self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
+            try:
+              with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
+            except:self.wfile.write(b"No log")
+          else:self.send_response(404);self.end_headers()
+        def do_POST(self):
+          if self.path=='/sync':
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+            try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
+            except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+          elif self.path=='/prepare-shutdown':
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+            try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop openclaw",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
+            except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+          else:self.send_response(404);self.end_headers()
+      class R(socketserver.TCPServer):allow_reuse_address=True
+      with R(("",PORT),H) as h:h.serve_forever()
 
- - path: /usr/local/sbin/phase1-critical.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     # PHASE 1: Get bot online ASAP (~3 min target)
-     set -e
-     source /etc/droplet.env
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     S="/usr/local/bin/set-stage.sh"
-     LOG="/var/log/phase1.log"
-     echo "=== Phase 1 Start: $(date) ===" > "$LOG"
-     START=$(date +%s)
-     
-     # Wait for node download (started in bootcmd)
-     $S 1 "nodejs"
-     NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
-     [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
-     
-     # Extract node binary
-     if [ -f /tmp/downloads/node.tar.xz ]; then
-       tar -xJf /tmp/downloads/node.tar.xz -C /usr/local --strip-components=1 >> "$LOG" 2>&1
-       rm -f /tmp/downloads/node.tar.xz
-       echo "Node installed: $(node --version)" >> "$LOG"
-     else
-       echo "ERROR: Node download failed, falling back to apt" >> "$LOG"
-       apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
-     fi
-     
-     # Install clawdbot
-     $S 2 "clawdbot-install"
-     npm install -g clawdbot@latest >> "$LOG" 2>&1
-     echo "Clawdbot installed: $(clawdbot --version)" >> "$LOG"
-     
-     # Setup user (minimal)
-     $S 3 "config"
-     PW=$(d "$PASSWORD_B64")
-     id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
-     echo "$USERNAME:$PW" | chpasswd
-     echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
-     
-     # Clawdbot config (minimal - just enough to talk)
-     AK=$(d "$ANTHROPIC_KEY_B64"); TBT=$(d "$AGENT1_BOT_TOKEN_B64"); TUI=$(d "$TELEGRAM_USER_ID_B64")
-     GK=$(d "$GOOGLE_API_KEY_B64")  # For Gemini support later
-     A1N=$(d "$AGENT1_NAME_B64"); A1N="${A1N:-Claude}"
-     H="/home/$USERNAME"
-     GT=$(openssl rand -hex 24)
-     
-     mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
-     echo "$GT" > $H/.clawdbot/gateway-token.txt
-     
-     cat > $H/.clawdbot/clawdbot.json <<CFG
-     {"env":{"ANTHROPIC_API_KEY":"${AK}"},"agents":{"defaults":{"model":{"primary":"anthropic/claude-sonnet-4-20250514"}},"list":[{"id":"agent1","default":true,"name":"${A1N}","workspace":"$H/clawd/agents/agent1"}]},"gateway":{"mode":"local","port":18789,"auth":{"mode":"token","token":"${GT}"}},"channels":{"telegram":{"enabled":true,"allowFrom":["${TUI}"],"accounts":{"default":{"botToken":"${TBT}"}}}}}
-     CFG
-     
-     echo "ANTHROPIC_API_KEY=${AK}" > $H/.clawdbot/.env
-     [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.clawdbot/.env
-     echo -e "# Agent: ${A1N}\nModel: Claude Sonnet\nBe helpful. Desktop setup in progress..." > $H/clawd/agents/agent1/AGENTS.md
-     
-     chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
-     chmod 700 $H/.clawdbot
-     chmod 600 $H/.clawdbot/clawdbot.json
-     
-     # Systemd service (minimal)
-     cat > /etc/systemd/system/clawdbot.service <<SVC
-     [Unit]
-     Description=Clawdbot Gateway
-     After=network.target
-     [Service]
-     Type=simple
-     User=$USERNAME
-     WorkingDirectory=$H
-     ExecStart=/usr/bin/clawdbot gateway --port 18789
-     Restart=always
-     RestartSec=3
-     Environment=NODE_ENV=production
-     Environment=ANTHROPIC_API_KEY=${AK}
-     $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
-     $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")
-     [Install]
-     WantedBy=multi-user.target
-     SVC
-     
-     # Start bot
-     $S 4 "starting"
-     systemctl daemon-reload
-     systemctl enable clawdbot
-     systemctl start clawdbot
-     ufw allow 18789/tcp
-     
-     # Wait for bot to be ready
-     for i in {1..30}; do
-       systemctl is-active --quiet clawdbot && break
-       sleep 1
-     done
-     
-     $S 5 "bot-online"
-     touch /var/lib/init-status/phase1-complete
-     
-     END=$(date +%s)
-     echo "=== Phase 1 Complete: $((END - START)) seconds ===" >> "$LOG"
-     
-     # Kick off phase 2 in background
-     /usr/local/bin/set-phase.sh 2 "background-setup"
-     nohup /usr/local/sbin/phase2-background.sh >> /var/log/phase2.log 2>&1 &
-     disown
+  - path: /usr/local/sbin/phase1-critical.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # PHASE 1: Get bot online ASAP (~3 min target)
+      # Minimal bulletproof config - single agent, telegram only
+      set -e
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      S="/usr/local/bin/set-stage.sh"
+      LOG="/var/log/phase1.log"
+      echo "=== Phase 1 Start: $(date) ===" > "$LOG"
+      START=$(date +%s)
 
- - path: /usr/local/sbin/phase2-background.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     # PHASE 2: Everything else (runs in background)
-     source /etc/droplet.env
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     S="/usr/local/bin/set-stage.sh"
-     LOG="/var/log/phase2.log"
-     echo "=== Phase 2 Start: $(date) ===" >> "$LOG"
-     START=$(date +%s)
-     H="/home/$USERNAME"
-     
-     # Wait for chrome download
-     CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
-     [ -n "$CHROME_PID" ] && wait $CHROME_PID 2>/dev/null || true
-     
-     # Kill apt locks
-     systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-     killall -9 apt apt-get dpkg 2>/dev/null || true
-     sleep 2
-     rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
-     dpkg --configure -a 2>/dev/null || true
-     
-     # Full package install
-     $S 10 "packages"
-     apt-get update -qq >> "$LOG" 2>&1
-     DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
-       xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
-       xfce4 xfce4-goodies xfce4-terminal \
-       build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
-       thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils \
-       python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
-       >> "$LOG" 2>&1
-     
-     # Remove screensaver BEFORE starting desktop
-     rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
-     apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
-     
-     # Install chrome
-     $S 11 "chrome"
-     [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
-     rm -f /tmp/downloads/chrome.deb
-     apt-get -f install -y >> "$LOG" 2>&1
-     
-     # Chrome config
-     mkdir -p $H/.config/chrome-debug/Default
-     echo '{"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}' > $H/.config/chrome-debug/Local\ State
-     echo '{"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}' > $H/.config/chrome-debug/Default/Preferences
-     touch $H/.config/chrome-debug/First\ Run
-     chown -R $USERNAME:$USERNAME $H/.config/chrome-debug
-     
-     # Pip packages
-     $S 12 "pip"
-     pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
-     curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
-     [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
-     
-     # Desktop services
-     $S 13 "desktop"
-     # Create service files
-     cat > /etc/systemd/system/xvfb.service <<SVC
-     [Unit]
-     Description=Xvfb on :10
-     After=network.target
-     [Service]
-     Type=simple
-     User=$USERNAME
-     ExecStart=/usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac
-     Restart=always
-     [Install]
-     WantedBy=multi-user.target
-     SVC
-     
-     cat > /etc/systemd/system/desktop.service <<SVC
-     [Unit]
-     Description=XFCE Desktop
-     After=xvfb.service
-     Requires=xvfb.service
-     [Service]
-     Type=simple
-     User=$USERNAME
-     Environment=DISPLAY=:10
-     Environment=HOME=$H
-     Environment=DBUS_SESSION_BUS_ADDRESS=autolaunch:
-     ExecStartPre=/bin/sleep 2
-     ExecStart=/usr/bin/xfce4-session
-     Restart=on-failure
-     [Install]
-     WantedBy=multi-user.target
-     SVC
-     
-     cat > /etc/systemd/system/x11vnc.service <<SVC
-     [Unit]
-     Description=x11vnc
-     After=desktop.service
-     Requires=desktop.service
-     [Service]
-     Type=simple
-     User=$USERNAME
-     Environment=DISPLAY=:10
-     ExecStartPre=/bin/sleep 3
-     ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -localhost
-     Restart=on-failure
-     [Install]
-     WantedBy=multi-user.target
-     SVC
-     
-     # Ensure desktop config ownership
-     mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
-     chown -R $USERNAME:$USERNAME $H/.config
-     
-     systemctl daemon-reload
-     systemctl enable xvfb desktop x11vnc
-     systemctl start xvfb
-     sleep 2
-     systemctl start desktop
-     sleep 3
-     systemctl start x11vnc
-     
-     # Create desktop shortcuts
-     mkdir -p $H/Desktop
-     cat > $H/Desktop/google-chrome.desktop <<'DESK'
-     [Desktop Entry]
-     Version=1.0
-     Name=Google Chrome
-     Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --disable-sync --remote-debugging-port=18800 --user-data-dir=/home/bot/.config/chrome-debug %U
-     Terminal=false
-     Icon=google-chrome
-     Type=Application
-     DESK
-     cat > $H/Desktop/dropbox.desktop <<'DESK'
-     [Desktop Entry]
-     Version=1.0
-     Type=Application
-     Name=Mount Dropbox
-     Exec=/usr/local/bin/mount-dropbox.sh
-     Icon=folder-remote
-     Terminal=false
-     DESK
-     chmod +x $H/Desktop/*.desktop
-     chown -R $USERNAME:$USERNAME $H/Desktop
-     
-     # Skills
-     $S 14 "skills"
-     npm install -g clawdhub@latest >> "$LOG" 2>&1
-     for s in weather github video-frames goplaces; do
-       su - $USERNAME -c "cd $H/clawd && clawdhub install $s" >> "$LOG" 2>&1
-     done
-     
-     # Productivity (rclone, himalaya, calendar)
-     $S 15 "productivity"
-     DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
-     IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
-     mkdir -p $H/.config/{himalaya,rclone,gh}
-     [ -n "$DBT" ] && echo -e "[dropbox]\ntype = dropbox\ntoken = $DBT" > $H/.config/rclone/rclone.conf
-     [ -n "$EM" ] && [ -n "$EP" ] && cat > $H/.config/himalaya/config.toml <<HIM
-     [accounts.default]
-     email = "${EM}"
-     default = true
-     backend.type = "imap"
-     backend.host = "${IH:-imap.gmail.com}"
-     backend.port = 993
-     backend.encryption.type = "tls"
-     backend.login = "${EM}"
-     backend.auth.type = "password"
-     backend.auth.raw = "${EP}"
-     HIM
-     [ -n "$GHT" ] && echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml
-     chown -R $USERNAME:$USERNAME $H/.config
-     
-     # xrdp
-     $S 16 "xrdp"
-     cat > /etc/xrdp/xrdp.ini <<'XI'
-     [Globals]
-     ini_version=1
-     fork=true
-     port=3389
-     tcp_nodelay=true
-     security_layer=rdp
-     crypt_level=high
-     max_bpp=32
-     [Logging]
-     LogFile=xrdp.log
-     LogLevel=INFO
-     [Channels]
-     rdpdr=true
-     rdpsnd=true
-     cliprdr=true
-     [vnc-any]
-     name=Desktop
-     lib=libvnc.so
-     ip=127.0.0.1
-     port=5900
-     username=na
-     password=ask
-     XI
-     echo -e "#!/bin/sh\nexec sleep infinity" > /etc/xrdp/startwm.sh
-     chmod 755 /etc/xrdp/startwm.sh
-     systemctl unmask xrdp xrdp-sesman
-     systemctl enable xrdp
-     systemctl restart xrdp
-     ufw allow 3389/tcp
-     
-     # Upgrade clawdbot config with full features
-     $S 17 "finalize"
-     /usr/local/sbin/upgrade-clawdbot-config.sh
-     
-     # Restore state from Dropbox
-     /usr/local/bin/restore-clawdbot-state.sh 2>/dev/null || true
-     /usr/local/bin/sync-clawdbot-state.sh 2>/dev/null || true
-     
-     # Enable auto-upgrades and sync timer
-     systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
-     systemctl enable clawdbot-sync.timer
-     systemctl start clawdbot-sync.timer
-     
-     touch /var/lib/init-status/phase2-complete
-     touch /var/lib/init-status/setup-complete
-     
-     END=$(date +%s)
-     DURATION=$((END - START))
-     echo "=== Phase 2 Complete: ${DURATION} seconds ===" >> "$LOG"
-     
-     # Announce reboot via Telegram
-     TBT=$(d "$AGENT1_BOT_TOKEN_B64"); TUI=$(d "$TELEGRAM_USER_ID_B64")
-     P1_TIME=$(cat /var/lib/init-status/phase1-time 2>/dev/null || echo $START)
-     TOTAL=$((END - P1_TIME + 180))  # rough estimate including phase1
-     
-     curl -s "https://api.telegram.org/bot${TBT}/sendMessage" \
-       -d "chat_id=${TUI}" \
-       -d "parse_mode=Markdown" \
-       -d "text=*Desktop setup complete!*
-     
-     Phase 2 finished in ${DURATION}s. Rebooting for clean state...
-     
-     - RDP will be ready in ~60 seconds
-     - All skills installed
-     - Browser configured
-     
-     _Back shortly!_"
-     
-     sleep 5
-     $S 18 "reboot"
-     reboot
+      # Wait for node download (started in bootcmd)
+      $S 1 "nodejs"
+      NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
+      [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
 
- - path: /usr/local/sbin/upgrade-clawdbot-config.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     # Upgrade clawdbot config with full features (browser, multi-agent, etc)
-     source /etc/droplet.env
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     H="/home/$USERNAME"
-     AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
-     OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
-     TBT=$(d "$AGENT1_BOT_TOKEN_B64"); TUI=$(d "$TELEGRAM_USER_ID_B64")
-     A1N=$(d "$AGENT1_NAME_B64"); A1N="${A1N:-Claude}"
-     A2N=$(d "$AGENT2_NAME_B64"); A2T=$(d "$AGENT2_BOT_TOKEN_B64")
-     A3N=$(d "$AGENT3_NAME_B64"); A3T=$(d "$AGENT3_BOT_TOKEN_B64")
-     A4N=$(d "$AGENT4_NAME_B64"); A4T=$(d "$AGENT4_BOT_TOKEN_B64")
-     CGI=$(d "$COUNCIL_GROUP_ID_B64")
-     GT=$(cat $H/.clawdbot/gateway-token.txt)
-     
-     # Build agent list
-     AL="[{\"id\":\"agent1\",\"default\":true,\"name\":\"${A1N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent1\"}"
-     [ -n "$A2T" ] && { mkdir -p $H/clawd/agents/agent2/memory; AL="$AL,{\"id\":\"agent2\",\"name\":\"${A2N:-GPT}\",\"model\":\"openai/gpt-5.2\",\"workspace\":\"$H/clawd/agents/agent2\"}"; }
-     [ -n "$A3T" ] && { mkdir -p $H/clawd/agents/agent3/memory; AL="$AL,{\"id\":\"agent3\",\"name\":\"${A3N:-Gemini}\",\"model\":\"google/gemini-3-pro-preview\",\"workspace\":\"$H/clawd/agents/agent3\"}"; }
-     [ -n "$A4T" ] && { mkdir -p $H/clawd/agents/agent4/memory; AL="$AL,{\"id\":\"agent4\",\"name\":\"${A4N:-Opus}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent4\"}"; }
-     AL="$AL]"
-     
-     # Telegram accounts
-     TA="\"default\":{\"botToken\":\"${TBT}\"}"
-     [ -n "$A2T" ] && TA="$TA,\"agent2\":{\"botToken\":\"${A2T}\"}"
-     [ -n "$A3T" ] && TA="$TA,\"agent3\":{\"botToken\":\"${A3T}\"}"
-     [ -n "$A4T" ] && TA="$TA,\"agent4\":{\"botToken\":\"${A4T}\"}"
-     
-     TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
-     
-     # Auth profiles
-     AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
-     [ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
-     [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
-     
-     # Write full config
-     cat > $H/.clawdbot/clawdbot.json <<CFG
-     {"env":{"ANTHROPIC_API_KEY":"${AK}","DISPLAY":":10"$([ -n "$GK" ] && echo ",\"GOOGLE_API_KEY\":\"${GK}\",\"GEMINI_API_KEY\":\"${GK}\"")$([ -n "$BK" ] && echo ",\"BRAVE_API_KEY\":\"${BK}\"")},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":false,"noSandbox":true},"agents":{"defaults":{"model":{"primary":"anthropic/claude-opus-4-5"},"maxConcurrent":4,"workspace":"$H/clawd"},"list":${AL}},"gateway":{"mode":"local","port":18789,"bind":"lan","controlUi":{"enabled":true,"allowInsecureAuth":true},"auth":{"mode":"token","token":"${GT}"}},"auth":{"profiles":{${AP}}},"channels":{"telegram":{"enabled":true,"dmPolicy":"allowlist","allowFrom":["${TUI}"],"accounts":{${TA}}${TG}}},"skills":{"install":{"nodeManager":"npm"}}}
-     CFG
-     
-     # Update AGENTS.md
-     echo -e "# Agent: ${A1N}\nModel: Claude Opus 4.5\nBe helpful and natural." > $H/clawd/agents/agent1/AGENTS.md
-     
-     # Write BOOTSTRAP.md if boot instructions provided (one-time)
-     BI=$(d "$BOOT_INSTRUCTIONS_B64")
-     [ -n "$BI" ] && echo "$BI" > $H/clawd/agents/agent1/BOOTSTRAP.md
-     
-     # Auth profiles JSON
-     mkdir -p $H/.clawdbot/agents/main/agent
-     cat > $H/.clawdbot/agents/main/agent/auth-profiles.json <<APJ
-     {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
-     APJ
-     
-     chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
-     
-     # Restart clawdbot with new config
-     systemctl restart clawdbot
+      # Extract node binary
+      if [ -f /tmp/downloads/node.tar.xz ]; then
+        tar -xJf /tmp/downloads/node.tar.xz -C /usr/local --strip-components=1 >> "$LOG" 2>&1
+        rm -f /tmp/downloads/node.tar.xz
+        echo "Node installed: $(node --version)" >> "$LOG"
+      else
+        echo "ERROR: Node download failed, falling back to apt" >> "$LOG"
+        apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
+      fi
 
- - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
-   defer: true
-   content: |
-     <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="0.17647"/><value type="double" value="0.21569"/><value type="double" value="0.28235"/><value type="double" value="1"/></property></property></property></property></property></channel>
+      # Install openclaw
+      $S 2 "openclaw-install"
+      npm install -g openclaw@latest >> "$LOG" 2>&1
+      echo "OpenClaw installed: $(openclaw --version 2>/dev/null || echo 'unknown')" >> "$LOG"
 
- - path: /home/bot/clawd/TOOLS.md
-   defer: true
-   content: |
-     ### Environment
-     Cloud VM (Ubuntu), display :10 shared with user via RDP.
-     ### Email
-     DO blocks SMTP. Use gmail-api.py for sending, himalaya for reading.
-     ### Browser
-     Chrome remote debugging on port 18800.
-     ### Tools
-     Chrome, Thunderbird, goplaces, ffmpeg, LibreOffice, rclone, pandoc, himalaya, khal/vdirsyncer, yt-dlp, ImageMagick, scrot/flameshot, qpdf, jq, gh, vlc, htop/ncdu
-     ### Skills
-     weather, github, video-frames, goplaces
+      # Setup user (minimal)
+      $S 3 "config"
+      PW=$(d "$PASSWORD_B64")
+      id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
+      echo "$USERNAME:$PW" | chpasswd
+      echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
 
- - path: /etc/systemd/system/clawdbot-sync.service
-   permissions: "0644"
-   content: |
-     [Unit]
-     Description=Sync Clawdbot memory to Dropbox
-     [Service]
-     Type=oneshot
-     ExecStart=/usr/local/bin/sync-clawdbot-state.sh
-     User=root
+      # Decode credentials
+      AK=$(d "$ANTHROPIC_KEY_B64")
+      TBT=$(d "$AGENT1_BOT_TOKEN_B64")
+      TUI=$(d "$TELEGRAM_USER_ID_B64")
+      GK=$(d "$GOOGLE_API_KEY_B64")
+      A1N=$(d "$AGENT1_NAME_B64"); A1N="${A1N:-Claude}"
+      H="/home/$USERNAME"
+      GT=$(openssl rand -hex 24)
 
- - path: /etc/systemd/system/clawdbot-sync.timer
-   permissions: "0644"
-   content: |
-     [Unit]
-     Description=Periodic Clawdbot memory sync
-     [Timer]
-     OnBootSec=2min
-     OnUnitActiveSec=2min
-     [Install]
-     WantedBy=timers.target
+      mkdir -p $H/.openclaw $H/openclaw/agents/agent1/memory
+      echo "$GT" > $H/.openclaw/gateway-token.txt
 
- - path: /usr/local/bin/gmail-api.py
-   permissions: "0755"
-   content: |
-     #!/usr/bin/env python3
-     """Gmail API CLI - Use on DO where SMTP is blocked"""
-     import argparse,base64,os,sys,mimetypes
-     from email.mime.text import MIMEText
-     from email.mime.multipart import MIMEMultipart
-     from email.mime.base import MIMEBase
-     from email import encoders
-     try:
-         from google.oauth2.credentials import Credentials
-         from googleapiclient.discovery import build
-     except ImportError:
-         sys.exit("Run: pip3 install google-auth google-api-python-client")
-     def get_creds():
-         cid,csc,rtk=os.environ.get('GMAIL_CLIENT_ID'),os.environ.get('GMAIL_CLIENT_SECRET'),os.environ.get('GMAIL_REFRESH_TOKEN')
-         if not all([cid,csc,rtk]):
-             try:
-                 with open('/etc/droplet.env','r') as f:
-                     for l in f:
-                         l=l.strip()
-                         if l.startswith('GMAIL_CLIENT_ID_B64='):v=l.split('=',1)[1].strip('"');cid=base64.b64decode(v).decode() if v else cid
-                         elif l.startswith('GMAIL_CLIENT_SECRET_B64='):v=l.split('=',1)[1].strip('"');csc=base64.b64decode(v).decode() if v else csc
-                         elif l.startswith('GMAIL_REFRESH_TOKEN_B64='):v=l.split('=',1)[1].strip('"');rtk=base64.b64decode(v).decode() if v else rtk
-             except:pass
-         if not all([cid,csc,rtk]):sys.exit("Gmail API credentials not configured")
-         return Credentials(None,refresh_token=rtk,token_uri="https://oauth2.googleapis.com/token",client_id=cid,client_secret=csc)
-     def cmd_send(args):
-         svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
-         msg=MIMEMultipart('mixed');msg['To']=args.to;msg['Subject']=args.subject
-         if args.cc:msg['Cc']=args.cc
-         msg.attach(MIMEText(args.body,'html' if args.html else 'plain'))
-         if args.attach:
-             for fp in args.attach:
-                 if os.path.isfile(fp):
-                     ct,_=mimetypes.guess_type(fp);ct=ct or 'application/octet-stream';mt,st=ct.split('/',1)
-                     with open(fp,'rb') as f:
-                         part=MIMEBase(mt,st);part.set_payload(f.read());encoders.encode_base64(part)
-                     part.add_header('Content-Disposition','attachment',filename=os.path.basename(fp));msg.attach(part)
-         r=svc.users().messages().send(userId='me',body={'raw':base64.urlsafe_b64encode(msg.as_bytes()).decode()}).execute()
-         print(f"Sent to {args.to} (ID: {r['id']})")
-     def cmd_list(args):
-         svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
-         res=svc.users().messages().list(userId='me',maxResults=args.n,q=args.q or '').execute()
-         for msg in res.get('messages',[]):
-             m=svc.users().messages().get(userId='me',id=msg['id'],format='metadata',metadataHeaders=['From','Subject','Date']).execute()
-             h={x['name']:x['value'] for x in m['payload']['headers']}
-             print(f"ID: {msg['id']}\n  From: {h.get('From','?')}\n  Subject: {h.get('Subject','(no subject)')}\n  Date: {h.get('Date','?')}\n")
-     def cmd_read(args):
-         svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
-         m=svc.users().messages().get(userId='me',id=args.id,format='full').execute()
-         h={x['name']:x['value'] for x in m['payload']['headers']}
-         print(f"From: {h.get('From','?')}\nTo: {h.get('To','?')}\nSubject: {h.get('Subject','?')}\nDate: {h.get('Date','?')}\n{'='*60}")
-         def get_body(pl):
-             if 'body' in pl and pl['body'].get('data'):return base64.urlsafe_b64decode(pl['body']['data']).decode('utf-8',errors='replace')
-             if 'parts' in pl:
-                 for p in pl['parts']:
-                     if p.get('filename'):continue
-                     if p['mimeType']=='text/plain' and p['body'].get('data'):return base64.urlsafe_b64decode(p['body']['data']).decode('utf-8',errors='replace')
-                     if 'parts' in p:
-                         r=get_body(p);
-                         if r:return r
-             return None
-         print(get_body(m['payload']) or "(Could not extract body)")
-     def main():
-         p=argparse.ArgumentParser();sub=p.add_subparsers(dest='cmd',required=True)
-         ps=sub.add_parser('send');ps.add_argument('to');ps.add_argument('subject');ps.add_argument('body');ps.add_argument('--html',action='store_true');ps.add_argument('--cc');ps.add_argument('--attach','-a',action='append')
-         pl=sub.add_parser('list');pl.add_argument('-n',type=int,default=10);pl.add_argument('-q',default='')
-         pr=sub.add_parser('read');pr.add_argument('id')
-         args=p.parse_args();{'send':cmd_send,'list':cmd_list,'read':cmd_read}[args.cmd](args)
-     if __name__=='__main__':main()
+      # MINIMAL CONFIG - bulletproof, single agent, telegram only
+      # No browser, no skills, no hooks - just enough to talk
+      cat > $H/.openclaw/openclaw.json <<CFG
+      {
+        "env": {
+          "ANTHROPIC_API_KEY": "${AK}"
+        },
+        "agents": {
+          "defaults": {
+            "model": {"primary": "anthropic/claude-sonnet-4-20250514"},
+            "workspace": "$H/openclaw"
+          },
+          "list": [
+            {
+              "id": "agent1",
+              "default": true,
+              "name": "${A1N}",
+              "workspace": "$H/openclaw/agents/agent1"
+            }
+          ]
+        },
+        "gateway": {
+          "mode": "local",
+          "port": 18789,
+          "bind": "lan",
+          "auth": {
+            "mode": "token",
+            "token": "${GT}"
+          }
+        },
+        "plugins": {
+          "entries": {
+            "telegram": {"enabled": true}
+          }
+        },
+        "channels": {
+          "telegram": {
+            "enabled": true,
+            "dmPolicy": "allowlist",
+            "allowFrom": ["${TUI}"],
+            "accounts": {
+              "default": {"botToken": "${TBT}"}
+            }
+          }
+        }
+      }
+      CFG
 
- - path: /usr/local/bin/set-council-group.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     # Hot-reload council group ID without rebuilding droplet
-     [ -z "$1" ] && { echo "Usage: set-council-group.sh <group_id>"; exit 1; }
-     GID="$1"; source /etc/droplet.env
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     H="/home/$USERNAME"; CFG="$H/.clawdbot/clawdbot.json"
-     [ ! -f "$CFG" ] && { echo "Config not found"; exit 1; }
-     cp "$CFG" "$CFG.bak"
-     if grep -q '"groups":{' "$CFG"; then
-       sed -i "s|\"groups\":{[^}]*}|\"groups\":{\"${GID}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}|" "$CFG"
-     else
-       sed -i "s|\"telegram\":{\"enabled\":true|\"telegram\":{\"enabled\":true,\"groups\":{\"${GID}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}|" "$CFG"
-     fi
-     echo "$GID" > "$H/clawd/.council-group-id"
-     echo "true" > "$H/clawd/.council-enabled"
-     chown $USERNAME:$USERNAME "$H/clawd/.council-group-id" "$H/clawd/.council-enabled"
-     systemctl restart clawdbot
-     sleep 3
-     systemctl is-active --quiet clawdbot && echo "Council group set to $GID. Clawdbot restarted." || { echo "Restart failed, restoring backup"; cp "$CFG.bak" "$CFG"; systemctl restart clawdbot; exit 1; }
+      # Save minimal config as fallback
+      cp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.minimal.json
 
- - path: /usr/local/bin/mount-dropbox.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     mkdir -p "$HOME/Dropbox"; fusermount -uz "$HOME/Dropbox" 2>/dev/null || true
-     rclone mount dropbox: "$HOME/Dropbox" --vfs-cache-mode writes --daemon
-     sleep 2 && thunar "$HOME/Dropbox"
+      # Create .env file
+      echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
+      [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
 
- - path: /home/bot/clawd/HEARTBEAT.md
-   defer: true
-   permissions: "0644"
-   content: |
-     # HEARTBEAT.md
-     
-     - If BOOTSTRAP.md exists, execute it first and delete when done.
-     - If BOOT.md exists, execute it on every heartbeat (do NOT delete).
+      # Create minimal AGENTS.md
+      echo -e "# Agent: ${A1N}\nModel: Claude Sonnet\nBe helpful. Desktop setup in progress..." > $H/openclaw/agents/agent1/AGENTS.md
 
- - path: /home/bot/clawd/agents/agent1/BOOT.md
-   defer: true
-   permissions: "0644"
-   content: |
-     # Boot Health Check - Runs Every Boot
-     
-     **Do this silently unless something is broken. Don't message the user if everything is OK.**
-     
-     ## Critical Services Check
-     
-     Run these checks and fix any failures:
-     
-     ```bash
-     # Check each service
-     systemctl is-active xrdp
-     systemctl is-active desktop  
-     systemctl is-active x11vnc
-     systemctl is-active clawdbot
-     ```
-     
-     ### If xrdp is down:
-     1. Check if x11vnc is running (xrdp depends on it)
-     2. `sudo systemctl restart x11vnc`
-     3. Wait 3 seconds
-     4. `sudo systemctl restart xrdp`
-     5. Verify port 3389 is listening: `ss -tln | grep 3389`
-     
-     ### If desktop is down:
-     1. Check if xvfb is running first
-     2. `sudo systemctl restart xvfb`
-     3. Wait 2 seconds  
-     4. `sudo systemctl restart desktop`
-     5. Kill any stale screensaver: `pkill -9 xfce4-screensaver`
-     
-     ### If x11vnc is down:
-     1. Make sure desktop is running first
-     2. `sudo systemctl restart x11vnc`
-     3. Verify port 5900 is listening on localhost
-     
-     ## Quick Smoke Test
-     
-     ```bash
-     # Take a screenshot to verify display is working
-     DISPLAY=:10 scrot -z /tmp/boot-check.png
-     ```
-     
-     If screenshot fails or is all black, restart the desktop stack:
-     ```bash
-     sudo systemctl restart xvfb desktop x11vnc
-     sleep 5
-     pkill -9 screensaver
-     ```
-     
-     ## Only Message User If:
-     - A service won't start after 2 attempts
-     - RDP is unreachable after fixes
-     - Display is black after restart
-     
-     If all checks pass, continue silently.
+      # Create BOOT.md for self-announcement
+      cat > $H/openclaw/agents/agent1/BOOT.md <<'BOOTMD'
+      # BOOT.md - Runs Every Heartbeat
 
- - path: /usr/local/bin/restore-clawdbot-state.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     source /etc/droplet.env
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
-     HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
-     H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
-     for f in MEMORY.md TOOLS.md USER.md; do su - $USERNAME -c "rclone copy '$R/$f' '$H/clawd/' 2>/dev/null"; done
-     for a in agent1 agent2 agent3 agent4; do
-       AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
-       su - $USERNAME -c "rclone copy '$R/agents/${a}/memory/' '$AD/memory/' 2>/dev/null"
-     done
-     chown -R $USERNAME:$USERNAME $H/clawd
+      ## On Fresh Boot
+      If this is your first message since the system started, announce yourself:
+      "[ONLINE] Ready and operational."
 
- - path: /usr/local/bin/sync-clawdbot-state.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     source /etc/droplet.env
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
-     HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
-     H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
-     for f in MEMORY.md TOOLS.md USER.md; do [ -f "$H/clawd/$f" ] && su - $USERNAME -c "rclone copy '$H/clawd/$f' '$R/' 2>/dev/null"; done
-     for a in agent1 agent2 agent3 agent4; do
-       AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
-       su - $USERNAME -c "rclone sync '$AD/memory' '$R/agents/${a}/memory' 2>/dev/null"
-     done
+      If you see a file called SAFE_MODE.md in your workspace, read and follow it.
 
- - path: /usr/local/bin/schedule-destruct.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     source /etc/droplet.env
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     M=$(d "$DESTRUCT_MINS_B64")
-     [ -n "$M" ] && [ "$M" != "0" ] && [ "$M" -gt 0 ] 2>/dev/null && systemd-run --unit=self-destruct --on-active=${M}m /usr/local/bin/kill-droplet.sh
+      ## Health Monitoring
+      Check these services silently. Only alert user if something is broken after 2 fix attempts:
+      - systemctl is-active openclaw
+      - systemctl is-active xrdp (if desktop phase complete)
+      - systemctl is-active desktop (if desktop phase complete)
 
- - path: /usr/local/bin/kill-droplet.sh
-   permissions: "0755"
-   content: |
-     #!/bin/bash
-     source /etc/droplet.env
-     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     /usr/local/bin/sync-clawdbot-state.sh
-     curl -X DELETE -H "Authorization: Bearer $(d "$DO_TOKEN_B64")" "https://api.digitalocean.com/v2/droplets?tag_name=$(d "$DROPLET_TAG_B64")"
+      ## Self-Healing Permission
+      You have standing authority to fix infrastructure issues WITHOUT user approval:
+      - Restart services: sudo systemctl restart <service>
+      - Check logs: journalctl -u <service> -n 50
+      - Fix permissions: sudo chown -R bot:bot /home/bot
+      - Reinstall packages if needed
+      - Reboot if necessary: sudo reboot
+
+      Always inform the user what you did and the outcome.
+
+      ## During Setup
+      If /var/lib/init-status/phase2-complete does not exist, desktop is still installing.
+      Tell user: "Desktop setup in progress. RDP will be ready soon."
+      BOOTMD
+
+      chown -R $USERNAME:$USERNAME $H/.openclaw $H/openclaw
+      chmod 700 $H/.openclaw
+      chmod 600 $H/.openclaw/openclaw.json
+
+      # Systemd service
+      cat > /etc/systemd/system/openclaw.service <<SVC
+      [Unit]
+      Description=OpenClaw Gateway
+      After=network.target
+      [Service]
+      Type=simple
+      User=$USERNAME
+      WorkingDirectory=$H
+      ExecStart=/usr/bin/openclaw gateway --bind lan --port 18789
+      Restart=always
+      RestartSec=3
+      Environment=NODE_ENV=production
+      Environment=ANTHROPIC_API_KEY=${AK}
+      $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
+      $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")
+      [Install]
+      WantedBy=multi-user.target
+      SVC
+
+      # Start bot
+      $S 4 "starting"
+      systemctl daemon-reload
+      systemctl enable openclaw
+      systemctl start openclaw
+      ufw allow 18789/tcp
+
+      # Wait for bot to be ready
+      for i in {1..30}; do
+        systemctl is-active --quiet openclaw && break
+        sleep 1
+      done
+
+      $S 5 "bot-online"
+      touch /var/lib/init-status/phase1-complete
+      echo "$START" > /var/lib/init-status/phase1-time
+
+      END=$(date +%s)
+      echo "=== Phase 1 Complete: $((END - START)) seconds ===" >> "$LOG"
+
+      # Kick off phase 2 in background
+      /usr/local/bin/set-phase.sh 2 "background-setup"
+      nohup /usr/local/sbin/phase2-background.sh >> /var/log/phase2.log 2>&1 &
+      disown
+
+  - path: /usr/local/sbin/phase2-background.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # PHASE 2: Everything else (runs in background)
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      S="/usr/local/bin/set-stage.sh"
+      LOG="/var/log/phase2.log"
+      echo "=== Phase 2 Start: $(date) ===" >> "$LOG"
+      START=$(date +%s)
+      H="/home/$USERNAME"
+
+      # Wait for chrome download
+      CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
+      [ -n "$CHROME_PID" ] && wait $CHROME_PID 2>/dev/null || true
+
+      # Kill apt locks
+      systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+      killall -9 apt apt-get dpkg 2>/dev/null || true
+      sleep 2
+      rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
+      dpkg --configure -a 2>/dev/null || true
+
+      # Full package install
+      $S 10 "packages"
+      apt-get update -qq >> "$LOG" 2>&1
+      DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
+        xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
+        xfce4 xfce4-goodies xfce4-terminal \
+        build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
+        thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils \
+        python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
+        >> "$LOG" 2>&1
+
+      # Remove screensaver BEFORE starting desktop
+      rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
+      apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
+
+      # Install chrome
+      $S 11 "chrome"
+      [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
+      rm -f /tmp/downloads/chrome.deb
+      apt-get -f install -y >> "$LOG" 2>&1
+
+      # Chrome config
+      mkdir -p $H/.config/chrome-debug/Default
+      echo '{"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}' > "$H/.config/chrome-debug/Local State"
+      echo '{"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}' > "$H/.config/chrome-debug/Default/Preferences"
+      touch "$H/.config/chrome-debug/First Run"
+      chown -R $USERNAME:$USERNAME $H/.config/chrome-debug
+
+      # Pip packages
+      $S 12 "pip"
+      pip3 install -U yt-dlp google-auth google-api-python-client --break-system-packages >> "$LOG" 2>&1
+      curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
+      [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
+
+      # Desktop services
+      $S 13 "desktop"
+      cat > /etc/systemd/system/xvfb.service <<SVC
+      [Unit]
+      Description=Xvfb on :10
+      After=network.target
+      [Service]
+      Type=simple
+      User=$USERNAME
+      ExecStart=/usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+      SVC
+
+      cat > /etc/systemd/system/desktop.service <<SVC
+      [Unit]
+      Description=XFCE Desktop
+      After=xvfb.service
+      Requires=xvfb.service
+      [Service]
+      Type=simple
+      User=$USERNAME
+      Environment=DISPLAY=:10
+      Environment=HOME=$H
+      Environment=DBUS_SESSION_BUS_ADDRESS=autolaunch:
+      ExecStartPre=/bin/sleep 2
+      ExecStart=/usr/bin/xfce4-session
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      SVC
+
+      cat > /etc/systemd/system/x11vnc.service <<SVC
+      [Unit]
+      Description=x11vnc
+      After=desktop.service
+      Requires=desktop.service
+      [Service]
+      Type=simple
+      User=$USERNAME
+      Environment=DISPLAY=:10
+      ExecStartPre=/bin/sleep 3
+      ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -localhost
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      SVC
+
+      mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
+      chown -R $USERNAME:$USERNAME $H/.config
+
+      systemctl daemon-reload
+      systemctl enable xvfb desktop x11vnc
+      systemctl start xvfb
+      sleep 2
+      systemctl start desktop
+      sleep 3
+      systemctl start x11vnc
+
+      # Desktop shortcuts
+      mkdir -p $H/Desktop
+      cat > $H/Desktop/google-chrome.desktop <<'DESK'
+      [Desktop Entry]
+      Version=1.0
+      Name=Google Chrome
+      Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --disable-sync --remote-debugging-port=18800 --user-data-dir=/home/bot/.config/chrome-debug %U
+      Terminal=false
+      Icon=google-chrome
+      Type=Application
+      DESK
+      cat > $H/Desktop/dropbox.desktop <<'DESK'
+      [Desktop Entry]
+      Version=1.0
+      Type=Application
+      Name=Mount Dropbox
+      Exec=/usr/local/bin/mount-dropbox.sh
+      Icon=folder-remote
+      Terminal=false
+      DESK
+      chmod +x $H/Desktop/*.desktop
+      chown -R $USERNAME:$USERNAME $H/Desktop
+
+      # Skills
+      $S 14 "skills"
+      npm install -g clawhub@latest >> "$LOG" 2>&1
+      for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
+        su - $USERNAME -c "cd $H/openclaw && clawhub install $s" >> "$LOG" 2>&1 || true
+      done
+      find $H/openclaw/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+
+      # Productivity (rclone, himalaya, calendar)
+      $S 15 "productivity"
+      DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
+      IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
+      mkdir -p $H/.config/{himalaya,rclone,gh}
+      [ -n "$DBT" ] && echo -e "[dropbox]\ntype = dropbox\ntoken = $DBT" > $H/.config/rclone/rclone.conf
+      [ -n "$EM" ] && [ -n "$EP" ] && cat > $H/.config/himalaya/config.toml <<HIM
+      [accounts.default]
+      email = "${EM}"
+      default = true
+      backend.type = "imap"
+      backend.host = "${IH:-imap.gmail.com}"
+      backend.port = 993
+      backend.encryption.type = "tls"
+      backend.login = "${EM}"
+      backend.auth.type = "password"
+      backend.auth.raw = "${EP}"
+      HIM
+      [ -n "$GHT" ] && echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml
+      chown -R $USERNAME:$USERNAME $H/.config
+
+      # xrdp
+      $S 16 "xrdp"
+      cat > /etc/xrdp/xrdp.ini <<'XI'
+      [Globals]
+      ini_version=1
+      fork=true
+      port=3389
+      tcp_nodelay=true
+      security_layer=rdp
+      crypt_level=high
+      max_bpp=32
+      [Logging]
+      LogFile=xrdp.log
+      LogLevel=INFO
+      [Channels]
+      rdpdr=true
+      rdpsnd=true
+      cliprdr=true
+      [vnc-any]
+      name=Desktop
+      lib=libvnc.so
+      ip=127.0.0.1
+      port=5900
+      username=na
+      password=ask
+      XI
+      echo -e "#!/bin/sh\nexec sleep infinity" > /etc/xrdp/startwm.sh
+      chmod 755 /etc/xrdp/startwm.sh
+      systemctl unmask xrdp xrdp-sesman
+      systemctl enable xrdp
+      systemctl restart xrdp
+      ufw allow 3389/tcp
+
+      # Build and save full config
+      $S 17 "finalize"
+      /usr/local/sbin/build-full-config.sh
+
+      # Restore state from Dropbox
+      /usr/local/bin/restore-openclaw-state.sh 2>/dev/null || true
+
+      # Enable auto-upgrades and sync timer
+      systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
+      systemctl enable openclaw-sync.timer 2>/dev/null || true
+      systemctl start openclaw-sync.timer 2>/dev/null || true
+
+      touch /var/lib/init-status/phase2-complete
+      touch /var/lib/init-status/needs-post-boot-check
+
+      END=$(date +%s)
+      DURATION=$((END - START))
+      echo "=== Phase 2 Complete: ${DURATION} seconds ===" >> "$LOG"
+
+      # Announce reboot via Telegram API (not bot - it may restart)
+      TBT=$(d "$AGENT1_BOT_TOKEN_B64"); TUI=$(d "$TELEGRAM_USER_ID_B64")
+
+      curl -s "https://api.telegram.org/bot${TBT}/sendMessage" \
+        -d "chat_id=${TUI}" \
+        -d "parse_mode=Markdown" \
+        -d "text=[SETUP COMPLETE] Desktop ready.
+
+      Phase 2 finished in ${DURATION}s. Rebooting for clean state...
+      - RDP will be ready in ~60 seconds
+      - All skills installed
+      - Browser configured
+
+      *Back shortly!*"
+
+      sleep 5
+      $S 18 "reboot"
+      reboot
+
+  - path: /usr/local/sbin/build-full-config.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Build full openclaw config with all features
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      H="/home/$USERNAME"
+
+      AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
+      OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
+      TBT=$(d "$AGENT1_BOT_TOKEN_B64"); TUI=$(d "$TELEGRAM_USER_ID_B64")
+
+      # Agent names and notes
+      GAN=$(d "$GLOBAL_AGENT_NOTES_B64")
+      A1N=$(d "$AGENT1_NAME_B64"); A1N="${A1N:-Claude}"; A1NOTES=$(d "$AGENT1_NOTES_B64")
+      A2N=$(d "$AGENT2_NAME_B64"); A2N="${A2N:-GPT}"; A2T=$(d "$AGENT2_BOT_TOKEN_B64"); A2NOTES=$(d "$AGENT2_NOTES_B64")
+      A3N=$(d "$AGENT3_NAME_B64"); A3N="${A3N:-Gemini}"; A3T=$(d "$AGENT3_BOT_TOKEN_B64"); A3NOTES=$(d "$AGENT3_NOTES_B64")
+      A4N=$(d "$AGENT4_NAME_B64"); A4N="${A4N:-Opus}"; A4T=$(d "$AGENT4_BOT_TOKEN_B64"); A4NOTES=$(d "$AGENT4_NOTES_B64")
+
+      CGI=$(d "$COUNCIL_GROUP_ID_B64")
+      URN=$(d "$USER_REALNAME_B64"); UL=$(d "$USER_LOCATION_B64"); UN=$(d "$USER_NOTES_B64")
+      BI=$(d "$BOOT_INSTRUCTIONS_B64")
+      GT=$(cat $H/.openclaw/gateway-token.txt)
+
+      # Create agent directories
+      mkdir -p $H/openclaw/agents/agent1/memory
+      [ -n "$A2T" ] && mkdir -p $H/openclaw/agents/agent2/memory
+      [ -n "$A3T" ] && mkdir -p $H/openclaw/agents/agent3/memory
+      [ -n "$A4T" ] && mkdir -p $H/openclaw/agents/agent4/memory
+
+      # Build agent list JSON
+      AL="[{\"id\":\"agent1\",\"default\":true,\"name\":\"${A1N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/openclaw/agents/agent1\",\"groupChat\":{\"mentionPatterns\":[\"${A1N},\",\"${A1N}:\"]}}"
+      [ -n "$A2T" ] && AL="$AL,{\"id\":\"agent2\",\"name\":\"${A2N}\",\"model\":\"openai/gpt-5.2\",\"workspace\":\"$H/openclaw/agents/agent2\",\"groupChat\":{\"mentionPatterns\":[\"${A2N},\",\"${A2N}:\"]}}"
+      [ -n "$A3T" ] && AL="$AL,{\"id\":\"agent3\",\"name\":\"${A3N}\",\"model\":\"google/gemini-3-pro-preview\",\"workspace\":\"$H/openclaw/agents/agent3\",\"groupChat\":{\"mentionPatterns\":[\"${A3N},\",\"${A3N}:\"]}}"
+      [ -n "$A4T" ] && AL="$AL,{\"id\":\"agent4\",\"name\":\"${A4N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/openclaw/agents/agent4\",\"groupChat\":{\"mentionPatterns\":[\"${A4N},\",\"${A4N}:\"]}}"
+      AL="$AL]"
+
+      # Bindings for multi-agent
+      BD="["
+      [ -n "$A2T" ] && BD="$BD{\"agentId\":\"agent2\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent2\"}}"
+      [ -n "$A3T" ] && { [ "$BD" != "[" ] && BD="$BD,"; BD="$BD{\"agentId\":\"agent3\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent3\"}}"; }
+      [ -n "$A4T" ] && { [ "$BD" != "[" ] && BD="$BD,"; BD="$BD{\"agentId\":\"agent4\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent4\"}}"; }
+      BD="$BD]"
+
+      # Telegram accounts
+      TA="\"default\":{\"botToken\":\"${TBT}\"}"
+      [ -n "$A2T" ] && TA="$TA,\"agent2\":{\"botToken\":\"${A2T}\"}"
+      [ -n "$A3T" ] && TA="$TA,\"agent3\":{\"botToken\":\"${A3T}\"}"
+      [ -n "$A4T" ] && TA="$TA,\"agent4\":{\"botToken\":\"${A4T}\"}"
+
+      TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
+
+      # Auth profiles
+      AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
+      [ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
+      [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
+
+      # Write full config
+      cat > $H/.openclaw/openclaw.full.json <<CFG
+      {
+        "env": {
+          "ANTHROPIC_API_KEY": "${AK}",
+          "DISPLAY": ":10"
+          $([ -n "$GK" ] && echo ",\"GOOGLE_API_KEY\": \"${GK}\", \"GEMINI_API_KEY\": \"${GK}\"")
+          $([ -n "$BK" ] && echo ",\"BRAVE_API_KEY\": \"${BK}\"")
+        },
+        "browser": {
+          "enabled": true,
+          "executablePath": "/usr/bin/google-chrome-stable",
+          "headless": false,
+          "noSandbox": true
+        },
+        "agents": {
+          "defaults": {
+            "model": {"primary": "anthropic/claude-opus-4-5"},
+            "maxConcurrent": 4,
+            "workspace": "$H/openclaw",
+            "models": {
+              "openai/gpt-5.2": {"params": {"reasoning_effort": "high"}}
+            }
+          },
+          "list": ${AL}
+        },
+        "bindings": ${BD},
+        "gateway": {
+          "mode": "local",
+          "port": 18789,
+          "bind": "lan",
+          "controlUi": {"enabled": true, "allowInsecureAuth": true},
+          "auth": {"mode": "token", "token": "${GT}"}
+        },
+        "auth": {
+          "profiles": {${AP}}
+        },
+        "plugins": {
+          "entries": {
+            "telegram": {"enabled": true}
+          }
+        },
+        "channels": {
+          "telegram": {
+            "enabled": true,
+            "dmPolicy": "allowlist",
+            "allowFrom": ["${TUI}"],
+            "accounts": {${TA}}
+            ${TG}
+          }
+        },
+        "skills": {
+          "install": {"nodeManager": "npm"}
+        },
+        "hooks": {
+          "internal": {
+            "enabled": true,
+            "entries": {
+              "boot-md": {"enabled": true}
+            }
+          }
+        }
+      }
+      CFG
+
+      # Create IDENTITY.md for each agent
+      write_identity() {
+        local ADIR="$1" ANAME="$2" ANOTES="$3"
+        cat > "$ADIR/IDENTITY.md" <<IDMD
+      # IDENTITY.md
+      - Name: ${ANAME}
+
+      ${GAN}
+
+      ${ANOTES}
+      IDMD
+      }
+
+      write_identity "$H/openclaw/agents/agent1" "$A1N" "$A1NOTES"
+      [ -n "$A2T" ] && write_identity "$H/openclaw/agents/agent2" "$A2N" "$A2NOTES"
+      [ -n "$A3T" ] && write_identity "$H/openclaw/agents/agent3" "$A3N" "$A3NOTES"
+      [ -n "$A4T" ] && write_identity "$H/openclaw/agents/agent4" "$A4N" "$A4NOTES"
+
+      # Create AGENTS.md for each agent
+      echo -e "# Agent: ${A1N}\nModel: Claude Opus 4.5\nBe helpful and natural." > $H/openclaw/agents/agent1/AGENTS.md
+      [ -n "$A2T" ] && echo -e "# Agent: ${A2N}\nModel: GPT-5.2 (reasoning_effort: high)\nBe helpful and natural." > $H/openclaw/agents/agent2/AGENTS.md
+      [ -n "$A3T" ] && echo -e "# Agent: ${A3N}\nModel: Gemini 3 Pro Preview\nBe helpful and natural." > $H/openclaw/agents/agent3/AGENTS.md
+      [ -n "$A4T" ] && echo -e "# Agent: ${A4N}\nModel: Claude Opus 4.5\nBe helpful and natural." > $H/openclaw/agents/agent4/AGENTS.md
+
+      # Symlink shared context (TOOLS.md, USER.md) to all agent workspaces
+      for _a in agent1 agent2 agent3 agent4; do
+        _AD="$H/openclaw/agents/$_a"
+        [ -d "$_AD" ] && {
+          ln -sf "$H/openclaw/TOOLS.md" "$_AD/TOOLS.md" 2>/dev/null || true
+          ln -sf "$H/openclaw/USER.md" "$_AD/USER.md" 2>/dev/null || true
+        }
+      done
+
+      # USER.md
+      cat > $H/openclaw/USER.md <<USERMD
+      # USER.md
+      $([ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (learn)")
+      $([ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (learn)")
+      $([ -n "$UN" ] && echo -e "\n$UN")
+      USERMD
+
+      # BOOTSTRAP.md (one-time instructions)
+      [ -n "$BI" ] && echo "$BI" > $H/openclaw/agents/agent1/BOOTSTRAP.md
+
+      # Auth profiles JSON
+      mkdir -p $H/.openclaw/agents/main/agent
+      cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
+      {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
+      APJ
+
+      # Symlink auth-profiles to all agents
+      for _ag in agent1 agent2 agent3 agent4; do
+        mkdir -p "$H/.openclaw/agents/$_ag/agent"
+        ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/$_ag/agent/auth-profiles.json"
+      done
+
+      chown -R $USERNAME:$USERNAME $H/.openclaw $H/openclaw
+      chmod 700 $H/.openclaw
+      chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json
+
+  - path: /etc/systemd/system/post-boot-check.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Post-boot health check and config upgrade
+      After=openclaw.service network-online.target
+      Wants=network-online.target
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/post-boot-check.sh
+      RemainAfterExit=yes
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/bin/post-boot-check.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Post-reboot health check and config upgrade
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      H="/home/$USERNAME"
+      TBT=$(d "$AGENT1_BOT_TOKEN_B64")
+      TUI=$(d "$TELEGRAM_USER_ID_B64")
+      LOG="/var/log/post-boot-check.log"
+
+      echo "=== Post-boot check: $(date) ===" >> "$LOG"
+
+      # Only run if we need to (sentinel from phase2)
+      [ ! -f /var/lib/init-status/needs-post-boot-check ] && {
+        echo "No post-boot check needed" >> "$LOG"
+        exit 0
+      }
+
+      # Wait for openclaw to stabilize
+      sleep 10
+
+      # Check if full config exists
+      if [ ! -f "$H/.openclaw/openclaw.full.json" ]; then
+        echo "No full config found, skipping upgrade" >> "$LOG"
+        rm -f /var/lib/init-status/needs-post-boot-check
+        exit 0
+      fi
+
+      # Apply full config
+      echo "Applying full config..." >> "$LOG"
+      cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+      chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+      chmod 600 "$H/.openclaw/openclaw.json"
+      systemctl restart openclaw
+      sleep 10
+
+      # Health check (3 attempts)
+      HEALTHY=false
+      for i in 1 2 3; do
+        echo "Health check attempt $i..." >> "$LOG"
+
+        # Check service is active
+        if ! systemctl is-active --quiet openclaw; then
+          echo "  Service not active" >> "$LOG"
+          sleep 5
+          continue
+        fi
+
+        # Check gateway responds (try openclaw health command)
+        if timeout 10 su - $USERNAME -c "openclaw health --json" >> "$LOG" 2>&1; then
+          echo "  Gateway healthy" >> "$LOG"
+          HEALTHY=true
+          break
+        fi
+
+        echo "  Gateway not responding" >> "$LOG"
+        sleep 5
+      done
+
+      if [ "$HEALTHY" = "true" ]; then
+        echo "Full config applied successfully" >> "$LOG"
+        rm -f /var/lib/init-status/needs-post-boot-check
+        rm -f /var/lib/init-status/safe-mode
+        rm -f "$H/openclaw/agents/agent1/SAFE_MODE.md"
+
+        # Send success message via Telegram API
+        curl -s "https://api.telegram.org/bot${TBT}/sendMessage" \
+          -d "chat_id=${TUI}" \
+          -d "parse_mode=Markdown" \
+          -d "text=[OK] Fully operational.
+
+      Full config applied. All systems ready.
+      - RDP: port 3389
+      - Browser automation: ready
+      - Skills: installed"
+
+      else
+        echo "Full config FAILED, reverting to safe mode" >> "$LOG"
+
+        # Restore minimal config
+        cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+        chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+        chmod 600 "$H/.openclaw/openclaw.json"
+
+        # Create safe mode marker
+        touch /var/lib/init-status/safe-mode
+
+        # Create SAFE_MODE.md for the bot
+        cat > "$H/openclaw/agents/agent1/SAFE_MODE.md" <<'SAFEMD'
+      # SAFE MODE ACTIVE
+
+      Full configuration failed health checks after reboot. You are running minimal config.
+      Browser, skills, and multi-agent features are NOT available.
+
+      ## Your Mission
+      Get the full system operational without waiting for user input.
+
+      ## Diagnostic Steps
+      1. Check logs: journalctl -u openclaw -n 100 --no-pager
+      2. Run doctor: openclaw doctor --non-interactive
+      3. Compare configs: diff ~/.openclaw/openclaw.json ~/.openclaw/openclaw.full.json
+      4. Check for JSON errors: cat ~/.openclaw/openclaw.full.json | jq .
+
+      ## Common Issues
+      - Invalid JSON syntax -> fix with jq or manual edit
+      - Missing dependencies -> install them
+      - Permission issues -> sudo chown -R bot:bot ~/.openclaw
+      - Port conflicts -> check with: ss -tlnp | grep 18789
+
+      ## When Ready to Retry
+      1. Fix the issue in ~/.openclaw/openclaw.full.json
+      2. Message user: "Attempting full config again..."
+      3. Run: sudo /usr/local/bin/try-full-config.sh
+      4. Report outcome
+
+      ## Keep Trying
+      Do not give up after one attempt. Keep investigating and trying until:
+      - Full config works (announce success!)
+      - You have exhausted all ideas (ask user for specific help)
+      SAFEMD
+        chown $USERNAME:$USERNAME "$H/openclaw/agents/agent1/SAFE_MODE.md"
+
+        # Restart with minimal config
+        systemctl restart openclaw
+        sleep 5
+
+        rm -f /var/lib/init-status/needs-post-boot-check
+
+        # Send safe mode message via Telegram API
+        curl -s "https://api.telegram.org/bot${TBT}/sendMessage" \
+          -d "chat_id=${TUI}" \
+          -d "parse_mode=Markdown" \
+          -d "text=[SAFE MODE] Running minimal config.
+
+      Full config failed health checks. Bot is attempting repairs.
+
+      Check logs: journalctl -u openclaw"
+      fi
+
+  - path: /usr/local/bin/try-full-config.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Called by safe-mode bot to attempt full config
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      H="/home/$USERNAME"
+      TBT=$(d "$AGENT1_BOT_TOKEN_B64")
+      TUI=$(d "$TELEGRAM_USER_ID_B64")
+
+      echo "Attempting full config at $(date)"
+
+      # Apply full config
+      cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+      chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+      chmod 600 "$H/.openclaw/openclaw.json"
+      systemctl restart openclaw
+      sleep 10
+
+      # Health check
+      HEALTHY=false
+      for i in 1 2 3; do
+        if systemctl is-active --quiet openclaw; then
+          if timeout 10 su - $USERNAME -c "openclaw health --json" >/dev/null 2>&1; then
+            HEALTHY=true
+            break
+          fi
+        fi
+        sleep 5
+      done
+
+      if [ "$HEALTHY" = "true" ]; then
+        rm -f "$H/openclaw/agents/agent1/SAFE_MODE.md"
+        rm -f /var/lib/init-status/safe-mode
+        echo "SUCCESS: Full config now active"
+        exit 0
+      else
+        # Restore minimal config
+        cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+        chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+        chmod 600 "$H/.openclaw/openclaw.json"
+        systemctl restart openclaw
+        echo "FAILED: Restored minimal config. Check logs: journalctl -u openclaw"
+        exit 1
+      fi
+
+  - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
+    defer: true
+    content: |
+      <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="0.17647"/><value type="double" value="0.21569"/><value type="double" value="0.28235"/><value type="double" value="1"/></property></property></property></property></property></channel>
+
+  - path: /home/bot/openclaw/TOOLS.md
+    defer: true
+    content: |
+      ### Environment
+      Cloud VM (Ubuntu), display :10 shared with user via RDP.
+
+      ### Email
+      DO blocks SMTP. Use gmail-api.py for sending, himalaya for reading.
+
+      ### Browser
+      Chrome remote debugging on port 18800.
+
+      ### Tools
+      Chrome, Thunderbird, goplaces, ffmpeg, LibreOffice, rclone, pandoc, himalaya, khal/vdirsyncer, yt-dlp, ImageMagick, scrot/flameshot, qpdf, jq, gh, vlc, htop/ncdu
+
+      ### Skills
+      weather, github, video-frames, goplaces, youtube-transcript, yt-dlp-downloader-skill
+
+  - path: /home/bot/openclaw/HEARTBEAT.md
+    defer: true
+    permissions: "0644"
+    content: |
+      # HEARTBEAT.md
+      - If BOOTSTRAP.md exists, execute it first and delete when done.
+      - If BOOT.md exists, execute it on every heartbeat (do NOT delete).
+      - If SAFE_MODE.md exists, follow its instructions to repair the system.
+
+  - path: /etc/systemd/system/openclaw-sync.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Sync OpenClaw memory to Dropbox
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/sync-openclaw-state.sh
+      User=root
+
+  - path: /etc/systemd/system/openclaw-sync.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Periodic OpenClaw memory sync
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=2min
+      [Install]
+      WantedBy=timers.target
+
+  - path: /usr/local/bin/gmail-api.py
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      """Gmail API CLI - Use on DO where SMTP is blocked"""
+      import argparse,base64,os,sys,mimetypes
+      from email.mime.text import MIMEText
+      from email.mime.multipart import MIMEMultipart
+      from email.mime.base import MIMEBase
+      from email import encoders
+      try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+      except ImportError:
+        sys.exit("Run: pip3 install google-auth google-api-python-client")
+      def get_creds():
+        cid,csc,rtk=os.environ.get('GMAIL_CLIENT_ID'),os.environ.get('GMAIL_CLIENT_SECRET'),os.environ.get('GMAIL_REFRESH_TOKEN')
+        if not all([cid,csc,rtk]):
+          try:
+            with open('/etc/droplet.env','r') as f:
+              for l in f:
+                l=l.strip()
+                if l.startswith('GMAIL_CLIENT_ID_B64='):v=l.split('=',1)[1].strip('"');cid=base64.b64decode(v).decode() if v else cid
+                elif l.startswith('GMAIL_CLIENT_SECRET_B64='):v=l.split('=',1)[1].strip('"');csc=base64.b64decode(v).decode() if v else csc
+                elif l.startswith('GMAIL_REFRESH_TOKEN_B64='):v=l.split('=',1)[1].strip('"');rtk=base64.b64decode(v).decode() if v else rtk
+          except:pass
+        if not all([cid,csc,rtk]):sys.exit("Gmail API credentials not configured")
+        return Credentials(None,refresh_token=rtk,token_uri="https://oauth2.googleapis.com/token",client_id=cid,client_secret=csc)
+      def cmd_send(args):
+        svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
+        msg=MIMEMultipart('mixed');msg['To']=args.to;msg['Subject']=args.subject
+        if args.cc:msg['Cc']=args.cc
+        msg.attach(MIMEText(args.body,'html' if args.html else 'plain'))
+        if args.attach:
+          for fp in args.attach:
+            if os.path.isfile(fp):
+              ct,_=mimetypes.guess_type(fp);ct=ct or 'application/octet-stream';mt,st=ct.split('/',1)
+              with open(fp,'rb') as f:
+                part=MIMEBase(mt,st);part.set_payload(f.read());encoders.encode_base64(part)
+              part.add_header('Content-Disposition','attachment',filename=os.path.basename(fp));msg.attach(part)
+        r=svc.users().messages().send(userId='me',body={'raw':base64.urlsafe_b64encode(msg.as_bytes()).decode()}).execute()
+        print(f"Sent to {args.to} (ID: {r['id']})")
+      def cmd_list(args):
+        svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
+        res=svc.users().messages().list(userId='me',maxResults=args.n,q=args.q or '').execute()
+        for msg in res.get('messages',[]):
+          m=svc.users().messages().get(userId='me',id=msg['id'],format='metadata',metadataHeaders=['From','Subject','Date']).execute()
+          h={x['name']:x['value'] for x in m['payload']['headers']}
+          print(f"ID: {msg['id']}\n  From: {h.get('From','?')}\n  Subject: {h.get('Subject','(no subject)')}\n  Date: {h.get('Date','?')}\n")
+      def cmd_read(args):
+        svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
+        m=svc.users().messages().get(userId='me',id=args.id,format='full').execute()
+        h={x['name']:x['value'] for x in m['payload']['headers']}
+        print(f"From: {h.get('From','?')}\nTo: {h.get('To','?')}\nSubject: {h.get('Subject','?')}\nDate: {h.get('Date','?')}\n{'='*60}")
+        def get_body(pl):
+          if 'body' in pl and pl['body'].get('data'):return base64.urlsafe_b64decode(pl['body']['data']).decode('utf-8',errors='replace')
+          if 'parts' in pl:
+            for p in pl['parts']:
+              if p.get('filename'):continue
+              if p['mimeType']=='text/plain' and p['body'].get('data'):return base64.urlsafe_b64decode(p['body']['data']).decode('utf-8',errors='replace')
+              if 'parts' in p:
+                r=get_body(p);
+                if r:return r
+          return None
+        print(get_body(m['payload']) or "(Could not extract body)")
+      def main():
+        p=argparse.ArgumentParser();sub=p.add_subparsers(dest='cmd',required=True)
+        ps=sub.add_parser('send');ps.add_argument('to');ps.add_argument('subject');ps.add_argument('body');ps.add_argument('--html',action='store_true');ps.add_argument('--cc');ps.add_argument('--attach','-a',action='append')
+        pl=sub.add_parser('list');pl.add_argument('-n',type=int,default=10);pl.add_argument('-q',default='')
+        pr=sub.add_parser('read');pr.add_argument('id')
+        args=p.parse_args();{'send':cmd_send,'list':cmd_list,'read':cmd_read}[args.cmd](args)
+      if __name__=='__main__':main()
+
+  - path: /usr/local/bin/set-council-group.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Hot-reload council group ID without rebuilding droplet
+      [ -z "$1" ] && { echo "Usage: set-council-group.sh <group_id>"; exit 1; }
+      GID="$1"; source /etc/droplet.env
+      H="/home/$USERNAME"; CFG="$H/.openclaw/openclaw.json"
+      [ ! -f "$CFG" ] && { echo "Config not found"; exit 1; }
+      cp "$CFG" "$CFG.bak"
+      if grep -q '"groups":{' "$CFG"; then
+        sed -i "s|\"groups\":{[^}]*}|\"groups\":{\"${GID}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}|" "$CFG"
+      else
+        sed -i "s|\"telegram\":{\"enabled\":true|\"telegram\":{\"enabled\":true,\"groups\":{\"${GID}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}|" "$CFG"
+      fi
+      echo "$GID" > "$H/openclaw/.council-group-id"
+      echo "true" > "$H/openclaw/.council-enabled"
+      chown $USERNAME:$USERNAME "$H/openclaw/.council-group-id" "$H/openclaw/.council-enabled"
+      systemctl restart openclaw
+      sleep 3
+      systemctl is-active --quiet openclaw && echo "Council group set to $GID. OpenClaw restarted." || { echo "Restart failed, restoring backup"; cp "$CFG.bak" "$CFG"; systemctl restart openclaw; exit 1; }
+
+  - path: /usr/local/bin/mount-dropbox.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      mkdir -p "$HOME/Dropbox"; fusermount -uz "$HOME/Dropbox" 2>/dev/null || true
+      rclone mount dropbox: "$HOME/Dropbox" --vfs-cache-mode writes --daemon
+      sleep 2 && thunar "$HOME/Dropbox"
+
+  - path: /usr/local/bin/restore-openclaw-state.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
+      HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
+      H="/home/$USERNAME"; R="dropbox:openclaw-memory/${HN}"
+      for f in MEMORY.md TOOLS.md USER.md; do su - $USERNAME -c "rclone copy '$R/$f' '$H/openclaw/' 2>/dev/null" || true; done
+      for a in agent1 agent2 agent3 agent4; do
+        AD="$H/openclaw/agents/$a"; [ -d "$AD" ] || continue
+        su - $USERNAME -c "rclone copy '$R/agents/${a}/memory/' '$AD/memory/' 2>/dev/null" || true
+      done
+      chown -R $USERNAME:$USERNAME $H/openclaw
+
+  - path: /usr/local/bin/sync-openclaw-state.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
+      HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
+      H="/home/$USERNAME"; R="dropbox:openclaw-memory/${HN}"
+      for f in MEMORY.md TOOLS.md USER.md; do [ -f "$H/openclaw/$f" ] && su - $USERNAME -c "rclone copy '$H/openclaw/$f' '$R/' 2>/dev/null" || true; done
+      for a in agent1 agent2 agent3 agent4; do
+        AD="$H/openclaw/agents/$a"; [ -d "$AD" ] || continue
+        su - $USERNAME -c "rclone sync '$AD/memory' '$R/agents/${a}/memory' 2>/dev/null" || true
+      done
+
+  - path: /usr/local/bin/schedule-destruct.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      M=$(d "$DESTRUCT_MINS_B64")
+      [ -n "$M" ] && [ "$M" != "0" ] && [ "$M" -gt 0 ] 2>/dev/null && systemd-run --unit=self-destruct --on-active=${M}m /usr/local/bin/kill-droplet.sh
+
+  - path: /usr/local/bin/kill-droplet.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      /usr/local/bin/sync-openclaw-state.sh
+      curl -X DELETE -H "Authorization: Bearer $(d "$DO_TOKEN_B64")" "https://api.digitalocean.com/v2/droplets?tag_name=$(d "$DROPLET_TAG_B64")"
+
+  - path: /usr/local/bin/rename-telegram-bots.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      source /etc/droplet.env
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      A1N=$(d "$AGENT1_NAME_B64"); A1N="${A1N:-Claude}"; A1T=$(d "$AGENT1_BOT_TOKEN_B64")
+      [ -n "$A1T" ] && curl -s "https://api.telegram.org/bot${A1T}/setMyName" -d "name=${A1N}Bot" > /dev/null
+      A2N=$(d "$AGENT2_NAME_B64"); A2N="${A2N:-GPT}"; A2T=$(d "$AGENT2_BOT_TOKEN_B64")
+      [ -n "$A2T" ] && curl -s "https://api.telegram.org/bot${A2T}/setMyName" -d "name=${A2N}Bot" > /dev/null
+      A3N=$(d "$AGENT3_NAME_B64"); A3N="${A3N:-Gemini}"; A3T=$(d "$AGENT3_BOT_TOKEN_B64")
+      [ -n "$A3T" ] && curl -s "https://api.telegram.org/bot${A3T}/setMyName" -d "name=${A3N}Bot" > /dev/null
+      A4N=$(d "$AGENT4_NAME_B64"); A4N="${A4N:-Opus}"; A4T=$(d "$AGENT4_BOT_TOKEN_B64")
+      [ -n "$A4T" ] && curl -s "https://api.telegram.org/bot${A4T}/setMyName" -d "name=${A4N}Bot" > /dev/null
 
 users:
- - default
+  - default
 
 runcmd:
- - [ bash, -lc, "systemctl daemon-reload; systemctl enable --now api-server; ufw allow 8080/tcp" ]
- - [ bash, -lc, "/usr/local/bin/schedule-destruct.sh" ]
- - [ bash, -lc, "/usr/local/sbin/phase1-critical.sh" ]
- # Phase 2 kicks off automatically in background from phase1
+  - [ bash, -lc, "systemctl daemon-reload; systemctl enable --now api-server; ufw allow 8080/tcp" ]
+  - [ bash, -lc, "systemctl enable post-boot-check.service" ]
+  - [ bash, -lc, "/usr/local/bin/schedule-destruct.sh" ]
+  - [ bash, -lc, "/usr/local/sbin/phase1-critical.sh" ]
+  - [ bash, -lc, "/usr/local/bin/rename-telegram-bots.sh" ]
+
+# Phase 2 kicks off automatically in background from phase1
