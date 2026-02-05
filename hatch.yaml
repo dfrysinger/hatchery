@@ -17,10 +17,8 @@ write_files:
       SSH_KEY_B64=""
       DO_TOKEN_B64="[[DO_TOKEN_B64]]"
       PASSWORD_B64="[[PASSWORD_B64]]"
-      PLATFORM_B64="[[PLATFORM_B64]]"
-      DISCORD_GUILD_ID_B64="[[DISCORD_GUILD_ID_B64]]"
-      DISCORD_OWNER_ID_B64="[[DISCORD_OWNER_ID_B64]]"
-      TELEGRAM_OWNER_ID_B64="[[TELEGRAM_OWNER_ID_B64]]"
+      # PLATFORM, DISCORD_*, TELEGRAM_OWNER_ID are extracted from HABITAT_B64
+      # by parse-habitat.py → /etc/habitat-parsed.env (no Shortcut placeholders needed)
       TELEGRAM_USER_ID_B64="[[TELEGRAM_USER_ID_B64]]"
       ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
       BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
