@@ -1,7 +1,7 @@
 #cloud-config
-# version: 2.49
-# Cloud Browser Config v2.49 - 2026-02-01
-# Fixed: Status API persists across reboots, BG_COLOR placeholder handled
+# version: 2.50
+# Cloud Browser Config v2.50 - 2026-02-01
+# Added: GH_TOKEN for GitHub CLI, Gmail OAuth placeholders
 # Changed: BOOT.md -> BOOTSTRAP.md (one-time bootstrap)
 package_update: false
 package_upgrade: false
@@ -44,6 +44,10 @@ write_files:
       BOOT_INSTRUCTIONS="BINST"
       BG_COLOR="BGCLR"
       AGENT_GEN="AGEN"
+      GH_TOKEN="GHTOK"
+      GMAIL_CLIENT_ID="GMCID"
+      GMAIL_CLIENT_SECRET="GMCSEC"
+      GMAIL_REFRESH_TOKEN="GMRTOK"
 
   - path: /etc/update-manager/release-upgrades
     owner: root:root
@@ -1019,6 +1023,21 @@ write_files:
       message.send.backend.auth.raw = "${EMAIL_PASS}"
       HIMALAYACONF
         echo "himalaya configured" >> "$LOG"
+      fi
+      
+      # Configure GitHub CLI if token provided
+      if [ -n "$GH_TOKEN" ] && [ "$GH_TOKEN" != "GHTOK" ]; then
+        echo "Configuring GitHub CLI..." >> "$LOG"
+        mkdir -p $HOMEDIR/.config/gh
+        cat > $HOMEDIR/.config/gh/hosts.yml <<GHCONF
+      github.com:
+          oauth_token: ${GH_TOKEN}
+          git_protocol: https
+          user: 
+      GHCONF
+        chown -R $USERNAME:$USERNAME $HOMEDIR/.config/gh
+        chmod 600 $HOMEDIR/.config/gh/hosts.yml
+        echo "gh configured" >> "$LOG"
       fi
       if [ -n "$CALDAV_URL" ] && [ -n "$CALDAV_USER" ]; then
         echo "Configuring vdirsyncer..." >> "$LOG"
