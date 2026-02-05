@@ -1,10 +1,25 @@
 #cloud-config
-# version: 3.16
+# version: 3.17
 
-# Droplet Init Config v3.16 - 2026-02-04
+# Droplet Init Config v3.17 - 2026-02-04
 # FAST BOOT: Bot online in ~3 min, desktop ready in background
 # Phase 1: nodejs + clawdbot + minimal config -> bot talks
 # Phase 2: packages, desktop, xrdp, skills (background)
+#
+# v3.17 Changes (from v3.16):
+# - FIX: Post-boot health check timing too aggressive for 4-agent startup;
+#         increased sleep-after-restart from 10s to 45s, health timeout from
+#         10s to 30s, retry wait from 5s to 15s (no rush after phase1)
+# - FIX: try-full-config.sh same timing improvements as post-boot-check
+# - FIX: ExecStop sync failed with permission denied on /etc/droplet.env;
+#         use systemd '+' prefix to run sync as root on service stop
+# - FIX: BOOT.md missing message tool instructions and NO_REPLY guidance
+# - FIX: Missing ~/.clawdbot/credentials dir (doctor flagged on every boot)
+# - FIX: IDENTITY.md version reference updated to v3.17
+# - ADD: vdirsyncer/khal calendar configuration (restored from v2.x)
+# - FIX: TOOLS.md updated: himalaya replaced with gmail-api.py for email
+# - FIX: gmail-api.py reads ~/.clawdbot/.env (bot-readable) before /etc/droplet.env
+# - FIX: Gmail creds written to ~/.clawdbot/.env in phase1 and build-full-config
 #
 # v3.16 Changes (from v3.15):
 # - FIX: pip --break-system-packages flag unsupported on Ubuntu 22.04 pip 22.x;
@@ -319,9 +334,11 @@ write_files:
       # Save minimal config as fallback
       cp $H/.clawdbot/clawdbot.json $H/.clawdbot/clawdbot.minimal.json
 
-      # Create .env file
+      # Create .env file (used by gmail-api.py and other tools that need creds)
       echo "ANTHROPIC_API_KEY=${AK}" > $H/.clawdbot/.env
       [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.clawdbot/.env
+      GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
+      [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.clawdbot/.env
 
       # Create minimal AGENTS.md
       echo -e "# Agent: ${A1N}\nModel: Claude Sonnet\nBe helpful. Desktop setup in progress..." > $H/clawd/agents/agent1/AGENTS.md
@@ -355,6 +372,11 @@ write_files:
       ## During Setup
       If /var/lib/init-status/phase2-complete does not exist, desktop is still installing.
       Tell user: "Desktop setup in progress. RDP will be ready soon."
+
+      If BOOT.md asks you to send a message, use the message tool (action=send with channel + target).
+      Use the `target` field (not `to`) for message tool destinations.
+      After sending with the message tool, reply with ONLY: NO_REPLY.
+      If nothing needs attention, reply with ONLY: NO_REPLY.
       BOOTMD
 
       chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
@@ -587,6 +609,53 @@ write_files:
       backend.auth.raw = "${EP}"
       HIM
       [ -n "$GHT" ] && echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml
+
+      # Calendar (vdirsyncer + khal)
+      CU=$(d "$CALDAV_URL_B64"); CUN=$(d "$CALDAV_USER_B64"); CP=$(d "$CALDAV_PASSWORD_B64")
+      if [ -n "$CU" ] && [ -n "$CUN" ]; then
+        mkdir -p $H/.config/vdirsyncer $H/.config/khal
+        mkdir -p $H/.local/share/vdirsyncer/status $H/.local/share/khal/calendars
+        cat > $H/.config/vdirsyncer/config <<VDSCFG
+      [general]
+      status_path = "~/.local/share/vdirsyncer/status/"
+
+      [pair calendar]
+      a = "calendar_local"
+      b = "calendar_remote"
+      collections = ["from a", "from b"]
+      metadata = ["color"]
+
+      [storage calendar_local]
+      type = "filesystem"
+      path = "~/.local/share/khal/calendars/"
+      fileext = ".ics"
+
+      [storage calendar_remote]
+      type = "caldav"
+      url = "${CU}"
+      username = "${CUN}"
+      password = "${CP}"
+      VDSCFG
+        cat > $H/.config/khal/config <<KHALCFG
+      [calendars]
+
+      [[default]]
+      path = ~/.local/share/khal/calendars/*
+      type = discover
+
+      [locale]
+      timeformat = %H:%M
+      dateformat = %Y-%m-%d
+      longdateformat = %Y-%m-%d
+      datetimeformat = %Y-%m-%d %H:%M
+      longdatetimeformat = %Y-%m-%d %H:%M
+      KHALCFG
+        chown -R $USERNAME:$USERNAME $H/.config/vdirsyncer $H/.config/khal $H/.local/share/vdirsyncer $H/.local/share/khal
+        su - $USERNAME -c "yes | vdirsyncer discover" >> "$LOG" 2>&1 || true
+        su - $USERNAME -c "vdirsyncer sync" >> "$LOG" 2>&1 || true
+        echo "Calendar configured (vdirsyncer + khal)" >> "$LOG"
+      fi
+
       chown -R $USERNAME:$USERNAME $H/.config
 
       # xrdp
@@ -677,7 +746,8 @@ write_files:
       BI=$(d "$BOOT_INSTRUCTIONS_B64")
       GT=$(cat $H/.clawdbot/gateway-token.txt)
 
-      # Create agent directories
+      # Create agent directories and credentials dir (doctor expects it)
+      mkdir -p $H/.clawdbot/credentials
       mkdir -p $H/clawd/agents/agent1/memory
       [ -n "$A2T" ] && mkdir -p $H/clawd/agents/agent2/memory
       [ -n "$A3T" ] && mkdir -p $H/clawd/agents/agent3/memory
@@ -788,7 +858,7 @@ write_files:
 
       ## Project Context
       This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.
-      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.16.yaml)
+      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.17.yaml)
       - Project docs: dropbox:droplets/yaml/CONTEXT.md
       - Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
       - Previous transcripts restored from Dropbox on boot
@@ -860,7 +930,7 @@ write_files:
       WorkingDirectory=$H
       ExecStartPre=/bin/sleep 2
       ExecStart=/usr/local/bin/clawdbot gateway --bind lan --port 18789
-      ExecStop=/usr/local/bin/sync-clawdbot-state.sh
+      ExecStop=+/usr/local/bin/sync-clawdbot-state.sh
       TimeoutStopSec=30
       Restart=always
       RestartSec=3
@@ -915,7 +985,7 @@ write_files:
         exit 0
       }
 
-      # Wait for clawdbot to stabilize (15s for 4 agents + telegram connections)
+      # Wait for clawdbot to stabilize
       sleep 15
 
       # Check if full config exists
@@ -931,9 +1001,12 @@ write_files:
       chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
       chmod 600 "$H/.clawdbot/clawdbot.json"
       systemctl restart clawdbot
-      sleep 10
 
-      # Health check (3 attempts)
+      # Wait generously for 4 agents + 4 telegram bots to initialize
+      # No rush here - phase1 bot is already online for user
+      sleep 45
+
+      # Health check (3 attempts, generous timeouts)
       HEALTHY=false
       for i in 1 2 3; do
         echo "Health check attempt $i..." >> "$LOG"
@@ -941,19 +1014,19 @@ write_files:
         # Check service is active
         if ! systemctl is-active --quiet clawdbot; then
           echo "  Service not active" >> "$LOG"
-          sleep 5
+          sleep 15
           continue
         fi
 
         # Check gateway responds (try clawdbot health command)
-        if timeout 10 su - $USERNAME -c "clawdbot health --json" >> "$LOG" 2>&1; then
+        if timeout 30 su - $USERNAME -c "clawdbot health --json" >> "$LOG" 2>&1; then
           echo "  Gateway healthy" >> "$LOG"
           HEALTHY=true
           break
         fi
 
         echo "  Gateway not responding" >> "$LOG"
-        sleep 5
+        sleep 15
       done
 
       if [ "$HEALTHY" = "true" ]; then
@@ -1035,18 +1108,20 @@ write_files:
       chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
       chmod 600 "$H/.clawdbot/clawdbot.json"
       systemctl restart clawdbot
-      sleep 10
+
+      # Wait generously for 4 agents + telegram bots to initialize
+      sleep 45
 
       # Health check
       HEALTHY=false
       for i in 1 2 3; do
         if systemctl is-active --quiet clawdbot; then
-          if timeout 10 su - $USERNAME -c "clawdbot health --json" >/dev/null 2>&1; then
+          if timeout 30 su - $USERNAME -c "clawdbot health --json" >/dev/null 2>&1; then
             HEALTHY=true
             break
           fi
         fi
-        sleep 5
+        sleep 15
       done
 
       if [ "$HEALTHY" = "true" ]; then
@@ -1076,13 +1151,23 @@ write_files:
       Cloud VM (Ubuntu), display :10 shared with user via RDP.
 
       ### Email
-      DO blocks SMTP. Use gmail-api.py for sending, himalaya for reading.
+      DO blocks SMTP. Use gmail-api.py for all email:
+      - Send: gmail-api.py send "to@email" "Subject" "Body" [--html] [--cc addr] [-a file]
+      - List: gmail-api.py list [-n count] [-q "search query"]
+      - Read: gmail-api.py read <message_id>
+      Requires: google-auth, google-api-python-client (installed via pip)
+      Credentials: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN from /etc/droplet.env
 
       ### Browser
       Chrome remote debugging on port 18800.
 
+      ### Calendar
+      khal for viewing, vdirsyncer for CalDAV sync.
+      - View: khal list [today] [2days]
+      - Sync: vdirsyncer sync
+
       ### Tools
-      Chrome, Thunderbird, goplaces, ffmpeg, LibreOffice, rclone, pandoc, himalaya, khal/vdirsyncer, yt-dlp, ImageMagick, scrot/flameshot, qpdf, jq, gh, vlc, htop/ncdu
+      Chrome, Thunderbird, goplaces, ffmpeg, LibreOffice, rclone, pandoc, khal/vdirsyncer, yt-dlp, ImageMagick, scrot/flameshot, qpdf, jq, gh, vlc, htop/ncdu
 
       ### Skills
       weather, github, video-frames, goplaces, youtube-transcript, yt-dlp-downloader-skill
@@ -1135,14 +1220,20 @@ write_files:
       def get_creds():
         cid,csc,rtk=os.environ.get('GMAIL_CLIENT_ID'),os.environ.get('GMAIL_CLIENT_SECRET'),os.environ.get('GMAIL_REFRESH_TOKEN')
         if not all([cid,csc,rtk]):
-          try:
-            with open('/etc/droplet.env','r') as f:
-              for l in f:
-                l=l.strip()
-                if l.startswith('GMAIL_CLIENT_ID_B64='):v=l.split('=',1)[1].strip('"');cid=base64.b64decode(v).decode() if v else cid
-                elif l.startswith('GMAIL_CLIENT_SECRET_B64='):v=l.split('=',1)[1].strip('"');csc=base64.b64decode(v).decode() if v else csc
-                elif l.startswith('GMAIL_REFRESH_TOKEN_B64='):v=l.split('=',1)[1].strip('"');rtk=base64.b64decode(v).decode() if v else rtk
-          except:pass
+          # Try bot's .env file first (readable by bot user)
+          for envf in [os.path.expanduser('~/.clawdbot/.env'),'/etc/droplet.env']:
+            try:
+              with open(envf,'r') as f:
+                for l in f:
+                  l=l.strip()
+                  if l.startswith('GMAIL_CLIENT_ID='):cid=cid or l.split('=',1)[1].strip('"')
+                  elif l.startswith('GMAIL_CLIENT_SECRET='):csc=csc or l.split('=',1)[1].strip('"')
+                  elif l.startswith('GMAIL_REFRESH_TOKEN='):rtk=rtk or l.split('=',1)[1].strip('"')
+                  elif l.startswith('GMAIL_CLIENT_ID_B64='):v=l.split('=',1)[1].strip('"');cid=cid or (base64.b64decode(v).decode() if v else None)
+                  elif l.startswith('GMAIL_CLIENT_SECRET_B64='):v=l.split('=',1)[1].strip('"');csc=csc or (base64.b64decode(v).decode() if v else None)
+                  elif l.startswith('GMAIL_REFRESH_TOKEN_B64='):v=l.split('=',1)[1].strip('"');rtk=rtk or (base64.b64decode(v).decode() if v else None)
+            except:pass
+            if all([cid,csc,rtk]):break
         if not all([cid,csc,rtk]):sys.exit("Gmail API credentials not configured")
         return Credentials(None,refresh_token=rtk,token_uri="https://oauth2.googleapis.com/token",client_id=cid,client_secret=csc)
       def cmd_send(args):
