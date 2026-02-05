@@ -1,13 +1,19 @@
 #cloud-config
-# version: 3.9
-# Droplet Init Config v3.9 - 2026-02-03
+# version: 3.9.1
+# Droplet Init Config v3.9.1 - 2026-02-03
 # Multi-agent council support, habitat-based memory, hot-reload council group
 # GPT-5.2 with reasoning_effort:high, Gemini 3 Pro Preview
+# v3.9.1: OpenAI OAuth (Codex) instead of API key
+# v3.9.1: Symlink TOOLS.md/USER.md from root to agent workspaces (shared env context)
+# v3.9.1: Sync/restore agent context files (SOUL.md, IDENTITY.md, AGENTS.md, HEARTBEAT.md)
+# v3.9.1: Auto-rename Telegram bots to [AgentName]Bot on boot
+# v3.9.1: Symlink auth-profiles.json to all agent directories (fixes multi-agent auth)
 #
 # === PLACEHOLDER REFERENCE ===
 # Plaintext: USERNAME, BG_R, BG_G, BG_B
 # Base64: SSH_KEY_B64, DO_TOKEN_B64, PASSWORD_B64, DESTRUCT_MINS_B64,
-#   TELEGRAM_USER_ID_B64, ANTHROPIC_KEY_B64, OPENAI_TOKEN_B64,
+#   TELEGRAM_USER_ID_B64, ANTHROPIC_KEY_B64,
+#   OPENAI_ACCESS_B64, OPENAI_REFRESH_B64, OPENAI_EXPIRES_B64, OPENAI_ACCOUNT_ID_B64,
 #   GOOGLE_API_KEY_B64, BRAVE_KEY_B64, DROPBOX_TOKEN_B64,
 #   EMAIL_B64, IMAP_HOST_B64, SMTP_HOST_B64, EMAIL_PASSWORD_B64,
 #   CALDAV_URL_B64, CALDAV_USER_B64, CALDAV_PASSWORD_B64, AGENT_GEN_B64,
@@ -66,7 +72,10 @@ write_files:
      BOT_NOTES_B64="[[BOT_NOTES_B64]]"
      BOOT_INSTRUCTIONS_B64="[[BOOT_INSTRUCTIONS_B64]]"
      HABITAT_NAME_B64="[[HABITAT_NAME_B64]]"
-     OPENAI_TOKEN_B64="[[OPENAI_TOKEN_B64]]"
+     OPENAI_ACCESS_B64="[[OPENAI_ACCESS_B64]]"
+     OPENAI_REFRESH_B64="[[OPENAI_REFRESH_B64]]"
+     OPENAI_EXPIRES_B64="[[OPENAI_EXPIRES_B64]]"
+     OPENAI_ACCOUNT_ID_B64="[[OPENAI_ACCOUNT_ID_B64]]"
      AGENT1_NAME_B64="[[AGENT1_NAME_B64]]"
      AGENT2_NAME_B64="[[AGENT2_NAME_B64]]"
      AGENT2_BOT_TOKEN_B64="[[AGENT2_BOT_TOKEN_B64]]"
@@ -355,11 +364,18 @@ write_files:
      AG=$(d "$AGENT_GEN_B64"); HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
      H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"; MG="${AG:-1}"; PG=$((MG - 1))
      mkdir -p "$H/clawd/memory" "$H/clawd/memory/archive" "$H/clawd/shared"
-     su - $USERNAME -c "rclone copy '$R/MEMORY.md' '$H/clawd/' 2>/dev/null"
+     # Restore root files (MEMORY.md, TOOLS.md, USER.md)
+     for f in MEMORY.md TOOLS.md USER.md; do su - $USERNAME -c "rclone copy '$R/$f' '$H/clawd/' 2>/dev/null"; done
      su - $USERNAME -c "rclone copy '$R/shared/' '$H/clawd/shared/' 2>/dev/null"
      [ "$PG" -gt 0 ] && su - $USERNAME -c "rclone copy '$R/gen-${PG}/memory' '$H/clawd/memory/' 2>/dev/null"
      for i in $(seq 1 $((PG - 1))); do su - $USERNAME -c "rclone copy '$R/gen-${i}/memory' '$H/clawd/memory/archive/gen-${i}/' 2>/dev/null"; done
-     for a in agent1 agent2 agent3 agent4; do [ -d "$H/clawd/agents/$a" ] && su - $USERNAME -c "rclone copy '$R/agents/${a}/' '$H/clawd/agents/${a}/' 2>/dev/null"; done
+     # Restore per-agent files (memory + context, then re-create symlinks)
+     for a in agent1 agent2 agent3 agent4; do
+       AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+       su - $USERNAME -c "rclone copy '$R/agents/${a}/memory/' '$AD/memory/' 2>/dev/null"
+       for f in MEMORY.md AGENTS.md SOUL.md IDENTITY.md HEARTBEAT.md; do su - $USERNAME -c "rclone copy '$R/agents/${a}/$f' '$AD/' 2>/dev/null"; done
+       ln -sf "$H/clawd/TOOLS.md" "$AD/TOOLS.md"; ln -sf "$H/clawd/USER.md" "$AD/USER.md"
+     done
      echo "$MG" > "$H/clawd/.gen"; echo "$HN" > "$H/clawd/.habitat"; date -u +%s > "$H/clawd/.gen-created"
      chown -R $USERNAME:$USERNAME "$H/clawd"
 
@@ -374,10 +390,12 @@ write_files:
      HN="${HN:-default}"; [ -f "$H/clawd/.habitat" ] && HN=$(cat "$H/clawd/.habitat")
      R="dropbox:clawdbot-memory/${HN}"; MG="${AG:-$(cat "$H/clawd/.gen" 2>/dev/null)}"; [ -z "$MG" ] && MG="1"
      su - $USERNAME -c "rclone sync '$H/clawd/memory' '$R/gen-${MG}/memory' --exclude 'archive/**' 2>/dev/null"
-     [ -f "$H/clawd/MEMORY.md" ] && su - $USERNAME -c "rclone copy '$H/clawd/MEMORY.md' '$R/' 2>/dev/null"
+     for f in MEMORY.md TOOLS.md USER.md; do [ -f "$H/clawd/$f" ] && su - $USERNAME -c "rclone copy '$H/clawd/$f' '$R/' 2>/dev/null"; done
      [ -d "$H/clawd/shared" ] && su - $USERNAME -c "rclone sync '$H/clawd/shared' '$R/shared/' 2>/dev/null"
      for a in agent1 agent2 agent3 agent4; do
-       [ -d "$H/clawd/agents/$a" ] && { su - $USERNAME -c "rclone sync '$H/clawd/agents/${a}/memory' '$R/agents/${a}/memory' 2>/dev/null"; [ -f "$H/clawd/agents/${a}/MEMORY.md" ] && su - $USERNAME -c "rclone copy '$H/clawd/agents/${a}/MEMORY.md' '$R/agents/${a}/' 2>/dev/null"; }
+       AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+       su - $USERNAME -c "rclone sync '$AD/memory' '$R/agents/${a}/memory' 2>/dev/null"
+       for f in MEMORY.md AGENTS.md SOUL.md IDENTITY.md HEARTBEAT.md; do [ -f "$AD/$f" ] && [ ! -L "$AD/$f" ] && su - $USERNAME -c "rclone copy '$AD/$f' '$R/agents/${a}/' 2>/dev/null"; done
      done
      date -u +%s > "$H/clawd/.last-sync"; chown $USERNAME:$USERNAME "$H/clawd/.last-sync" 2>/dev/null
 
@@ -566,7 +584,7 @@ write_files:
    content: |
      #!/bin/bash
      LOG="/var/log/package-install.log"; T="/usr/local/bin/tlog.sh"
-     echo "=== v3.9 Package Install: $(date) ===" > "$LOG"
+     echo "=== v3.9.1 Package Install: $(date) ===" > "$LOG"
      $T start total_install
      $T start dl_chrome
      wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb &
@@ -647,7 +665,9 @@ write_files:
      source /etc/droplet.env
      T="/usr/local/bin/tlog.sh"
      d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
-     AK=$(d "$ANTHROPIC_KEY_B64"); OK=$(d "$OPENAI_TOKEN_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
+     AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
+     # OpenAI OAuth tokens
+     OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
      TBT=$(d "$AGENT1_BOT_TOKEN_B64"); TUI=$(d "$TELEGRAM_USER_ID_B64")
      URN=$(d "$USER_REALNAME_B64"); UL=$(d "$USER_LOCATION_B64"); UN=$(d "$USER_NOTES_B64")
      BN=$(d "$BOT_NAME_B64"); BNO=$(d "$BOT_NOTES_B64"); BI=$(d "$BOOT_INSTRUCTIONS_B64")
@@ -657,11 +677,11 @@ write_files:
      A4N=$(d "$AGENT4_NAME_B64"); A4N="${A4N:-Opus}"; A4T=$(d "$AGENT4_BOT_TOKEN_B64")
      CGI=$(d "$COUNCIL_GROUP_ID_B64"); HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
      H="/home/$USERNAME"; LOG="/var/log/clawdbot-setup.log"
-     echo "=== v3.9 Clawdbot Setup: $(date) ===" > "$LOG"
+     echo "=== v3.9.1 Clawdbot Setup (OAuth): $(date) ===" > "$LOG"
      $T start total_clawdbot
      AC=1; [ -n "$A2T" ] && AC=$((AC+1)); [ -n "$A3T" ] && AC=$((AC+1)); [ -n "$A4T" ] && AC=$((AC+1))
      CE="false"; [ -n "$CGI" ] && CE="true"
-     echo "Agents:$AC Council:$CE" >> "$LOG"
+     echo "Agents:$AC Council:$CE OAuth:$([ -n "$OA" ] && echo yes || echo no)" >> "$LOG"
      $T start setup_swap
      [ ! -f /swapfile ] && { fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048; chmod 600 /swapfile; mkswap /swapfile; swapon /swapfile; echo '/swapfile none swap sw 0 0' >> /etc/fstab; }
      $T end setup_swap
@@ -678,7 +698,6 @@ write_files:
      [ -n "$A4T" ] && mkdir -p $H/clawd/agents/agent4/memory
      GT=$(openssl rand -hex 24); echo "$GT" > $H/.clawdbot/gateway-token.txt
      ENV="Environment=NODE_ENV=production\nEnvironment=PATH=/usr/bin:/usr/local/bin\nEnvironment=DISPLAY=:10\nEnvironment=ANTHROPIC_API_KEY=${AK}"
-     [ -n "$OK" ] && ENV="$ENV\nEnvironment=OPENAI_API_KEY=${OK}"
      [ -n "$GK" ] && ENV="$ENV\nEnvironment=GOOGLE_API_KEY=${GK}"
      [ -n "$BK" ] && ENV="$ENV\nEnvironment=BRAVE_API_KEY=${BK}"
      cat > /etc/systemd/system/clawdbot.service <<SVC
@@ -700,14 +719,13 @@ write_files:
      WantedBy=multi-user.target
      SVC
      echo -e "ANTHROPIC_API_KEY=${AK}\nDISPLAY=:10" > $H/.clawdbot/.env
-     [ -n "$OK" ] && echo "OPENAI_API_KEY=${OK}" >> $H/.clawdbot/.env
      [ -n "$GK" ] && echo "GOOGLE_API_KEY=${GK}" >> $H/.clawdbot/.env
      [ -n "$BK" ] && echo "BRAVE_API_KEY=${BK}" >> $H/.clawdbot/.env
      BJ=""; [ -n "$BK" ] && BJ="\"BRAVE_API_KEY\":\"${BK}\","
-     OJ=""; [ -n "$OK" ] && OJ="\"OPENAI_API_KEY\":\"${OK}\","
      GAJ=""; [ -n "$GK" ] && GAJ="\"GOOGLE_API_KEY\":\"${GK}\","
+     # Auth profiles: Anthropic API key, OpenAI OAuth (if provided), Google API key
      AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
-     [ -n "$OK" ] && AP="$AP,\"openai:default\":{\"provider\":\"openai\",\"mode\":\"api_key\"}"
+     [ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
      [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
      AL="[{\"id\":\"agent1\",\"default\":true,\"name\":\"${A1N}\",\"model\":\"anthropic/claude-opus-4-5\",\"workspace\":\"$H/clawd/agents/agent1\",\"groupChat\":{\"mentionPatterns\":[\"${A1N},\",\"${A1N}:\"]}}"
      [ -n "$A2T" ] && AL="$AL,{\"id\":\"agent2\",\"name\":\"${A2N}\",\"model\":\"openai/gpt-5.2\",\"workspace\":\"$H/clawd/agents/agent2\",\"groupChat\":{\"mentionPatterns\":[\"${A2N},\",\"${A2N}:\"]}}"
@@ -725,12 +743,17 @@ write_files:
      [ -n "$A4T" ] && TA="$TA,\"agent4\":{\"botToken\":\"${A4T}\"}"
      TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
      cat > $H/.clawdbot/clawdbot.json <<CFG
-     {"env":{"ANTHROPIC_API_KEY":"${AK}",${OJ}${GAJ}${BJ}"DISPLAY":":10"},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":false,"noSandbox":true},"agents":{"defaults":{"model":{"primary":"anthropic/claude-opus-4-5"},"maxConcurrent":4,"subagents":{"maxConcurrent":8},"workspace":"$H/clawd","models":{"openai/gpt-5.2":{"params":{"reasoning_effort":"high"}}}},"list":${AL}},"bindings":${BD},"gateway":{"mode":"local","port":18789,"bind":"lan","controlUi":{"enabled":true,"allowInsecureAuth":true},"auth":{"mode":"token","token":"${GT}"}},"auth":{"profiles":{${AP}}},"plugins":{"entries":{"telegram":{"enabled":true}}},"channels":{"telegram":{"enabled":true,"dmPolicy":"allowlist","allowFrom":["${TUI}"],"accounts":{${TA}}${TG}}},"skills":{"install":{"nodeManager":"npm"}},"hooks":{"internal":{"enabled":true,"entries":{"boot-md":{"enabled":true}}}}}
+     {"env":{"ANTHROPIC_API_KEY":"${AK}",${GAJ}${BJ}"DISPLAY":":10"},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":false,"noSandbox":true},"agents":{"defaults":{"model":{"primary":"anthropic/claude-opus-4-5"},"maxConcurrent":4,"subagents":{"maxConcurrent":8},"workspace":"$H/clawd","models":{"openai/gpt-5.2":{"params":{"reasoning_effort":"high"}}}},"list":${AL}},"bindings":${BD},"gateway":{"mode":"local","port":18789,"bind":"lan","controlUi":{"enabled":true,"allowInsecureAuth":true},"auth":{"mode":"token","token":"${GT}"}},"auth":{"profiles":{${AP}}},"plugins":{"entries":{"telegram":{"enabled":true}}},"channels":{"telegram":{"enabled":true,"dmPolicy":"allowlist","allowFrom":["${TUI}"],"accounts":{${TA}}${TG}}},"skills":{"install":{"nodeManager":"npm"}},"hooks":{"internal":{"enabled":true,"entries":{"boot-md":{"enabled":true}}}}}
      CFG
      echo -e "# Agent: ${A1N}\nModel: Claude Opus 4.5\nBe helpful and natural." > $H/clawd/agents/agent1/AGENTS.md
      [ -n "$A2T" ] && echo -e "# Agent: ${A2N}\nModel: GPT-5.2 (reasoning_effort: high)\nBe helpful and natural." > $H/clawd/agents/agent2/AGENTS.md
      [ -n "$A3T" ] && echo -e "# Agent: ${A3N}\nModel: Gemini 3 Pro Preview\nBe helpful and natural." > $H/clawd/agents/agent3/AGENTS.md
      [ -n "$A4T" ] && echo -e "# Agent: ${A4N}\nModel: Claude Opus 4.5 + Extended Thinking\nBe helpful and natural." > $H/clawd/agents/agent4/AGENTS.md
+     # Symlink shared context (TOOLS.md, USER.md) from root to all agent workspaces
+     for _a in agent1 agent2 agent3 agent4; do
+       _AD="$H/clawd/agents/$_a"
+       [ -d "$_AD" ] && { ln -sf "$H/clawd/TOOLS.md" "$_AD/TOOLS.md"; ln -sf "$H/clawd/USER.md" "$_AD/USER.md"; }
+     done
      cat > $H/clawd/shared/KNOWLEDGE.md <<KMD
      # Shared Knowledge
      ## About the Human
@@ -738,9 +761,15 @@ write_files:
      $([ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (to learn)")
      KMD
      [ -n "$CGI" ] && echo "# Council Decisions Archive" > $H/clawd/shared/DECISIONS.md
+     # Auth profiles JSON with OAuth support
      cat > $H/.clawdbot/agents/main/agent/auth-profiles.json <<APJ
-     {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OK" ] && echo ",\"openai:default\":{\"type\":\"api_key\",\"provider\":\"openai\",\"token\":\"${OK}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
+     {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
      APJ
+     # Symlink auth-profiles.json to all agent directories
+     for _ag in agent1 agent2 agent3 agent4; do
+       mkdir -p "$H/.clawdbot/agents/$_ag/agent"
+       ln -sf "$H/.clawdbot/agents/main/agent/auth-profiles.json" "$H/.clawdbot/agents/$_ag/agent/auth-profiles.json"
+     done
      echo -e "# USER.md\n$([ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (learn)")\n$([ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (learn)")\n$([ -n "$UN" ] && echo "\n$UN")" > $H/clawd/USER.md
      echo -e "# IDENTITY.md\n$([ -n "$BN" ] && echo "- Name: $BN" || echo "- Name: (choose)")\n$([ -n "$BNO" ] && echo "\n$BNO" || echo "\nAI assistant on cloud VM.")" > $H/clawd/IDENTITY.md
      [ -n "$BI" ] && echo "$BI" > $H/clawd/BOOTSTRAP.md
@@ -879,6 +908,21 @@ write_files:
      echo -e "[Unit]\nAfter=x11vnc.service\nWants=x11vnc.service\n\n[Service]\nExecStartPre=/bin/bash -c 'for i in {1..30}; do nc -z 127.0.0.1 5900 && exit 0; sleep 1; done; exit 1'" > /etc/systemd/system/xrdp.service.d/wait-for-vnc.conf
      systemctl daemon-reload; systemctl unmask xrdp xrdp-sesman; systemctl enable xrdp; systemctl restart xrdp
 
+ - path: /usr/local/bin/rename-telegram-bots.sh
+   permissions: "0755"
+   content: |
+     #!/bin/bash
+     source /etc/droplet.env
+     d() { [ -n "$1" ] && echo "$1" | base64 -d || echo ""; }
+     A1N=$(d "$AGENT1_NAME_B64"); A1N="${A1N:-Claude}"; A1T=$(d "$AGENT1_BOT_TOKEN_B64")
+     [ -n "$A1T" ] && curl -s "https://api.telegram.org/bot${A1T}/setMyName" -d "name=${A1N}Bot" > /dev/null
+     A2N=$(d "$AGENT2_NAME_B64"); A2N="${A2N:-GPT}"; A2T=$(d "$AGENT2_BOT_TOKEN_B64")
+     [ -n "$A2T" ] && curl -s "https://api.telegram.org/bot${A2T}/setMyName" -d "name=${A2N}Bot" > /dev/null
+     A3N=$(d "$AGENT3_NAME_B64"); A3N="${A3N:-Gemini}"; A3T=$(d "$AGENT3_BOT_TOKEN_B64")
+     [ -n "$A3T" ] && curl -s "https://api.telegram.org/bot${A3T}/setMyName" -d "name=${A3N}Bot" > /dev/null
+     A4N=$(d "$AGENT4_NAME_B64"); A4N="${A4N:-Opus}"; A4T=$(d "$AGENT4_BOT_TOKEN_B64")
+     [ -n "$A4T" ] && curl -s "https://api.telegram.org/bot${A4T}/setMyName" -d "name=${A4N}Bot" > /dev/null
+
 users:
  - default
 
@@ -891,6 +935,7 @@ runcmd:
  - [ bash, -lc, "/usr/local/bin/tlog.sh start stage_chrome; /usr/local/bin/set-stage.sh 3 chrome; /usr/local/sbin/setup-chrome.sh; /usr/local/bin/tlog.sh end stage_chrome" ]
  - [ bash, -lc, "/usr/local/bin/tlog.sh start stage_desktop; /usr/local/bin/set-stage.sh 4 desktop; /usr/local/sbin/setup-display.sh; /usr/local/bin/tlog.sh end stage_desktop" ]
  - [ bash, -lc, "/usr/local/bin/tlog.sh start stage_clawdbot; /usr/local/bin/set-stage.sh 5 clawdbot; /usr/local/sbin/setup-clawdbot.sh; /usr/local/bin/tlog.sh end stage_clawdbot" ]
+ - [ bash, -lc, "/usr/local/bin/rename-telegram-bots.sh" ]
  - [ bash, -lc, "/usr/local/bin/tlog.sh start stage_productivity; /usr/local/bin/set-stage.sh 6 productivity; /usr/local/sbin/setup-optional.sh; /usr/local/bin/tlog.sh end stage_productivity" ]
  - [ bash, -lc, "/usr/local/bin/tlog.sh start restore_state; /usr/local/bin/restore-clawdbot-state.sh; /usr/local/bin/tlog.sh end restore_state" ]
  - [ bash, -lc, "systemctl enable clawdbot-sync.timer; systemctl start clawdbot-sync.timer" ]
