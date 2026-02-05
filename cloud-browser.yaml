@@ -1,10 +1,16 @@
 #cloud-config
-# version: 3.15
+# version: 3.16
 
-# Droplet Init Config v3.15 - 2026-02-04
+# Droplet Init Config v3.16 - 2026-02-04
 # FAST BOOT: Bot online in ~3 min, desktop ready in background
 # Phase 1: nodejs + clawdbot + minimal config -> bot talks
 # Phase 2: packages, desktop, xrdp, skills (background)
+#
+# v3.16 Changes (from v3.15):
+# - FIX: pip --break-system-packages flag unsupported on Ubuntu 22.04 pip 22.x;
+#         use PIP_BREAK_SYSTEM_PACKAGES=1 env var instead
+# - FIX: bootcmd xrdp mask guard checks phase2-complete instead of setup-complete,
+#         preventing xrdp from being re-masked on the phase2->reboot transition
 #
 # v3.15 Changes (from v3.14):
 # - RENAME: Package openclaw -> clawdbot, binary openclaw -> clawdbot
@@ -40,7 +46,7 @@ package_upgrade: false
 bootcmd:
   - [ bash, -lc, "mkdir -p /var/lib/init-status; [ -f /var/lib/init-status/setup-complete ] && exit 0; echo '0' > /var/lib/init-status/stage; echo '1' > /var/lib/init-status/phase; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\" >> /var/log/init-stages.log" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
-  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/phase2-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
   # needrestart config handled by write_files section
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; mkdir -p /tmp/downloads; curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz & echo $! > /tmp/downloads/node.pid; wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb & echo $! > /tmp/downloads/chrome.pid" ]
   - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '99' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=99 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
@@ -467,7 +473,7 @@ write_files:
 
       # Pip packages
       $S 12 "pip"
-      pip3 install -U yt-dlp google-auth google-api-python-client --break-system-packages >> "$LOG" 2>&1
+      PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
 
@@ -782,7 +788,7 @@ write_files:
 
       ## Project Context
       This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.
-      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.15.yaml)
+      - YAML configs: dropbox:droplets/yaml/ (current: cloud-browser-v3.16.yaml)
       - Project docs: dropbox:droplets/yaml/CONTEXT.md
       - Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
       - Previous transcripts restored from Dropbox on boot
@@ -982,7 +988,7 @@ write_files:
 
       ## Diagnostic Steps
       1. Check logs: journalctl -u clawdbot -n 100 --no-pager
-      2. Run doctor: clawdbot doctor --non-interactive
+      2. Run doctor with auto-fix: clawdbot doctor --fix
       3. Compare configs: diff ~/.clawdbot/clawdbot.json ~/.clawdbot/clawdbot.full.json
       4. Check for JSON errors: cat ~/.clawdbot/clawdbot.full.json | jq .
 
