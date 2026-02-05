@@ -675,23 +675,46 @@ The multi-agent council deliberation protocol works well structurally but fights
 - R10.5.1: Clawdbot Discord channel MUST be configured as the default council platform for new habitats.
 - R10.5.2: Each agent gets a Discord bot (same approach as Telegram — one bot token per agent).
 - R10.5.3: Council group is a Discord server with a `#council` forum channel. Each topic becomes a forum post with threads for rounds.
-- R10.5.4: Telegram remains available as an option (`council.platform: "telegram"`) for users who prefer it.
-- R10.5.5: Agent DMs (1:1 with user) can be on either platform — user's choice.
+- R10.5.4: Agent DMs default to Discord. Per-agent opt-in to Telegram by providing a `telegramBotToken` instead of (or alongside) `discordBotToken` in the agent config.
+- R10.5.5: The wizard shortcut MUST collect Discord bot tokens by default. Telegram bot tokens are an optional "Advanced" field per agent.
+- R10.5.6: Clawdbot config MUST support both `discord` and `telegram` channels simultaneously for habitats that use both.
 
-**Habitat config:**
+**Habitat config (agents):**
+```json
+{
+  "agents": [
+    {
+      "agent": "Claude",
+      "discordBotToken": "...",
+      "telegramBotToken": null
+    },
+    {
+      "agent": "ChatGPT",
+      "discordBotToken": "...",
+      "telegramBotToken": "..."
+    }
+  ]
+}
+```
+- `discordBotToken` → agent DMs on Discord (default)
+- `telegramBotToken` → agent DMs on Telegram (opt-in, can coexist with Discord)
+- If both provided, agent is reachable on both platforms
+- Council always uses Discord regardless of individual agent DM platform
+
+**Habitat config (council):**
 ```json
 {
   "council": {
-    "groupId": "...",
+    "serverId": "...",
+    "forumChannelId": "...",
     "groupName": "The Council",
     "judge": "Opus",
-    "platform": "discord",
     "deliveryMode": "summary+file"
   }
 }
 ```
 
-**Action item:** Set up a Discord server for The Council and migrate ASAP. Telegram group stays active during transition.
+**Action item:** Set up a Discord server for The Council and migrate ASAP.
 
 ---
 
