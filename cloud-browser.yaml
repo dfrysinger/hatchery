@@ -1,7 +1,7 @@
 #cloud-config
-# version: 2.51
-# Cloud Browser Config v2.51 - 2026-02-01
-# Added: Email limitations to TOOLS.md template, GH_TOKEN, Gmail OAuth placeholders
+# version: 2.52
+# Cloud Browser Config v2.52 - 2026-02-01
+# Added: /prepare-shutdown endpoint for reliable memory sync before destroy
 # Changed: BOOT.md -> BOOTSTRAP.md (one-time bootstrap)
 package_update: false
 package_upgrade: false
@@ -166,11 +166,11 @@ write_files:
     permissions: "0644"
     content: |
       [calendars]
-      
+
       [[default]]
       path = ~/.local/share/khal/calendars/*
       type = discover
-      
+
       [locale]
       timeformat = %H:%M
       dateformat = %Y-%m-%d
@@ -234,13 +234,13 @@ write_files:
       [Unit]
       Description=Xvfb Virtual Framebuffer
       After=network.target
-      
+
       [Service]
       Type=simple
       User=__USERNAME__
       ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -ac
       Restart=always
-      
+
       [Install]
       WantedBy=multi-user.target
 
@@ -295,7 +295,7 @@ write_files:
       - User has RDP access on display :10
       - Virtual display :99 (Xvfb) available for invisible automation
       - Chrome is at `/usr/bin/google-chrome-stable`
-      
+
       ### Email Limitations (DigitalOcean)
       - **Direct SMTP is blocked** - DO blocks outbound port 25 by default
       - Email must be sent via:
@@ -303,37 +303,37 @@ write_files:
         - **Authenticated SMTP on port 587** (current himalaya setup uses this)
         - **Third-party relay/proxy**
       - The current himalaya config uses Gmail SMTP on port 587 with app password, which works
-      
+
       ### Package Installation
       - **Homebrew is NOT installed** - do not use `brew`
       - Use `apt` for system packages: `sudo apt install <package>`
       - Use `pip` for Python packages: `pip3 install <package>`
       - Use `npm` for Node packages: `npm install -g <package>`
       - For tools not in apt/pip/npm, download binaries directly with curl
-      
+
       ### Browser Control
-      
+
       The desktop Chrome shortcut is pre-configured with remote debugging enabled.
       - User sees it in their RDP session on display :10
       - You have full CDP control via port 18800
       - Uses the chrome-debug profile (no onboarding prompts)
-      
+
       To launch Chrome programmatically with control:
-      
+
           DISPLAY=:10 google-chrome-stable --remote-debugging-port=18800 --user-data-dir=__HOMEDIR__/.config/chrome-debug <url> &
-      
+
       For invisible automation, use the clawd-managed browser on :99:
       - Runs in background, user cannot see it
       - To let user view it: `x11vnc -display :99 -nopw -forever &`
-      
+
       ### File Sharing with User's Phone (Jump RDP)
       When user connects via Jump iOS app, their phone storage is available at:
       `__HOMEDIR__/thinclient_drives/`
-      
+
       ### Cloud Storage (Dropbox via rclone)
       If configured, Dropbox is mounted at `__HOMEDIR__/Dropbox` (click desktop icon to mount).
       CLI: `rclone ls dropbox:`, `rclone copy`, etc.
-      
+
       ### Available Tools
       - **Chrome**: Desktop shortcut has remote debugging enabled (port 18800)
       - **Thunderbird**: Email and calendar client (configure on first launch)
@@ -344,7 +344,7 @@ write_files:
       - **pandoc**: Document conversion
       - **himalaya**: Email CLI (if configured)
       - **khal/vdirsyncer**: Calendar CLI tools (if configured)
-      
+
       ### Additional Tools
       - **yt-dlp**: Download videos from YouTube and other sites
       - **ImageMagick**: Image manipulation (`convert`, `mogrify`, `identify`)
@@ -354,7 +354,7 @@ write_files:
       - **gh**: GitHub CLI (issues, PRs, CI)
       - **vlc**: Media player
       - **htop/ncdu**: System monitoring
-      
+
       ### ClawdHub Skills
       - **weather**: Weather forecasts (no API key needed)
       - **github**: GitHub via gh CLI
@@ -362,7 +362,7 @@ write_files:
       - **yt-dlp-downloader-skill**: Download videos
       - **video-frames**: Extract frames from videos
       - **goplaces**: Google Places search
-      
+
       ### Workspace
       `__HOMEDIR__/clawd`
 
@@ -416,41 +416,41 @@ write_files:
       HOMEDIR="/home/$USERNAME"
       REMOTE="dropbox:clawdbot-memory"
       LOG="/var/log/clawdbot-restore.log"
-      
+
       echo "=== Memory Restore Started: $(date) ===" > "$LOG"
-      
+
       if [ -z "$DROPBOX_TOK" ]; then
         echo "No Dropbox configured, skipping restore" >> "$LOG"
         exit 0
       fi
-      
+
       MY_GEN="$AGENT_GEN"
       if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
         MY_GEN="1"
         echo "AGENT_GEN not set, defaulting to gen-1" >> "$LOG"
       fi
       PREV_GEN=$((MY_GEN - 1))
-      
+
       echo "I am gen-${MY_GEN}, restoring from gen-${PREV_GEN}" >> "$LOG"
-      
+
       mkdir -p "$HOMEDIR/clawd/memory"
       mkdir -p "$HOMEDIR/clawd/memory/archive"
-      
+
       su - $USERNAME -c "rclone copy '$REMOTE/MEMORY.md' '$HOMEDIR/clawd/' 2>/dev/null" >> "$LOG" 2>&1
-      
+
       if [ "$PREV_GEN" -gt 0 ]; then
         su - $USERNAME -c "rclone copy '$REMOTE/gen-${PREV_GEN}/memory' '$HOMEDIR/clawd/memory/' 2>/dev/null" >> "$LOG" 2>&1
         echo "Restored memory from gen-${PREV_GEN}" >> "$LOG"
       fi
-      
+
       for i in $(seq 1 $((PREV_GEN - 1))); do
         su - $USERNAME -c "rclone copy '$REMOTE/gen-${i}/memory' '$HOMEDIR/clawd/memory/archive/gen-${i}/' 2>/dev/null" >> "$LOG" 2>&1
       done
-      
+
       echo "$MY_GEN" > "$HOMEDIR/clawd/.gen"
       date -u +%s > "$HOMEDIR/clawd/.gen-created"
       chown $USERNAME:$USERNAME "$HOMEDIR/clawd/.gen" "$HOMEDIR/clawd/.gen-created"
-      
+
       chown -R $USERNAME:$USERNAME "$HOMEDIR/clawd"
       echo "=== Memory Restore Finished: $(date) ===" >> "$LOG"
 
@@ -462,28 +462,28 @@ write_files:
       source /etc/droplet.env
       HOMEDIR="/home/$USERNAME"
       REMOTE="dropbox:clawdbot-memory"
-      
+
       if [ -z "$DROPBOX_TOK" ]; then
         exit 0
       fi
-      
+
       MY_GEN="$AGENT_GEN"
       if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
         if [ -f "$HOMEDIR/clawd/.gen" ]; then
           MY_GEN=$(cat "$HOMEDIR/clawd/.gen")
         fi
       fi
-      
+
       if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
         MY_GEN="1"
       fi
-      
+
       su - $USERNAME -c "rclone sync '$HOMEDIR/clawd/memory' '$REMOTE/gen-${MY_GEN}/memory' --exclude 'archive/**' 2>/dev/null"
-      
+
       if [ -f "$HOMEDIR/clawd/MEMORY.md" ]; then
         su - $USERNAME -c "rclone copy '$HOMEDIR/clawd/MEMORY.md' '$REMOTE/' 2>/dev/null"
       fi
-      
+
       date -u +%s > "$HOMEDIR/clawd/.last-sync"
       chown $USERNAME:$USERNAME "$HOMEDIR/clawd/.last-sync" 2>/dev/null
 
@@ -496,14 +496,14 @@ write_files:
       HOMEDIR="/home/$USERNAME"
       REMOTE="dropbox:clawdbot-memory"
       DAYS_OLD="${1:-30}"
-      
+
       echo "Consolidating generations older than $DAYS_OLD days..."
-      
+
       NOW=$(date +%s)
       CUTOFF=$((NOW - DAYS_OLD * 86400))
-      
+
       GENS=$(su - $USERNAME -c "rclone lsf '$REMOTE/' --dirs-only 2>/dev/null" | grep '^gen-' | sed 's|/$||' | sort -t- -k2 -n)
-      
+
       for GEN in $GENS; do
         CREATED_FILE=$(su - $USERNAME -c "rclone cat '$REMOTE/$GEN/.created' 2>/dev/null")
         if [ -n "$CREATED_FILE" ] && [ "$CREATED_FILE" -lt "$CUTOFF" ]; then
@@ -517,7 +517,7 @@ write_files:
     content: |
       [Unit]
       Description=Sync Clawdbot memory to Dropbox
-      
+
       [Service]
       Type=oneshot
       ExecStart=/usr/local/bin/sync-clawdbot-state.sh
@@ -529,11 +529,11 @@ write_files:
     content: |
       [Unit]
       Description=Periodic Clawdbot memory sync
-      
+
       [Timer]
       OnBootSec=2min
       OnUnitActiveSec=2min
-      
+
       [Install]
       WantedBy=timers.target
 
@@ -544,11 +544,11 @@ write_files:
       #!/bin/bash
       LOG="/var/log/package-install.log"
       echo "=== Package Install Started: $(date) ===" > "$LOG"
-      
+
       echo "Starting parallel downloads..." >> "$LOG"
       wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb &
       PID_CHROME=$!
-      
+
       (
         GPURL=$(curl -s https://api.github.com/repos/steipete/goplaces/releases/latest | grep -o 'https://[^"]*linux_amd64.tar.gz')
         if [ -n "$GPURL" ]; then
@@ -556,25 +556,25 @@ write_files:
         fi
       ) &
       PID_GOPLACES=$!
-      
+
       echo "Setting up NodeJS repository..." >> "$LOG"
       curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >> "$LOG" 2>&1
-      
+
       echo "Setting up GitHub CLI repository..." >> "$LOG"
       curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
       chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
-      
+
       echo "Stopping apt services..." >> "$LOG"
       systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
       systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
       systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
       systemctl stop unattended-upgrades 2>/dev/null || true
       systemctl disable unattended-upgrades 2>/dev/null || true
-      
+
       killall -9 apt apt-get dpkg unattended-upgr 2>/dev/null || true
       sleep 2
-      
+
       for lockfile in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
         if [ -f "$lockfile" ]; then
           if ! fuser "$lockfile" >/dev/null 2>&1; then
@@ -582,7 +582,7 @@ write_files:
           fi
         fi
       done
-      
+
       WAIT_COUNT=0
       while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
         if [ $((WAIT_COUNT % 10)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
@@ -596,7 +596,7 @@ write_files:
           break
         fi
       done
-      
+
       echo "Running consolidated apt install..." >> "$LOG"
       flock -x /var/lib/dpkg/lock-frontend -c '
         apt-get update && \
@@ -608,7 +608,7 @@ write_files:
           nodejs build-essential git gh \
           libreoffice-writer pandoc rclone fuse3 khal vdirsyncer thunderbird
       ' >> "$LOG" 2>&1
-      
+
       APT_STATUS=$?
       if [ $APT_STATUS -ne 0 ]; then
         echo "ERROR: apt failed with $APT_STATUS, retrying..." >> "$LOG"
@@ -625,36 +625,36 @@ write_files:
           sed -i '/^packages$/d' /var/run/cloud-init-errors 2>/dev/null || true
         fi
       fi
-      
+
       echo "Waiting for downloads..." >> "$LOG"
       wait $PID_CHROME
       wait $PID_GOPLACES
-      
+
       if [ -f /tmp/chrome.deb ]; then
         echo "Installing Chrome..." >> "$LOG"
         apt-get install -y /tmp/chrome.deb >> "$LOG" 2>&1
         rm -f /tmp/chrome.deb
       fi
-      
+
       apt-get purge -y gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
       apt-get autoremove -y >> "$LOG" 2>&1
-      
+
       if [ -f /tmp/goplaces.tar.gz ]; then
         echo "Installing goplaces..." >> "$LOG"
         tar -xzf /tmp/goplaces.tar.gz -C /usr/local/bin 2>/dev/null
         chmod +x /usr/local/bin/goplaces 2>/dev/null
         rm -f /tmp/goplaces.tar.gz
       fi
-      
+
       echo "Installing yt-dlp..." >> "$LOG"
       pip3 install -U yt-dlp >> "$LOG" 2>&1
-      
+
       echo "Installing himalaya..." >> "$LOG"
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       if [ -f "/root/.local/bin/himalaya" ]; then
         ln -sf "/root/.local/bin/himalaya" /usr/local/bin/himalaya
       fi
-      
+
       echo "=== Package Install Finished: $(date) ===" >> "$LOG"
 
   - path: /usr/local/sbin/apply-credentials.sh
@@ -801,7 +801,7 @@ write_files:
       Description=Clawdbot Gateway
       After=network.target xvfb.service
       Requires=xvfb.service
-      
+
       [Service]
       Type=simple
       User=$USERNAME
@@ -812,7 +812,7 @@ write_files:
       TimeoutStopSec=30
       Restart=always
       $(echo -e "$CLAWDBOT_ENV")
-      
+
       [Install]
       WantedBy=multi-user.target
       CLAWDSERVICE
@@ -1013,7 +1013,7 @@ write_files:
       [accounts.default]
       email = "${EMAIL}"
       default = true
-      
+
       backend.type = "imap"
       backend.host = "${IMAP_H}"
       backend.port = 993
@@ -1021,7 +1021,7 @@ write_files:
       backend.login = "${EMAIL}"
       backend.auth.type = "password"
       backend.auth.raw = "${EMAIL_PASS}"
-      
+
       message.send.backend.type = "smtp"
       message.send.backend.host = "${SMTP_H}"
       message.send.backend.port = 587
@@ -1032,7 +1032,7 @@ write_files:
       HIMALAYACONF
         echo "himalaya configured" >> "$LOG"
       fi
-      
+
       # Configure GitHub CLI if token provided
       if [ -n "$GH_TOKEN" ] && [ "$GH_TOKEN" != "GHTOK" ]; then
         echo "Configuring GitHub CLI..." >> "$LOG"
@@ -1041,7 +1041,7 @@ write_files:
       github.com:
           oauth_token: ${GH_TOKEN}
           git_protocol: https
-          user: 
+          user: ""
       GHCONF
         chown -R $USERNAME:$USERNAME $HOMEDIR/.config/gh
         chmod 600 $HOMEDIR/.config/gh/hosts.yml
@@ -1052,18 +1052,18 @@ write_files:
         cat > $HOMEDIR/.config/vdirsyncer/config <<VDIRSYNCERCONF
       [general]
       status_path = "~/.local/share/vdirsyncer/status/"
-      
+
       [pair calendar]
       a = "calendar_local"
       b = "calendar_remote"
       collections = ["from a", "from b"]
       metadata = ["color"]
-      
+
       [storage calendar_local]
       type = "filesystem"
       path = "~/.local/share/khal/calendars/"
       fileext = ".ics"
-      
+
       [storage calendar_remote]
       type = "caldav"
       url = "${CALDAV_URL}"
@@ -1095,7 +1095,7 @@ write_files:
       import json
       import re
       import os
-      
+
       PORT = 8080
       STAGES = {
           0: "init",
@@ -1110,7 +1110,7 @@ write_files:
           9: "reboot",
           10: "ready"
       }
-      
+
       def get_min_to_dest():
           try:
               with open('/etc/droplet.env', 'r') as f:
@@ -1121,7 +1121,7 @@ write_files:
           except:
               pass
           return 0
-      
+
       def get_status():
           errors = []
           if os.path.exists('/var/run/cloud-init-errors'):
@@ -1141,9 +1141,9 @@ write_files:
               "desc": STAGES.get(stage, "unknown"),
               "errors": errors
           }
-      
+
       LOG_FILE = "/var/log/api-server-requests.log"
-      
+
       def log_request(path, status, client):
           try:
               from datetime import datetime
@@ -1152,7 +1152,7 @@ write_files:
                   f.write(f"{ts} {path} stage={status.get('stage','-')} desc={status.get('desc','-')} client={client}\n")
           except:
               pass
-      
+
       class Handler(http.server.BaseHTTPRequestHandler):
           def log_message(self, *args):
               pass
@@ -1179,11 +1179,32 @@ write_files:
                           self.wfile.write(f.read().encode())
                   except:
                       self.wfile.write(b"No stage log available")
+              elif self.path == '/sync':
+                  self.send_response(200)
+                  self.send_header('Content-type', 'application/json')
+                  self.end_headers()
+                  try:
+                      result = subprocess.run("/usr/local/bin/sync-clawdbot-state.sh", shell=True, capture_output=True, timeout=60)
+                      self.wfile.write(json.dumps({"ok": result.returncode == 0}).encode())
+                  except Exception as e:
+                      self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
               else:
                   self.send_response(404)
                   self.end_headers()
           def do_POST(self):
-              if self.path == '/keepalive':
+              if self.path == '/prepare-shutdown':
+                  self.send_response(200)
+                  self.send_header('Content-type', 'application/json')
+                  self.end_headers()
+                  try:
+                      # Sync memory to Dropbox
+                      sync_result = subprocess.run("/usr/local/bin/sync-clawdbot-state.sh", shell=True, capture_output=True, timeout=60)
+                      # Stop clawdbot gracefully (will also trigger ExecStop sync)
+                      subprocess.run("systemctl stop clawdbot", shell=True, timeout=30)
+                      self.wfile.write(json.dumps({"ok": sync_result.returncode == 0, "ready_for_shutdown": True}).encode())
+                  except Exception as e:
+                      self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+              elif self.path == '/keepalive':
                   self.send_response(200)
                   self.send_header('Content-type', 'application/json')
                   self.end_headers()
@@ -1192,10 +1213,10 @@ write_files:
                       self.wfile.write(json.dumps({"ok": True}).encode())
                   except Exception as e:
                       self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
-      
+
       class ReusableTCPServer(socketserver.TCPServer):
           allow_reuse_address = True
-      
+
       with ReusableTCPServer(("", PORT), Handler) as httpd:
           httpd.serve_forever()
 
