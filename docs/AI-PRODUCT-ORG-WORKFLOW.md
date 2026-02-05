@@ -1,10 +1,11 @@
 # AI Product Organization — Operating Workflow
 
-> **Version:** 1.0-draft
-> **Status:** Council Review Pending
+> **Version:** 2.0
+> **Status:** Approved (Council Round 1 + 2, Human confirmation)
 > **Last Updated:** 2026-02-05
+> **Timezone:** US Mountain Time (MT)
 
-A complete operating manual for running an autonomous AI product organization inside Discord + Clawdbot. This workflow governs how ideas become shipped features through structured council deliberation, sprint execution, and quality gates.
+A complete operating manual for running an autonomous AI product organization inside Discord + Clawdbot. This workflow governs how ideas become shipped features through structured council deliberation, daily sprint cadence, and quality gates.
 
 ---
 
@@ -13,14 +14,17 @@ A complete operating manual for running an autonomous AI product organization in
 1. [Organization Design](#1-organization-design)
 2. [Decision Authority (RACI)](#2-decision-authority-raci)
 3. [Discord Server Structure](#3-discord-server-structure)
-4. [The Workflow Pipeline](#4-the-workflow-pipeline)
-5. [Worker Protocol (TDD)](#5-worker-protocol-tdd)
-6. [The Judge's Playbook](#6-the-judges-playbook)
-7. [Cost Governance](#7-cost-governance)
-8. [Clawdbot Configuration](#8-clawdbot-configuration)
-9. [Failure Recovery](#9-failure-recovery)
-10. [Artifact Templates](#10-artifact-templates)
-11. [Implementation Roadmap](#11-implementation-roadmap)
+4. [Daily Cadence](#4-daily-cadence)
+5. [The Workflow Pipeline](#5-the-workflow-pipeline)
+6. [Worker Protocol (TDD)](#6-worker-protocol-tdd)
+7. [The Judge's Playbook](#7-the-judges-playbook)
+8. [Cost Governance](#8-cost-governance)
+9. [CI/CD Standards](#9-cicd-standards)
+10. [Security Policy](#10-security-policy)
+11. [Clawdbot Configuration](#11-clawdbot-configuration)
+12. [Failure Recovery](#12-failure-recovery)
+13. [Artifact Templates](#13-artifact-templates)
+14. [Implementation Roadmap](#14-implementation-roadmap)
 
 ---
 
@@ -28,35 +32,47 @@ A complete operating manual for running an autonomous AI product organization in
 
 ### 1.1 Permanent Seats (Agents)
 
-| Seat | Model | Account Tier | Primary Role |
+| Seat | Model | Access Model | Primary Role |
 |------|-------|-------------|--------------|
-| **Opus (Judge/CPO)** | Claude Opus 4.5 | Max | Orchestrator, final arbiter, CPO tiebreaker |
-| **Claude** | Claude Opus 4.5 | Max | Panelist — product quality, UX coherence, narrative |
-| **ChatGPT** | GPT-5.2 | $20/mo | Panelist — systems thinking, workflow rigor, edge cases |
-| **Gemini** | Gemini 3 Pro | $20/mo | Panelist — implementation realism, integration, test strategy |
-| **Grok** | Grok | $20/mo | Panelist — adversarial review, failure modes, cost, abuse paths |
+| **Opus (Judge/CPO)** | Claude Opus 4.5 | Anthropic API (Max) | Orchestrator, final arbiter, CPO tiebreaker |
+| **Claude** | Claude Opus 4.5 | Anthropic API (Max) | Panelist — product quality, UX coherence, narrative |
+| **ChatGPT** | GPT-5.2 | OpenAI OAuth (subscription) | Panelist — systems thinking, workflow rigor, edge cases |
+| **Gemini** | Gemini 3 Pro | Google API (subscription) | Panelist — implementation realism, integration, test strategy |
+| **Grok** | Grok | xAI (subscription) | Panelist — adversarial review, failure modes, cost, abuse paths |
 
-### 1.2 Dynamic Hats (Role Overlays)
+### 1.2 Consistent Panelist Personas (No Dynamic Hats)
 
-Hats are NOT separate agents — they're prompt instructions applied when the Judge dispatches work. Each council member adopts the assigned hat's perspective while retaining their natural strengths.
+Each council member keeps a **consistent persona**. The Judge controls focus via the dispatch scope (e.g., "focus on security for this review") rather than swapping "hat prompt packs." This is simpler, cheaper, and equally effective.
 
-| Hat | Emoji | Focus |
-|-----|-------|-------|
-| **Product Manager (PM)** | 🎩 | User value, requirements, acceptance criteria, UX, market fit |
-| **Engineering Lead (EL)** | 🔧 | Architecture, feasibility, scalability, code quality, implementation |
-| **Security Researcher (SEC)** | 🔒 | Threat modeling, attack surfaces, auth, data handling, abuse cases |
-| **QA Lead** | 🧪 | Test strategy, edge cases, integration testing, quality gates |
+- **Claude:** Product quality, UX, narrative coherence, acceptance criteria depth
+- **ChatGPT:** Systems thinking, process rigor, edge cases, workflow enforcement
+- **Gemini:** Implementation realism, feasibility, test strategy, integration risk
+- **Grok:** Adversarial review, failure modes, abuse paths, cost analysis
 
-**How hats activate:** The Judge's dispatch message includes `HAT: <role>`. Council members respond through that lens. The hat is in the dispatch, not the channel — this avoids context loss from channel-hopping and saves tokens.
+The Judge's dispatch message tells panelists what perspective to emphasize per round — they don't change identity.
 
 ### 1.3 Scrum Team (Execution)
 
 | Role | Model | Count | Purpose |
 |------|-------|-------|---------|
-| **Engineering Lead** | Claude Sonnet 4.5 | 1 (dedicated) | Task assignment, code review, integration testing, worker management |
+| **Engineering Lead (EL)** | Claude Sonnet 4.5 | 1 (dedicated) | Task assignment, code review, integration testing, worker management |
 | **Workers** | Claude Sonnet 4.5 | 5 | TDD implementation, unit testing, bug fixes |
 
-**Key design choice:** The EL is a **6th Sonnet agent**, NOT a council member doing double duty. This keeps the council available for high-leverage decisions and prevents Claude from becoming a bottleneck.
+**Total: 11 agents** (5 council + 1 EL + 5 workers)
+
+The EL is a **dedicated 6th Sonnet agent**, NOT a council member doing double duty. This keeps the council available for high-leverage decisions and prevents Claude from becoming a bottleneck.
+
+### 1.4 Account Strategy
+
+| Account | Models | Purpose | Rate Handling |
+|---------|--------|---------|---------------|
+| **Leadership** | Anthropic API (Opus + Sonnet EL) | Judge, Claude panelist, EL | Priority lane |
+| **Workers** | Anthropic API (Sonnet × 5) | Development tasks | Queue-managed with semaphore |
+| **ChatGPT** | OpenAI OAuth (subscription) | Council gates only | Throttled, not capped |
+| **Gemini** | Google API (subscription) | Council gates only | Throttled, not capped |
+| **Grok** | xAI (subscription) | Council gates only | Throttled, not capped |
+
+**Key:** Subscription-based models (ChatGPT, Gemini, Grok) are throttled when hitting rate limits, not hard-capped. Budget management is about managing throughput, not preventing overages.
 
 ---
 
@@ -67,15 +83,24 @@ Clear authority prevents endless debate. When in doubt, check this table.
 | Decision | Responsible | Accountable | Consulted | Informed |
 |----------|------------|-------------|-----------|----------|
 | Initiative worth council time | Judge | Human | — | Council |
-| PRD acceptance | Council (PM hat) | Judge | Human | Workers |
-| Architecture acceptance | Council (EL hat) | Judge | Human | EL |
-| Security requirements | Council (SEC hat) | Judge | Human | EL |
-| Task breakdown & sizing | EL | Judge | Council (quick review) | Workers |
-| Technical approach per task | EL | EL | — | Workers |
-| Implementation details | Worker | EL | — | — |
-| Code merge readiness | EL | EL | PM (acceptance criteria only) | Judge |
-| Release readiness | Council (all hats) | Judge | Human | EL, Workers |
+| PRD acceptance | Council | Judge | **Human (required)** | Workers |
+| Architecture acceptance | Council | Judge | Human | EL |
+| Security requirements | Council | Judge | Human | EL |
+| Sprint plan approval | EL | Judge | **Human (required)** | Workers |
+| Task breakdown & sizing | EL | EL | — | Workers |
+| Technical approach per task | Worker | EL | — | — |
+| Code merge readiness | EL | EL | — | Judge |
+| Release readiness | Council | Judge | **Human (required)** | EL, Workers |
+| Emergency hotfix | EL | Judge | Council (post-hoc) | Human |
 | Tiebreaker (any dispute) | Judge | Judge | — | All |
+
+### Human Gates (Hard Requirements)
+
+The human MUST approve at these points (✅ reaction or text both count):
+1. **Morning standup plan** — daily work plan before anything starts
+2. **PRD review** — before engineering begins
+3. **Sprint plan** — before workers start coding
+4. **Release candidate** — before anything ships
 
 ### Dispute Resolution Protocol
 
@@ -90,82 +115,140 @@ No appeals. No re-litigation. Move forward.
 
 ## 3. Discord Server Structure
 
-### 3.1 Channel Map
+### 3.1 Channel Map (5 Channels)
 
 ```
-🏛️ COUNCIL
-├── #council-lobby        — Judge announcements, phase transitions, human requests
-├── #deliberation         — Forum: council discusses dispatched topics (1 post per topic)
-├── #decisions-log        — Read-only: Judge posts final decisions + rationale
-├── #council-votes        — Quick polls when preference sensing is useful
-
-📋 PRODUCT
-├── 📋 prds               — Forum: each PRD is a post (tags: Draft / Review / Approved / Rejected)
-├── 📋 roadmap            — Forum: release milestones and feature groupings
-
-🔧 SCRUM
-├── #standup              — EL posts assignments, workers report status (daily summaries)
-├── #code-review          — MR submissions, review discussions, approval/rejection
-├── 📋 sprint-tasks       — Forum: each task is a post (tags: Todo / In Progress / Review / Done / Blocked)
-├── 📋 bugs               — Forum: bug reports (tags: P0 / P1 / P2 / In Progress / Resolved)
-
-🧪 QUALITY
-├── #test-results         — Automated test output, integration test reports
-├── #release-candidates   — RC announcements + council review threads
-
-📊 RELEASES
-├── #release-notes        — Published release notes for the human
-├── 📋 releases           — Forum: each release with changelog and review trail
-
-🔧 OPS
-├── #alerts               — CI failures, gateway issues, cron reminders
-├── #audit-log            — "Who did what" summaries (bot-posted)
+📁 Product Org
+├── #standup           — Human-facing: daily briefs, approvals, EOD reports
+├── #council-forum     — Forum: one thread per feature (tags: PRD / Sprint / RC / Done)
+├── #decisions-log     — Append-only: final decisions, gate outcomes
+├── #alerts            — Escalations, budget warnings, failures
+└── #dev-log           — EL: task assignments, MR links, CI results, worker progress
 ```
 
-### 3.2 Permission Model
+**Design principle:** The human checks `#standup` daily. Everything else is optional depth.
 
-| Role | Council Channels | Product | Scrum | Quality | Releases | Ops |
-|------|-----------------|---------|-------|---------|----------|-----|
-| Human | Full access | Full | Full | Full | Full | Full |
-| Judge | Full access | Full | Read + post | Full | Full | Full |
-| Council Members | Post in #deliberation | Read | Read only | Read | Read | Read |
-| EL | Read #decisions-log | Read | Full access | Full | Post | Read |
-| Workers | None | Read PRDs | Post in scrum channels | Post test results | None | None |
+### 3.2 Channel Purposes
 
-### 3.3 Discord Features Used
+| Channel | Who Posts | Who Reads | Purpose |
+|---------|----------|-----------|---------|
+| `#standup` | Judge | Human, all agents | Morning plan, EOD report, approval requests |
+| `#council-forum` | Judge, Council | Human, all agents | Feature lifecycle (PRD → Sprint → RC → Done) |
+| `#decisions-log` | Judge only | All | Canonical decision record, gate outcomes |
+| `#alerts` | Judge, EL | Human, Judge | Budget warnings, CI failures, blockers |
+| `#dev-log` | EL | Judge, Human (optional) | Task assignments, MR status, CI results |
 
-| Feature | Purpose |
-|---------|---------|
-| **Forum channels** | Structured tracking with status tags (PRDs, tasks, bugs, releases) |
-| **Forum tags** | Status workflow (Draft → Review → Approved → Done) |
-| **Threads** | Per-item discussions, keeps main channels clean |
-| **Pinned messages** | Latest approved artifacts in each channel |
-| **Polls** | Quick council preference sensing (Judge still decides) |
-| **Reactions** | ✅ approve, 🚩 flag concern, 🛑 block, 👀 reviewing |
-| **Roles** | Visual identification + permission control |
+**Workers never post to Discord.** EL summarizes worker progress to `#dev-log`. This reduces noise and keeps the human-facing channels clean.
+
+### 3.3 Forum Channel Usage
+
+`#council-forum` uses Discord forum posts with tags:
+- **PRD** — feature in PRD/design phase
+- **Sprint** — feature in active development
+- **RC** — release candidate under review
+- **Done** — shipped and archived
+
+Each feature gets ONE forum thread that tracks its entire lifecycle. PRDs, architecture decisions, sprint plans, and RC reviews all happen in the same thread.
 
 ---
 
-## 4. The Workflow Pipeline
+## 4. Daily Cadence
+
+**Day = Sprint.** Every day follows a Sunrise → Execute → Sunset rhythm.
+
+### 4.1 Sunrise (9:30 AM MT)
+
+Judge generates and posts the **Daily Brief** to `#standup`:
+
+```
+☀️ DAILY BRIEF — [Date]
+
+## Yesterday
+- [Completed items]
+- [Carry-over items]
+
+## Today's Plan
+- [Task 1] → Worker-N
+- [Task 2] → Worker-N
+- [Blocked items]
+
+## Decisions Needed
+- [Any approvals required]
+
+## Budget Status
+- Leadership: [X% used]
+- Workers: [X% used]
+- Council calls remaining: ~[N]
+
+⏳ Awaiting approval to begin. React ✅ or reply to approve.
+```
+
+**No work starts until the human approves** (✅ reaction or text reply).
+
+### 4.2 Execution (After Approval)
+
+- EL assigns tasks to workers via `sessions_send`
+- Workers execute TDD cycle (see Section 6)
+- EL monitors, reviews MRs, handles blockers
+- EL posts progress updates to `#dev-log`
+- **Midday checkpoint** only if there's a decision needed (EL escalates to Judge → `#standup`)
+
+### 4.3 Sunset (End of Work Day)
+
+Judge compiles and posts **EOD Report** to `#standup`:
+
+```
+🌙 EOD REPORT — [Date]
+
+## Completed
+- ✅ [Task] — merged, tests passing
+- ✅ [Task] — merged, tests passing
+
+## In Progress
+- 🔄 [Task] — MR submitted, awaiting review
+- 🔄 [Task] — 60% complete, continuing tomorrow
+
+## Blocked
+- 🔴 [Task] — [reason], [proposed resolution]
+
+## Tomorrow's Draft Plan
+- [Proposed task 1]
+- [Proposed task 2]
+
+## Notes
+- [Any observations, risks, or decisions for the human]
+```
+
+### 4.4 Day Types
+
+| Day Type | What Happens | Council Involved? |
+|----------|-------------|-------------------|
+| **Planning Day** | New feature → PRD draft → Council review → Human approval → Task breakdown → Human approval | Yes (1 gate) |
+| **Execution Day** | Standup → Workers code → EL manages → EOD report | No |
+| **Ship Day** | RC ready → Council review → Human demo → Release decision | Yes (1 gate) |
+
+Most days are Execution Days. Council only convenes at gates.
+
+---
+
+## 5. The Workflow Pipeline
 
 ### Overview
-
-The pipeline has **3 council gates** (expensive, high-leverage) and **multiple execution phases** (cheap, worker-driven).
 
 ```
 Intake → [GATE 1: PRD + Architecture] → Sprint Planning → [GATE 2: Task Review] →
 Sprint Execution → Testing → [GATE 3: Release Review] → Demo
 ```
 
+Each gate includes a **Packaging Layer**: a Sonnet-generated brief that summarizes context for the council, reducing expensive model token usage by 50-70%.
+
 ---
 
 ### Phase 0 — Intake (Free)
 
-**Who:** Human (or lightweight bot triage)
-**Where:** `#council-lobby`
+**Who:** Human
+**Where:** `#standup` or `#council-forum`
 **What:** Human describes a feature idea or problem
-
-**Output:** Raw feature request. Judge decides if it's worth council time.
 
 **Judge actions:**
 1. Acknowledge receipt
@@ -175,13 +258,26 @@ Sprint Execution → Testing → [GATE 3: Release Review] → Demo
 
 ---
 
+### Pre-Gate: Packaging Layer
+
+Before every gate, the EL (or a Sonnet worker) produces a **Brief**:
+- 10-bullet summary of current state
+- Decisions needed (max 3)
+- Risks (max 5)
+- Links to artifacts / diffs since last gate
+- ≤500 words total
+
+This brief is what gets dispatched to the council — not raw artifacts.
+
+---
+
 ### GATE 1 — PRD + Architecture Review (Council)
 
 **Cost:** 4 panelist calls + 1 Judge synthesis = **5 calls**
 **Time:** 30-45 minutes max
-**Where:** `#deliberation` forum post
+**Where:** Feature thread in `#council-forum`
 
-This gate combines PM hat (PRD) and EL hat (architecture) into a single council round to save budget. Council members respond with BOTH perspectives in one report.
+Council members respond with both product and engineering perspectives in one report.
 
 **Judge dispatches:**
 ```
@@ -189,144 +285,100 @@ COUNCIL:PROCEED
 Topic: <one-line description>
 Slug: <topic-slug>
 Round: 1
-HAT: PM + EL (combined)
-Scope: Write a combined assessment covering:
-  1. PRD perspective: requirements, user value, acceptance criteria, risks
-  2. Engineering perspective: architecture, feasibility, dependencies, test strategy
-Context: <OnePager.md contents>
+Focus: Combined product + engineering review
+Context: <Brief contents>
 Deadline: 5 minutes
 ```
 
-**Each panelist produces:** `~/clawd/shared/reports/Round1_<AgentName>.md`
+**Output:**
+- `PRD.md` → committed to GitHub in `docs/prds/`
+- `Solution.md` → committed to GitHub in `docs/prds/`
 
-**Judge synthesizes into:**
-- `PRD.md` → posted to 📋 prds forum
-- `Solution.md` → posted to 📋 prds forum (same thread)
-- `SecurityNotes.md` (from Grok's adversarial review)
-
-**Gate decision:** Judge posts to `#decisions-log`:
-```
-GATE 1 PASSED/FAILED
-Topic: <slug>
-Rationale: <why>
-Action: Proceed to Sprint Planning / Revise and resubmit
-```
-
-**Human touchpoint:** Human reviews PRD + Solution in the forum post. Approves or requests changes.
+**Human gate:** Human reviews PRD in GitHub. ✅ reaction or text reply to approve.
 
 ---
 
 ### Phase 1 — Sprint Planning (EL + Judge)
 
 **Cost:** 0-1 council calls (Judge + EL only; council consulted only if complex)
-**Where:** `📋 sprint-tasks` forum
+**Where:** Feature thread in `#council-forum`
 
 **EL produces:**
 - Release breakdown (R1, R2, ...)
-- Per-release task list with:
-  - Task ID, title, description
-  - Acceptance criteria (tied to PRD requirements)
-  - Test requirements
-  - Files likely touched
-  - Dependencies on other tasks
-  - Definition of done
-  - Estimated complexity (S/M/L)
+- Per-release task list with acceptance criteria
+- Dependency ordering for serialized merging
+- `Files Touched` and `Conflicts With` per task
 
-**Output:** One forum post per task in `📋 sprint-tasks`, tagged `Todo`.
+**Human gate:** Sprint plan posted to `#standup`. Human approves before workers start.
 
 ---
 
 ### GATE 2 — Task Review (Council, Quick)
 
 **Cost:** 4 panelist calls + 1 synthesis = **5 calls**
-**Time:** 15-20 minutes (this is a sanity check, not a deep dive)
+**Time:** 15-20 minutes
+**Where:** Feature thread in `#council-forum`
 
-**Judge dispatches** the full task list to council with:
-```
-COUNCIL:PROCEED
-HAT: PM
-Topic: <slug> — Task Coverage Review
-Question: Do these tasks fully cover the PRD requirements?
-  Missing scenarios? Over-engineering? Under-scoping?
-```
-
-**Output:** Approved task backlog, or specific gaps to address.
+Quick sanity check: Do these tasks fully cover the PRD requirements?
 
 ---
 
 ### Phase 2 — Sprint Execution (Workers + EL)
 
 **Cost:** 0 council calls
-**Where:** `#standup`, `#code-review`, `📋 sprint-tasks`
+**Where:** `#dev-log` for status; worker sessions for actual work
 
-This is where the 5 Sonnet workers do the actual building. See [Section 5: Worker Protocol](#5-worker-protocol-tdd) for details.
+This is where the 5 Sonnet workers build. See [Section 6: Worker Protocol](#6-worker-protocol-tdd).
 
-**EL responsibilities during sprint:**
-1. Assign tasks to workers via `sessions_send`
-2. Monitor `#standup` for status updates
-3. Review MRs in `#code-review`
-4. Provide code-level feedback
-5. Check acceptance criteria alignment (PM perspective)
-6. Escalate to Judge only for disputes or architectural questions
-7. Take over tasks where workers are stuck after 2 attempts
-
-**Parallel execution:** Up to 5 tasks in flight simultaneously. EL manages branch conflicts and dependency ordering.
+**Merge policy:** Serialized merging. EL merges one MR at a time; next worker rebases before pushing. This prevents merge conflicts with 5 parallel workers.
 
 ---
 
 ### Phase 3 — Testing (Workers + EL)
 
 **Cost:** 0 council calls
-**Where:** `#test-results`, `📋 bugs`
+**Where:** `#dev-log`, GitHub CI
 
-1. **Workers test their own tasks** — run unit tests, verify acceptance criteria
-2. **Workers report** results to `#test-results`
-3. **EL runs integration tests** across the full release
-4. **Bugs filed** to `📋 bugs` forum, assigned back to the worker who wrote the code
-5. **Fix cycle:** Worker fixes → EL re-tests → repeat until clean
-6. **Stuck workers** (2 attempts): EL fixes, Judge reviews
+1. Workers test their own tasks — run unit tests, verify acceptance criteria
+2. EL runs integration tests across the full release
+3. Bugs filed as GitHub issues, assigned back to the responsible worker
+4. Fix cycle: Worker fixes → EL re-tests → repeat until clean
+5. Stuck workers (2 attempts): EL takes over, Judge reviews
+
+**Triggered SEC mini-round:** If any agent flags a 🛑 security concern during testing, Judge convenes a 10-15 minute SEC-focused council round (2 panelists + Judge) before proceeding.
 
 **Release Candidate criteria:**
 - All unit tests passing
 - Integration tests passing
 - No P0 or P1 bugs open
 - All acceptance criteria verified
+- CI green on all required checks
 
 ---
 
 ### GATE 3 — Release Candidate Review (Council)
 
-**Cost:** 4 panelist calls + 1 synthesis = **5 calls** (batched multi-hat)
+**Cost:** 4 panelist calls + 1 synthesis = **5 calls** (multi-perspective)
 **Time:** 30 minutes max
-**Where:** `#release-candidates`
+**Where:** `#council-forum` (RC tag on feature thread)
 
-**Judge dispatches ONE round** with all hats combined:
-```
-COUNCIL:PROCEED
-HAT: EL + PM + SEC (all perspectives)
-Topic: <slug> — Release Candidate Review
-Deliverables:
-  1. Engineering review: code quality, architecture compliance, tech debt
-  2. Product review: all PRD requirements met? UX acceptable?
-  3. Security review: threat mitigations in place? New attack surfaces?
-Context: <RC_Checklist.md with test results, known issues, changes>
-```
+Council reviews RC checklist + brief (NOT raw code diffs).
 
 **Gate decision options:**
 - ✅ **Ship it** → proceed to demo
-- 🔄 **Conditional** → specific issues sent back to scrum team (one more cycle)
-- 🛑 **Reject** → fundamental problems, needs re-architecture (rare)
+- 🔄 **Conditional** → specific issues sent back to scrum team
+- 🛑 **Reject** → fundamental problems
 
-**Human touchpoint:** Judge announces "Ready for demo" in `#release-notes`.
+**Human gate:** Judge announces "Ready for demo" in `#standup`. Human tests and approves.
 
 ---
 
-### Phase 4 — Release Demo
+### Phase 4 — Retrospective (After Each Release)
 
-**Where:** `#release-notes`
-**What:** Human tests the release candidate live
-
-**Output:** Ship approval, or bug list for one more fix cycle.
+- EL writes sprint retro (what worked, what didn't, metrics)
+- Judge summarizes and updates `KNOWLEDGE.md` + this workflow doc
+- No council call needed — Judge + EL handle async
+- Lessons feed into future sprint planning
 
 ---
 
@@ -339,17 +391,16 @@ Context: <RC_Checklist.md with test results, known issues, changes>
 | Sprint Planning | 0-1 | EL + Judge; council only if complex |
 | Gate 2: Task Review | 5 | Quick sanity check |
 | Sprint Execution | 0 | Workers + EL only |
-| Testing | 0 | Workers + EL only |
-| Gate 3: RC Review | 5 | Batched multi-hat round |
-| **Total** | **15-16** | ~4 calls per $20/mo model per feature |
-
-This is **3-4x cheaper** than sequential hat rounds, with no loss of quality — council members are smart enough to wear multiple hats simultaneously when asked.
+| Testing | 0-5 | 0 normally; +5 if SEC mini-round triggered |
+| Gate 3: RC Review | 5 | Multi-perspective round |
+| Retrospective | 0 | Judge + EL only |
+| **Total** | **15-21** | Sustainable on subscription tiers |
 
 ---
 
-## 5. Worker Protocol (TDD)
+## 6. Worker Protocol (TDD)
 
-### 5.1 Task Assignment
+### 6.1 Task Assignment
 
 Workers receive tasks from the EL via `sessions_send`:
 
@@ -361,15 +412,15 @@ Description: <what to build>
 Acceptance Criteria:
   - AC1: <criterion>
   - AC2: <criterion>
-  - ...
 Test Requirements:
   - <what must be tested>
-Files: <likely files to touch>
+Files Touched: <files this task modifies>
+Conflicts With: <other task IDs touching same files, or "none">
 Branch: feature/<task-id>-<slug>
 Context: <relevant PRD sections, architecture notes>
 ```
 
-### 5.2 TDD Cycle
+### 6.2 TDD Cycle
 
 ```
 1. READ task spec + acceptance criteria thoroughly
@@ -379,92 +430,108 @@ Context: <relevant PRD sections, architecture notes>
    - Edge case tests for boundary conditions
 4. IMPLEMENT minimum code to pass tests (GREEN phase)
 5. REFACTOR for clarity, readability, and maintainability
-6. RUN full test suite — fix any regressions
-7. COMMIT with conventional commit message:
+6. RUN tests locally — all must pass before pushing
+7. PUSH to remote — CI runs automatically
+8. COMMIT with conventional commit message:
    feat(<scope>): <description>
    Refs: TASK-<id>
-8. POST MR to #code-review:
+9. Report to EL via sessions_send:
    [TASK-<id>] <title>
    Branch: feature/<task-id>-<slug>
    Tests: X passing, Y new
    Files: <list>
    Summary: <what and why>
-9. WAIT for review feedback
-10. ADDRESS feedback (up to 2 revision rounds)
-11. If STUCK after 2 attempts:
-    POST to #standup: 🔴 BLOCKED: TASK-<id> — <what's stuck and why>
+10. WAIT for EL review feedback
+11. ADDRESS feedback (up to 2 revision rounds)
+12. If STUCK after 2 attempts:
+    Report to EL: BLOCKED: TASK-<id> — <what's stuck and why>
     (EL will take over)
 ```
 
-### 5.3 Status Updates
+**"Attempt" definition:** A spec clarification request does NOT count as a failed attempt. Only implementation failures where the worker submitted code that doesn't meet acceptance criteria count.
 
-Workers post to `#standup` using these prefixes:
+### 6.3 Status Updates
+
+Workers report to EL via `sessions_send`. EL summarizes to `#dev-log`:
 
 ```
 🟢 STARTED: TASK-<id> — <title>
 🔄 PROGRESS: TASK-<id> — <what's done, what's next>
-📝 MR READY: TASK-<id> — submitted to #code-review
+📝 MR READY: TASK-<id> — submitted for review
 🔴 BLOCKED: TASK-<id> — <reason>
 🐛 BUG FILED: BUG-<id> — <description>
 ✅ DONE: TASK-<id> — merged
 ```
 
-### 5.4 Failure Protocol
+### 6.4 Failure Protocol
 
 When a worker fails a task after 2 attempts:
-1. Worker writes a **short postmortem** (≤100 words): what was tried, what failed, what they think the issue is
-2. Postmortem posted to `#standup`
+1. Worker writes a **structured postmortem**: (a) what was attempted, (b) exact error/failure, (c) what they think the root cause is
+2. Postmortem sent to EL
 3. EL takes over the task
 4. Judge (CPO) reviews EL's implementation
 5. Postmortem informs future task scoping (lessons learned → `KNOWLEDGE.md`)
 
 ---
 
-## 6. The Judge's Playbook
+## 7. The Judge's Playbook
 
-### 6.1 Dispatch Protocol
+### 7.1 Dispatch Protocol
 
 For each council gate:
 
 ```
-1. Announce phase in #council-lobby
-2. Create forum post in #deliberation (or #release-candidates for Gate 3)
-3. Send COUNCIL:PROCEED via sessions_send to each panelist:
-   - HAT instruction(s)
-   - PHASE name
-   - TOPIC slug + round number
-   - Full context (PRD, code summary, previous decisions)
-   - DEADLINE (5 minutes standard)
-4. Monitor for ACKs:
+1. EL (or Sonnet worker) generates Brief (≤500 words)
+2. Judge announces phase in #standup
+3. Judge creates/updates forum thread in #council-forum
+4. Judge sends COUNCIL:PROCEED via sessions_send to each panelist:
+   - Focus instruction (what perspective to emphasize)
+   - Topic slug + round number
+   - Brief + links to full artifacts
+   - Deadline (5 minutes standard; 8-10 for Gate 1/3)
+5. Monitor for ACKs:
    - No ACK in 60s → re-ping once
-   - Still no ACK in 60s → note absence, continue with available panelists
-5. At 4 minutes: reminder to panelists who haven't filed reports
-6. At 5 minutes: proceed with available reports
-7. Read reports from ~/clawd/shared/reports/Round{N}_{AgentName}.md
-8. Synthesize into structured output
-9. Post synthesis to #decisions-log (and relevant forum post)
-10. Address any DISSENT: or QUESTION: tags from panelists
-11. Gate decision: PASSED / CONDITIONAL / FAILED with rationale
-12. Check if human feedback needed → wait or proceed
+   - Still no ACK in 60s → note absence, continue
+6. At 4 minutes: reminder to panelists who haven't filed reports
+7. At 5 minutes: proceed with available reports
+8. Read reports from ~/clawd/shared/reports/
+9. Synthesize and post to #decisions-log + feature thread
+10. Gate decision: PASSED / CONDITIONAL / FAILED with rationale
+11. Post approval request to #standup if human gate required
 ```
 
-### 6.2 EL Management Protocol
+### 7.2 Daily Standup Generation
 
-During sprint phases, the Judge manages the Sonnet EL:
+Judge generates daily standup from `sprint-state.json`:
 
 ```
-1. Provide EL with approved task list from ~/clawd/shared/tasks/
-2. EL breaks down and assigns tasks to workers
-3. Judge monitors #standup for blockers
-4. Judge intervenes only for:
-   - Architectural disputes
-   - Worker 2-strike escalations
-   - PM vs EL disagreements
-   - Scope creep detection
-5. Judge does NOT micromanage implementation
+1. Read sprint-state.json for current task status
+2. Compile completed, in-progress, and blocked items
+3. Draft today's plan based on priority + dependencies
+4. Post to #standup at 9:30 AM MT
+5. Wait for human approval (✅ or text)
+6. Once approved, signal EL to begin work
 ```
 
-### 6.3 Synthesis Template
+### 7.3 EL Management
+
+During sprint phases:
+- Provide EL with approved task list
+- Monitor `#dev-log` for blockers
+- Intervene only for: architectural disputes, 2-strike escalations, PM vs EL disagreements, scope creep
+- Run EL heartbeat check every 10 minutes (if EL unresponsive >5 min, Judge can approve/assign in emergency)
+- Do NOT micromanage implementation
+
+### 7.4 Weekly Digest
+
+Every Friday, Judge posts a weekly summary to `#standup`:
+- Features in progress, their status
+- Budget usage for the week
+- Decisions made
+- Upcoming gates / milestones
+- Blockers or risks
+
+### 7.5 Synthesis Template
 
 ```markdown
 ## Synthesis — [Topic] Round [N]
@@ -476,98 +543,187 @@ During sprint phases, the Judge manages the Sonnet EL:
 **Grok:** [strengths, gaps, notable insights]
 
 ### Consensus Points
-- [items all/most panelists agree on]
+- [items all/most agree on]
 
 ### Divergence Points
-- [item] — Claude/ChatGPT say X, Gemini/Grok say Y
+- [item] — who says what
   → Judge ruling: [decision + rationale]
-
-### My Analysis
-[Judge's independent assessment — not just averaging the panelists]
 
 ### Decisions
 1. [decision with rationale]
-2. [decision with rationale]
 
 ### Open Questions
-- [unresolved items for human or next round]
-
-### DISSENT Responses
-- [response to any DISSENT: tags]
-
-### QUESTION Responses
-- [answers to any QUESTION for Judge: tags]
+- [unresolved items]
 ```
 
 ---
 
-## 7. Cost Governance
+## 8. Cost Governance
 
-### 7.1 Core Principles
+### 8.1 Core Principles
 
-1. **Council only meets at gates.** Three gates per feature, max. Everything else is async EL + workers.
-2. **Artifact-first rule.** No council discussion without a structured document to react to.
+1. **Council only meets at gates.** 3 gates per feature, max.
+2. **Packaging Layer before every gate.** Sonnet-generated brief reduces council token usage by 50-70%.
 3. **Single-round debate.** One rebuttal round for disagreements. Judge decides after that.
-4. **Combined hats save money.** Asking for PM + EL + SEC in one dispatch is 4 calls. Doing them sequentially is 12.
-5. **Sonnet does the drafting.** Use cheap models to write first drafts of PRDs/solutions, then council critiques (expensive refinement, cheap generation).
+4. **Subscriptions are throttled, not capped.** Budget management = throughput management.
 
-### 7.2 Tiered Engagement
+### 8.2 Tiered Engagement
 
-| Decision Complexity | Who | Cost |
-|-------------------|-----|------|
-| Full council deliberation | 4 panelists + Judge | 5 calls |
-| Quick review (consensus expected) | 2 panelists + Judge | 3 calls |
-| Routine code review | EL only | 0 external calls |
-| Bug triage | EL + 1 panelist | 1 call |
-| Tiebreaker | Judge only | 0 external calls |
-| Worker task execution | Workers | Sonnet-tier only |
+| Decision Complexity | Who | Council Calls |
+|-------------------|-----|:------------:|
+| Full council deliberation | 4 panelists + Judge | 5 |
+| Quick review (consensus expected) | 2 panelists + Judge | 3 |
+| Triggered SEC mini-round | 2 panelists + Judge | 3 |
+| Routine code review | EL only | 0 |
+| Bug triage | EL only | 0 |
+| Tiebreaker | Judge only | 0 |
 
-### 7.3 Monthly Capacity Estimates
+### 8.3 Degradation Modes
 
-Assuming ~100 quality interactions per $20/month model:
+When subscription rate limits are hit:
 
-| Activity | Calls per Model | Features/Month |
-|----------|:--------------:|:--------------:|
-| Full feature (3 gates) | ~4 per gate × 3 = 12 | ~8 features |
-| Quick feature (1-2 gates) | ~4-8 | ~12-25 features |
-| Bug fix / patch (no council) | 0 | Unlimited |
+| Mode | Trigger | Action |
+|------|---------|--------|
+| **Full** | Normal | 4 panelists per gate |
+| **Reduced** | Any model throttled | 2 panelists + Judge (prioritize least-throttled models) |
+| **Minimal** | Multiple models throttled | Judge synthesizes alone from prior reports |
+| **Paused** | Leadership account throttled | Pause sprint, notify human |
 
-**Budget alarm:** Judge tracks API usage. If any model is at 70% monthly usage, switch to reduced engagement (2 panelists instead of 4, skip Gate 2).
+### 8.4 Budget Tracking
+
+Judge tracks and reports in daily standup:
+- Council calls this week
+- Throttle events observed
+- Estimated remaining capacity
 
 ---
 
-## 8. Clawdbot Configuration
+## 9. CI/CD Standards
 
-### 8.1 Agent Architecture
+### 9.1 Repository
+
+All code lives in GitHub (`dfrysinger/hatchery` or feature-specific repos). PRDs live in `docs/prds/` in the repo.
+
+### 9.2 GitHub Actions
+
+Required CI jobs on every PR:
+
+```yaml
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: <install command>
+      - name: Lint
+        run: <lint command>
+      - name: Unit tests
+        run: <test command>
+      - name: Integration tests
+        run: <integration test command>
+```
+
+### 9.3 Branch Protection
+
+- **No direct push to `main`** — all changes via PR
+- **Required status checks:** CI must pass
+- **Required reviews:** EL approval required; Judge approval for release tags
+- **Squash merge** as default merge strategy
+
+### 9.4 Local Pre-Flight
+
+**Agents must run tests locally before pushing to CI.** CI is the final gate, not the development loop. Workers that push failing code waste CI minutes and slow everyone down.
+
+### 9.5 MR Workflow
+
+1. Worker creates feature branch and pushes code
+2. Worker opens PR via `gh pr create`
+3. CI runs automatically
+4. EL reviews code (style, correctness, tests, acceptance criteria)
+5. If CI passes + EL approves → EL merges (serialized — one at a time)
+6. Next worker rebases before pushing their PR
+
+### 9.6 Test Results
+
+CI results automatically appear on the PR. EL posts summary to `#dev-log` for visibility.
+
+---
+
+## 10. Security Policy
+
+### 10.1 Secrets Management
+
+- Secrets live ONLY in environment variables or secret stores
+- **Never** in Discord messages, `~/clawd/shared/`, or committed to git
+- Workers access secrets via environment injection (`.env` files, not hardcoded)
+- Redact tokens/PII from all logs and reports
+
+### 10.2 Filesystem Permissions
+
+| Agent | `~/clawd/shared/` | `prds/` | `DECISIONS.md` | `tasks/` | `reports/` |
+|-------|-------------------|---------|----------------|----------|------------|
+| Judge | Full write | Full write | Full write | Full write | Full write |
+| EL | Read + write tasks | Read | Read | Full write | Write own |
+| Council | Read + write reports | Read | Read | Read | Write own |
+| Workers | Read only | Read only | Read only | Read assigned | No access |
+
+**Canonical authorship:** Only the Judge edits final PRD/Solution versions and `DECISIONS.md`. Others propose changes; Judge integrates.
+
+### 10.3 Dependency Management
+
+- Adding/updating dependencies requires EL review
+- `npm audit` / `pip audit` (or equivalent) must pass in CI
+- Lockfile changes reviewed explicitly
+- New dependencies require a brief justification in the PR description
+
+### 10.4 Automated Security Scanning
+
+Required CI step:
+- Dependency vulnerability scanning (`npm audit`, `pip audit`, etc.)
+- Lightweight SAST (`semgrep` or equivalent) for common vulnerability patterns
+- Results must be clean or explicitly acknowledged before merge
+
+### 10.5 Triggered SEC Mini-Round
+
+When any agent flags a 🛑 security blocker:
+1. Judge convenes a 10-15 minute focused round
+2. 2 panelists (Grok + one other) + Judge
+3. Review the specific concern with full context
+4. Decision: block the release, require fix, or accept risk with documentation
+5. Cost: 3 calls (only when triggered, not every feature)
+
+---
+
+## 11. Clawdbot Configuration
+
+### 11.1 Agent Architecture
 
 ```
 11 agents total:
-├── judge (agent: Opus 4.5) — orchestrator
+├── judge (agent: Opus 4.5) — orchestrator, CPO
 ├── council-claude (agent: Opus 4.5) — panelist
-├── council-chatgpt (agent: GPT-5.2) — panelist
-├── council-gemini (agent: Gemini 3 Pro) — panelist
-├── council-grok (agent: Grok) — panelist
+├── council-chatgpt (agent: GPT-5.2, OAuth subscription) — panelist
+├── council-gemini (agent: Gemini 3 Pro, subscription) — panelist
+├── council-grok (agent: Grok, subscription) — panelist
 ├── scrum-el (agent: Sonnet 4.5) — engineering lead
 ├── worker-1 through worker-5 (agent: Sonnet 4.5) — developers
 ```
 
-### 8.2 Shared Filesystem
+### 11.2 Shared Filesystem
 
 ```
 ~/clawd/shared/
-├── ROLES.md                  — Hat definitions and behavioral instructions
-├── WORKFLOW.md               — This document (phase state machine)
 ├── KNOWLEDGE.md              — Accumulated project knowledge
-├── DECISIONS.md              — Decision log
+├── DECISIONS.md              — Decision log (Judge-owned)
 ├── CONTEXT.md                — Current project context
+├── sprint-state.json         — Current sprint status (EL maintains, Judge reads)
 ├── reports/                  — Council round reports
 │   └── Round{N}_{Agent}.md
-├── prds/                     — PRD documents
-│   └── {feature-slug}.md
-├── tasks/                    — Task specifications
+├── tasks/                    — Task specifications (EL writes, workers read)
 │   └── TASK-{id}.md
-├── bugs/                     — Bug reports
-│   └── BUG-{id}.md
 └── releases/                 — Release documentation
     └── {version}/
         ├── CHANGELOG.md
@@ -575,74 +731,102 @@ Assuming ~100 quality interactions per $20/month model:
         └── REVIEW.md
 ```
 
-### 8.3 Communication Flow
+PRDs and Solutions live in **GitHub** (`docs/prds/`) — not the shared filesystem.
+
+### 11.3 Sprint State File
+
+`sprint-state.json` enables crash recovery and standup generation:
+
+```json
+{
+  "feature": "feature-slug",
+  "phase": "execution",
+  "release": "R1",
+  "tasks": [
+    {
+      "id": "TASK-1",
+      "title": "...",
+      "assignee": "worker-1",
+      "status": "done",
+      "branch": "feature/TASK-1-slug",
+      "pr": 29,
+      "completedAt": "2026-02-06T17:30:00Z"
+    },
+    {
+      "id": "TASK-2",
+      "title": "...",
+      "assignee": "worker-3",
+      "status": "in-progress",
+      "branch": "feature/TASK-2-slug",
+      "attempts": 1
+    }
+  ],
+  "blockers": [],
+  "lastUpdated": "2026-02-06T18:00:00Z"
+}
+```
+
+### 11.4 Communication Flow
 
 ```
-Human → #council-lobby → Judge
+Human → #standup → Judge
 Judge → sessions_send → Council panelists (for gates)
 Judge → sessions_send → EL (for sprint management)
 EL → sessions_send → Workers (for task assignment)
-Workers → #standup, #code-review → EL (status, MRs)
-EL → Judge (escalations only)
-Judge → #decisions-log → All (decisions)
-Judge → #release-notes → Human (demo readiness)
+Workers → sessions_send → EL (status, MR submissions)
+EL → #dev-log (summaries)
+Judge → #standup, #decisions-log, #council-forum → Human + All
 ```
 
-### 8.4 Channel Bindings
+### 11.5 Session Discovery
 
-Each Discord channel is bound to the appropriate agent(s):
-
-- **Council channels** (`#council-lobby`, `#deliberation`, `#decisions-log`) → Judge
-- **Scrum channels** (`#standup`, `#code-review`, `📋 sprint-tasks`, `📋 bugs`) → EL
-- **Quality channels** (`#test-results`, `#release-candidates`) → EL + Judge
-- **Release channels** (`#release-notes`) → Judge
-- **Forum channels** (PRDs, roadmap, releases) → Judge (posting), all (reading)
-
-Workers communicate via `sessions_send`, not Discord channels directly, to reduce noise.
+Use **session labels** (not hardcoded session IDs) for agent-to-agent communication. If a session dies and respawns, the label persists. Example: `sessions_send(label="scrum-el", ...)`.
 
 ---
 
-## 9. Failure Recovery
+## 12. Failure Recovery
 
-### 9.1 Worker Failures
+### 12.1 Worker Failures
 
 | Scenario | Response |
 |----------|----------|
-| Worker stuck after 2 attempts | EL takes over; worker writes postmortem |
-| Worker produces code that breaks integration tests | Bug filed, assigned back to worker |
-| Worker unresponsive (session crash) | EL spawns replacement worker, reassigns task |
+| Worker stuck after 2 attempts | EL takes over; worker writes structured postmortem |
+| Worker produces code that breaks CI | Bug filed, assigned back to worker |
+| Worker unresponsive (session crash) | EL spawns replacement, reassigns task |
 | All workers stuck on same issue | EL escalates to Judge; may need architecture change |
 
-### 9.2 EL Failures
+### 12.2 EL Failures
 
 | Scenario | Response |
 |----------|----------|
-| EL can't resolve integration issue | Escalate to Judge; Judge may convene emergency council |
+| EL can't resolve integration issue | Escalate to Judge; may convene emergency council |
 | EL disagrees with PM on acceptance | One rebuttal round → Judge decides |
-| EL session crashes | Judge spawns new EL agent, provides full context |
+| EL session crashes | Judge spawns new EL; new EL reads `sprint-state.json` to bootstrap |
+| EL unresponsive >5 min | Judge can approve/assign in emergency mode |
 
-### 9.3 Council Failures
+### 12.3 Council Failures
 
 | Scenario | Response |
 |----------|----------|
 | Panelist doesn't ACK dispatch | Re-ping once; proceed without after 2 minutes |
-| Panelist produces garbage report | Judge ignores it, notes quality issue |
+| Panelist produces off-topic report | Judge ignores it, notes quality issue |
 | All panelists disagree | Judge makes independent decision, records rationale |
-| Judge session crashes | Human restarts; Judge reads DECISIONS.md for continuity |
+| Model throttled during gate | Switch to reduced engagement mode |
 
-### 9.4 Infrastructure
+### 12.4 Infrastructure
 
 | Scenario | Response |
 |----------|----------|
-| Clawdbot gateway restart | Sessions resume; Judge checks for interrupted phases |
-| Git conflict between workers | EL resolves; may reassign conflicting tasks sequentially |
-| Rate limit hit on $20/mo model | Judge switches to reduced engagement mode |
+| Clawdbot gateway restart | Sessions resume; Judge checks sprint-state.json |
+| Git conflict between workers | EL resolves (serialized merging prevents most) |
+| CI pipeline broken | EL diagnoses; workers pause until fixed |
+| Rate limit hit on subscription | Judge switches to degradation mode; notifies in #alerts |
 
 ---
 
-## 10. Artifact Templates
+## 13. Artifact Templates
 
-### 10.1 OnePager.md
+### 13.1 OnePager.md
 
 ```markdown
 # One-Pager: [Feature Name]
@@ -651,7 +835,7 @@ Workers communicate via `sessions_send`, not Discord channels directly, to reduc
 **Date:** [YYYY-MM-DD]
 
 ## Problem
-[What pain point or opportunity are we addressing?]
+[What pain point or opportunity?]
 
 ## Target Users
 [Who benefits?]
@@ -669,10 +853,10 @@ Workers communicate via `sessions_send`, not Discord channels directly, to reduc
 [What we're explicitly NOT doing]
 
 ## Open Questions
-[Unknowns that need resolution]
+[Unknowns]
 ```
 
-### 10.2 PRD.md
+### 13.2 PRD.md (Lives in GitHub: `docs/prds/`)
 
 ```markdown
 # PRD: [Feature Name]
@@ -694,7 +878,6 @@ Workers communicate via `sessions_send`, not Discord channels directly, to reduc
 
 ### Must Have
 - [REQ-1] [requirement] — AC: [acceptance criteria]
-- [REQ-2] ...
 
 ### Should Have
 - [REQ-N] ...
@@ -702,61 +885,20 @@ Workers communicate via `sessions_send`, not Discord channels directly, to reduc
 ### Could Have
 - [REQ-N] ...
 
-## UX Notes
-[Interaction model, key flows]
-
 ## Metrics
-[Success criteria with measurable targets]
+[Measurable targets]
 
 ## Risks & Assumptions
-[What could go wrong; what we're assuming is true]
+[What could go wrong]
 
 ## Security Considerations
-[Data handling, auth, abuse potential — from Grok's review]
+[Data handling, auth, abuse potential]
 
 ## Out of Scope
-[Explicit boundaries]
+[Boundaries]
 ```
 
-### 10.3 Solution.md
-
-```markdown
-# Solution: [Feature Name]
-
-**Version:** [N]
-**PRD:** [link]
-
-## Architecture Overview
-[High-level design with component diagram if useful]
-
-## Data Flow
-[How data moves through the system]
-
-## APIs / Interfaces
-[New or modified interfaces]
-
-## Dependencies
-[External services, libraries, other features]
-
-## Test Strategy
-- Unit: [approach]
-- Integration: [approach]
-- E2E: [approach]
-
-## Rollout Plan
-[How to deploy safely]
-
-## Observability
-[Logging, monitoring, alerting]
-
-## Known Tradeoffs
-[Decisions made and why]
-
-## Cost Considerations
-[Resource usage, API costs, scaling]
-```
-
-### 10.4 Task Spec
+### 13.3 Task Spec
 
 ```markdown
 # TASK-[ID]: [Title]
@@ -766,6 +908,7 @@ Workers communicate via `sessions_send`, not Discord channels directly, to reduc
 **Assigned:** [worker-N]
 **Complexity:** [S / M / L]
 **Depends On:** [TASK-IDs or "none"]
+**Conflicts With:** [TASK-IDs or "none"]
 
 ## Description
 [What to build]
@@ -777,87 +920,116 @@ Workers communicate via `sessions_send`, not Discord channels directly, to reduc
 ## Test Requirements
 - [ ] [what must be tested]
 
-## Files Likely Touched
-- [file paths]
+## Files Touched
+- [file paths this task modifies]
 
 ## Branch
 `feature/TASK-[ID]-[slug]`
 
 ## Definition of Done
-- [ ] Tests written and passing
+- [ ] Tests written and passing (local + CI)
 - [ ] Code reviewed by EL
 - [ ] Acceptance criteria verified
 - [ ] No regressions in test suite
+- [ ] Dependency audit clean
 ```
 
-### 10.5 RC_Checklist.md
+### 13.4 RC_Checklist.md
 
 ```markdown
 # Release Candidate: [Version]
 
 **Date:** [YYYY-MM-DD]
-**Release:** R[N]
 **Status:** [Review / Approved / Rejected]
 
 ## Test Results
 - Unit tests: [X/Y passing]
 - Integration tests: [X/Y passing]
-- Known failures: [list or "none"]
+- SAST scan: [clean / findings]
+- Dependency audit: [clean / findings]
 
 ## Changes Included
 - TASK-1: [title] — [status]
-- TASK-2: [title] — [status]
 
 ## Known Issues
-- [issue description] — [severity] — [mitigation]
+- [issue] — [severity] — [mitigation]
 
 ## Security Checklist
 - [ ] No new unauthenticated endpoints
 - [ ] Input validation on all user-facing inputs
 - [ ] Secrets management verified
 - [ ] No sensitive data in logs
+- [ ] Dependency vulnerabilities addressed
 
 ## Rollback Plan
-[How to revert if something breaks]
+[How to revert]
 
 ## Demo Script
 1. [Step 1]
 2. [Step 2]
 ```
 
+### 13.5 Gate Brief (Packaging Layer)
+
+```markdown
+# Brief: [Feature] — Gate [N]
+
+**Date:** [YYYY-MM-DD]
+**Prepared by:** [EL / Sonnet worker]
+
+## Summary (≤10 bullets)
+- ...
+
+## Decisions Needed (max 3)
+1. ...
+
+## Risks (max 5)
+1. ...
+
+## Artifacts
+- PRD: [link]
+- Solution: [link]
+- Sprint state: [link]
+- CI status: [link]
+
+## Changes Since Last Gate
+- [diff summary]
+```
+
 ---
 
-## 11. Implementation Roadmap
+## 14. Implementation Roadmap
 
 ### Week 1: Foundation
-- [ ] Create Discord server categories and channels per Section 3
-- [ ] Set up forum channels with status tags
+- [ ] Create Discord server with 5 channels per Section 3
+- [ ] Set up forum channel with status tags
 - [ ] Configure Discord roles and permissions
-- [ ] Set up Clawdbot multi-agent configuration (11 agents)
-- [ ] Write `ROLES.md` with hat definitions
-- [ ] Deploy this workflow document as `WORKFLOW.md` in shared directory
+- [ ] Set up Clawdbot 11-agent configuration
+- [ ] Deploy this workflow as `WORKFLOW.md` in shared directory
+- [ ] Set up GitHub Actions CI pipeline
+- [ ] Configure branch protection on `main`
 
 ### Week 2: Council Protocol
 - [ ] Write Judge's `AGENTS.md` with full orchestration protocol
-- [ ] Write panelist `AGENTS.md` files with hat-switching + report protocol
+- [ ] Write panelist `AGENTS.md` with consistent personas + report protocol
 - [ ] Test one full council round (Gate 1 style) with a sample topic
-- [ ] Refine dispatch format, timing, and report templates
-- [ ] Verify `sessions_send` reliability between all council agents
+- [ ] Verify `sessions_send` reliability between all agents
+- [ ] Test daily standup generation from sprint-state.json
 
 ### Week 3: Worker Pipeline
 - [ ] Write EL's `AGENTS.md` with task management protocol
 - [ ] Write worker `AGENTS.md` with TDD protocol
-- [ ] Set up shared git repository access for all agents
-- [ ] Test: task assignment → TDD → MR → review → merge cycle
+- [ ] Set up shared git access with serialized merge workflow
+- [ ] Test: task assignment → TDD → PR → review → merge cycle
 - [ ] Test: worker failure → EL takeover flow
-- [ ] Refine status update format
+- [ ] Validate CI catches failing code before merge
 
 ### Week 4: Integration
 - [ ] End-to-end test: idea → PRD → tasks → code → test → release
-- [ ] Measure actual council call costs against budget estimates
-- [ ] Optimize timing (are 5-minute deadlines right?)
-- [ ] Document lessons learned
+- [ ] Measure actual throttle behavior on subscription models
+- [ ] Optimize daily cadence timing
 - [ ] First real feature through the pipeline
+- [ ] Retrospective and workflow updates
 
 ---
 
@@ -865,13 +1037,39 @@ Workers communicate via `sessions_send`, not Discord channels directly, to reduc
 
 | Term | Definition |
 |------|-----------|
-| **Gate** | A council review point where work is approved, conditionally approved, or rejected |
-| **Hat** | A role overlay that defines the perspective a council member adopts |
+| **Gate** | A council review point where work is approved or rejected |
 | **EL** | Engineering Lead — the Sonnet agent managing the worker team |
-| **MR** | Merge Request — a worker's code submission for review |
-| **RC** | Release Candidate — code that has passed all tests and is ready for council review |
+| **Brief** | Sonnet-generated summary provided to council before each gate |
+| **MR/PR** | Merge/Pull Request — a worker's code submission for review |
+| **RC** | Release Candidate — code ready for council + human review |
 | **Dispatch** | The Judge sending a `COUNCIL:PROCEED` message to panelists |
-| **Postmortem** | A worker's brief explanation of why they couldn't complete a task |
+| **Postmortem** | A worker's structured explanation of why they couldn't complete a task |
+| **Sprint State** | `sprint-state.json` — machine-readable sprint progress for crash recovery |
+| **Serialized Merge** | One PR merged at a time; next worker rebases before pushing |
+| **SEC Mini-Round** | Triggered security review when any agent flags a 🛑 blocker |
+| **Packaging Layer** | Pre-gate step where Sonnet summarizes context into a ≤500 word brief |
+
+---
+
+## Appendix B: Decision Log (This Document)
+
+| Decision | Round | Rationale |
+|----------|:-----:|-----------|
+| 3-gate pipeline with combined perspectives | R1 | Cuts council calls from ~50 to ~15-21 per feature |
+| Dedicated Sonnet EL (not council double-duty) | R1 | Prevents Claude bottleneck |
+| Serialized merging | R1 | LLMs bad at merge conflicts; simpler than DAGs |
+| Packaging Layer before every gate | R1 | Reduces expensive model token usage 50-70% |
+| Triggered SEC mini-round | R1 | Defense-in-depth without extra cost in normal case |
+| No dynamic hats — consistent personas | R2 | Simpler, cheaper, equally effective |
+| Day = Sprint with Sunrise/Sunset cadence | R2 | Daily human visibility without micromanagement |
+| 5 channels (not 10+) | R2 | Right-sized for one-person org |
+| Workers never post to Discord | R2 | Reduces noise; EL summarizes |
+| Sprint state file for crash recovery | R2 | EL can be respawned without losing progress |
+| OAuth/subscription model (not API keys) | R2-Human | Throttled not capped; no budget ceiling concern |
+| 9:30 AM MT standup | Human | User's preferred time |
+| PRDs in GitHub | Human | Version controlled, PR-reviewable |
+| 5 workers + 1 EL | Human | Confirmed team size |
+| ✅ or text counts as approval | Human | Flexible approval mechanism |
 
 ---
 
