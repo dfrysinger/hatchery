@@ -52,6 +52,16 @@ v5.0 is a structural overhaul that addresses all 13 findings from the council co
 - **Upstream clawdbot changes** — v5.0 must work with clawdbot as-is. No dependency on new upstream features.
 - **Migration tooling for v4.4 → v5.0** — Users create fresh droplets; migration is not required.
 
+### Model Fallbacks
+
+Clawdbot natively supports model fallback chains via `agents.defaults.model.fallbacks` and per-agent `model: { primary, fallbacks }`. This is an existing feature, not a new requirement.
+
+**Requirements:**
+- R2.1: Habitat JSON SHOULD support an optional `modelFallbacks` array per agent (e.g., `["anthropic/claude-sonnet-4", "google/gemini-3-pro-preview"]`).
+- R2.2: build-config.py MUST generate `model: { primary: "...", fallbacks: [...] }` in clawdbot.json when fallbacks are specified.
+- R2.3: If no fallbacks are specified per-agent, the global `agents.defaults.model.fallbacks` from the habitat config applies.
+- R2.4: This ensures that when a model hits rate limits, the agent automatically falls to the next model in the chain — maintaining availability for troubleshooting and conversation continuity.
+
 ### Risks & Mitigations
 
 | Risk | Impact | Mitigation |
@@ -311,6 +321,8 @@ hatchery/
 - R4.6.5: Safe mode MUST be recoverable without SSH access (Telegram-only recovery).
 - R4.6.6: Safe mode MUST attempt multi-agent minimal config first (10s health check timeout). Fall back to single-agent (agent1) ONLY if multi-agent minimal fails health check. Full agent configs are preserved on disk so upgrade to full config can restore all agents. (Judge overrules ChatGPT + Gemini who prefer single-agent — multi-agent-first with fast fallback gets both reliability AND user intent.)
 - R4.6.7: Post-boot-check MUST write a `/var/lib/init-status/config-upgraded` marker after successfully applying full config. On subsequent reboots, skip the upgrade attempt if marker exists and full config is already active.
+- R4.6.8: **Telegram Token Fallback** — If the bot's assigned Telegram token fails to send (HTTP 401/403), safe mode MUST iterate through other agents' bot tokens from the habitat config and attempt to send using any working token. Once a working token is found, use it to notify the user of the issue.
+- R4.6.9: **User Outreach Retry** — When safe mode needs user help to resolve an issue and the user hasn't responded, the bot MUST retry notification every 30 minutes for 3 attempts, then stop. This ensures the user didn't simply miss a notification without becoming spammy.
 
 ### 4.7 Script Robustness (Judge Addition)
 
@@ -717,13 +729,25 @@ If a release tarball fails to download:
 - ChatGPT wants IP allowlisting; deferred to Shortcut-level firewall management (existing "Repair Habitat Firewall" shortcut)
 - Gemini wants Shortcut Interface Specification; added to "What's Still Missing" below
 
+### Known Bug: VNC Root vs Bot Permissions
+
+A root-vs-bot permissions issue was identified in v3.20 that blocks VNC from working in some configurations. The fix was attempted but the v3.20 YAML failed for unrelated reasons, so the fix never propagated to v4.0+.
+
+**Current state on v4.4:** Services appear correctly configured (`User=bot` on xvfb/desktop/x11vnc, X10 socket owned by bot). However, the user reports the issue persists in some deployments. This needs investigation — likely a race condition where xrdp creates a session as root before the bot-owned Xvfb is ready, or a permissions mismatch on `/tmp/.X11-unix/X10`.
+
+**Action item for v4.5:** Reproduce and fix. Add integration test for VNC connectivity.
+
 ### What's Still Missing (future PRD revisions)
+- **iOS Shortcut PRD** — Map out and plan the Shortcut code side of the work. Significant refactoring needed. User will record new videos of Shortcuts for transcription → architectural diagram → PRD. Existing (slightly outdated) Shortcut code transcriptions in `Dropbox/Droplets/shortcuts/` with video recordings in `shortcuts/Videos/`. **This is a separate workstream and should be tracked as its own project.**
 - iOS Shortcut Interface Specification (per Gemini: formal contract between Shortcut and YAML)
-- Detailed wizard Shortcut specification (§9.1 is aspirational, needs Shortcut-level requirements)
 - Monitoring beyond Telegram (Uptime Robot, DO monitoring, etc.)
 - Cost optimization analysis (which DO droplet size, when to downsize)
 - Documentation for contributors (CONTRIBUTING.md)
-- IP allowlisting at ufw level (currently handled by DO firewall via Shortcut)
+- IP allowlisting at ufw level (currently handled by DO firewall via iOS Shortcut — strict rules, user IP only)
+
+### Firewall Context
+
+The iOS Shortcut creates a strict DO Cloud Firewall that only allows traffic from the user's current IP on specific ports. This significantly reduces the VNC/gateway exposure risk — the droplet is not truly "open to the internet" in practice. However, the YAML-level ufw hardening and fail2ban remain important as defense-in-depth (the DO firewall can be misconfigured or the user's IP can change).
 
 ---
 
