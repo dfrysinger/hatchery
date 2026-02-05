@@ -640,6 +640,15 @@ write_files:
       AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
       OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
       TUI=$(d "$TELEGRAM_USER_ID_B64")
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
+      DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
+      TG_ENABLED="false"; DC_ENABLED="false"
+      case "$PLATFORM" in
+        telegram) TG_ENABLED="true" ;;
+        discord)  DC_ENABLED="true" ;;
+        both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
+      esac
       HN="${HABITAT_NAME:-default}"
       GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
       GSO=$(d "$GLOBAL_SOUL_B64"); GAG=$(d "$GLOBAL_AGENTS_B64"); GU=$(d "$GLOBAL_USER_B64")
@@ -662,10 +671,18 @@ write_files:
       done
       AL="$AL]"
       BD="["
-      for i in $(seq 2 $AC); do
-        [ "$BD" != "[" ] && BD="$BD,"
-        BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
-      done
+      if [ "$TG_ENABLED" = "true" ]; then
+        for i in $(seq 2 $AC); do
+          [ "$BD" != "[" ] && BD="$BD,"
+          BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
+        done
+      fi
+      if [ "$DC_ENABLED" = "true" ]; then
+        for i in $(seq 2 $AC); do
+          [ "$BD" != "[" ] && BD="$BD,"
+          BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"discord\",\"accountId\":\"agent${i}\"}}"
+        done
+      fi
       BD="$BD]"
       TA="\"default\":{\"botToken\":\"${AGENT1_BOT_TOKEN}\"}"
       for i in $(seq 2 $AC); do
@@ -673,6 +690,13 @@ write_files:
         [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK}\"}"
       done
       TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
+      DA="\"default\":{\"botToken\":\"${AGENT1_DISCORD_BOT_TOKEN}\"}"
+      for i in $(seq 2 $AC); do
+        DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"
+        [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"botToken\":\"${DTOK}\"}"
+      done
+      DG=""; [ -n "$DGI" ] && DG=",\"guilds\":{\"${DGI}\":{\"requireMention\":true}}"
+      DC_DM_ALLOW=""; [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI}\"]"
       AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
       [ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
       [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
@@ -715,16 +739,28 @@ write_files:
         },
         "plugins": {
           "entries": {
-            "telegram": {"enabled": true}
+            "telegram": {"enabled": ${TG_ENABLED}},
+            "discord": {"enabled": ${DC_ENABLED}}
           }
         },
         "channels": {
           "telegram": {
-            "enabled": true,
+            "enabled": ${TG_ENABLED},
             "dmPolicy": "allowlist",
             "allowFrom": ["${TUI}"],
             "accounts": {${TA}}
             ${TG}
+          },
+          "discord": {
+            "enabled": ${DC_ENABLED},
+            "groupPolicy": "allowlist",
+            "accounts": {${DA}},
+            "dm": {
+              "enabled": true,
+              "policy": "pairing"
+              ${DC_DM_ALLOW}
+            }
+            ${DG}
           }
         },
         "skills": {
