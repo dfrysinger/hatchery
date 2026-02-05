@@ -17,6 +17,10 @@ write_files:
       SSH_KEY_B64=""
       DO_TOKEN_B64="[[DO_TOKEN_B64]]"
       PASSWORD_B64="[[PASSWORD_B64]]"
+      PLATFORM_B64="[[PLATFORM_B64]]"
+      DISCORD_GUILD_ID_B64="[[DISCORD_GUILD_ID_B64]]"
+      DISCORD_OWNER_ID_B64="[[DISCORD_OWNER_ID_B64]]"
+      TELEGRAM_OWNER_ID_B64="[[TELEGRAM_OWNER_ID_B64]]"
       TELEGRAM_USER_ID_B64="[[TELEGRAM_USER_ID_B64]]"
       ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
       BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
@@ -96,8 +100,28 @@ write_files:
           f.write('DESTRUCT_MINS="{}"\n'.format(hab.get("destructMinutes", 0)))
           f.write('DESTRUCT_MINS_B64="{}"\n'.format(b64(str(hab.get("destructMinutes", 0)))))
           f.write('BG_COLOR="{}"\n'.format(hab.get("bgColor", "2D3748")))
+          # Platform (default: "telegram" for backward compat)
+          platform = hab.get("platform", "telegram")
+          f.write('PLATFORM="{}"\n'.format(platform))
+          f.write('PLATFORM_B64="{}"\n'.format(b64(platform)))
+          # Discord config
+          discord_cfg = hab.get("discord", {})
+          f.write('DISCORD_GUILD_ID="{}"\n'.format(discord_cfg.get("serverId", "")))
+          f.write('DISCORD_GUILD_ID_B64="{}"\n'.format(b64(discord_cfg.get("serverId", ""))))
+          f.write('DISCORD_OWNER_ID="{}"\n'.format(discord_cfg.get("ownerId", "")))
+          f.write('DISCORD_OWNER_ID_B64="{}"\n'.format(b64(discord_cfg.get("ownerId", ""))))
+          # Telegram config
+          telegram_cfg = hab.get("telegram", {})
+          telegram_owner_id = telegram_cfg.get("ownerId", "")
+          f.write('TELEGRAM_OWNER_ID="{}"\n'.format(telegram_owner_id))
+          f.write('TELEGRAM_OWNER_ID_B64="{}"\n'.format(b64(telegram_owner_id)))
+          # Backward compat: keep TELEGRAM_USER_ID_B64 as alias
+          f.write('TELEGRAM_USER_ID_B64="{}"\n'.format(b64(telegram_owner_id)))
+          # Council config (supports nested telegram.groupId and legacy groupId)
           council = hab.get("council", {})
-          f.write('COUNCIL_GROUP_ID="{}"\n'.format(council.get("groupId", hab.get("councilGroupId", ""))))
+          council_tg = council.get("telegram", {})
+          council_group_id = council_tg.get("groupId", council.get("groupId", hab.get("councilGroupId", "")))
+          f.write('COUNCIL_GROUP_ID="{}"\n'.format(council_group_id))
           f.write('COUNCIL_GROUP_NAME="{}"\n'.format(council.get("groupName", "")))
           f.write('COUNCIL_JUDGE="{}"\n'.format(council.get("judge", "")))
           f.write('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
@@ -120,10 +144,20 @@ write_files:
               boot = lib_entry.get("boot", "")
               bootstrap = lib_entry.get("bootstrap", "")
               user = lib_entry.get("user", "")
+              # Telegram bot token: prefer telegramBotToken, fall back to botToken for compat
+              tg_bot_token = agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
+              # Discord bot token
+              dc_bot_token = agent_ref.get("discordBotToken", "")
               f.write('AGENT{}_NAME="{}"\n'.format(n, name))
               f.write('AGENT{}_NAME_B64="{}"\n'.format(n, b64(name)))
-              f.write('AGENT{}_BOT_TOKEN="{}"\n'.format(n, agent_ref["botToken"]))
-              f.write('AGENT{}_BOT_TOKEN_B64="{}"\n'.format(n, b64(agent_ref["botToken"])))
+              # Backward compat: BOT_TOKEN = telegram bot token
+              f.write('AGENT{}_BOT_TOKEN="{}"\n'.format(n, tg_bot_token))
+              f.write('AGENT{}_BOT_TOKEN_B64="{}"\n'.format(n, b64(tg_bot_token)))
+              # Explicit per-platform tokens
+              f.write('AGENT{}_TELEGRAM_BOT_TOKEN="{}"\n'.format(n, tg_bot_token))
+              f.write('AGENT{}_TELEGRAM_BOT_TOKEN_B64="{}"\n'.format(n, b64(tg_bot_token)))
+              f.write('AGENT{}_DISCORD_BOT_TOKEN="{}"\n'.format(n, dc_bot_token))
+              f.write('AGENT{}_DISCORD_BOT_TOKEN_B64="{}"\n'.format(n, b64(dc_bot_token)))
               f.write('AGENT{}_MODEL="{}"\n'.format(n, model))
               f.write('AGENT{}_IDENTITY_B64="{}"\n'.format(n, b64(identity)))
               f.write('AGENT{}_SOUL_B64="{}"\n'.format(n, b64(soul)))
@@ -132,7 +166,7 @@ write_files:
               f.write('AGENT{}_BOOTSTRAP_B64="{}"\n'.format(n, b64(bootstrap)))
               f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
       os.chmod('/etc/habitat-parsed.env', 0o600)
-      print("Parsed habitat '{}' with {} agents".format(hab['name'], len(agents)))
+      print("Parsed habitat '{}' with {} agents (platform: {})".format(hab['name'], len(agents), platform))
   - path: /usr/local/bin/tg-notify.sh
     permissions: "0755"
     content: |
@@ -606,6 +640,15 @@ write_files:
       AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
       OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
       TUI=$(d "$TELEGRAM_USER_ID_B64")
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
+      DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
+      TG_ENABLED="false"; DC_ENABLED="false"
+      case "$PLATFORM" in
+        telegram) TG_ENABLED="true" ;;
+        discord)  DC_ENABLED="true" ;;
+        both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
+      esac
       HN="${HABITAT_NAME:-default}"
       GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
       GSO=$(d "$GLOBAL_SOUL_B64"); GAG=$(d "$GLOBAL_AGENTS_B64"); GU=$(d "$GLOBAL_USER_B64")
@@ -628,10 +671,18 @@ write_files:
       done
       AL="$AL]"
       BD="["
-      for i in $(seq 2 $AC); do
-        [ "$BD" != "[" ] && BD="$BD,"
-        BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
-      done
+      if [ "$TG_ENABLED" = "true" ]; then
+        for i in $(seq 2 $AC); do
+          [ "$BD" != "[" ] && BD="$BD,"
+          BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
+        done
+      fi
+      if [ "$DC_ENABLED" = "true" ]; then
+        for i in $(seq 2 $AC); do
+          [ "$BD" != "[" ] && BD="$BD,"
+          BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"discord\",\"accountId\":\"agent${i}\"}}"
+        done
+      fi
       BD="$BD]"
       TA="\"default\":{\"botToken\":\"${AGENT1_BOT_TOKEN}\"}"
       for i in $(seq 2 $AC); do
@@ -639,6 +690,13 @@ write_files:
         [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK}\"}"
       done
       TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
+      DA="\"default\":{\"botToken\":\"${AGENT1_DISCORD_BOT_TOKEN}\"}"
+      for i in $(seq 2 $AC); do
+        DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"
+        [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"botToken\":\"${DTOK}\"}"
+      done
+      DG=""; [ -n "$DGI" ] && DG=",\"guilds\":{\"${DGI}\":{\"requireMention\":true}}"
+      DC_DM_ALLOW=""; [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI}\"]"
       AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
       [ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
       [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
@@ -681,16 +739,28 @@ write_files:
         },
         "plugins": {
           "entries": {
-            "telegram": {"enabled": true}
+            "telegram": {"enabled": ${TG_ENABLED}},
+            "discord": {"enabled": ${DC_ENABLED}}
           }
         },
         "channels": {
           "telegram": {
-            "enabled": true,
+            "enabled": ${TG_ENABLED},
             "dmPolicy": "allowlist",
             "allowFrom": ["${TUI}"],
             "accounts": {${TA}}
             ${TG}
+          },
+          "discord": {
+            "enabled": ${DC_ENABLED},
+            "groupPolicy": "allowlist",
+            "accounts": {${DA}},
+            "dm": {
+              "enabled": true,
+              "policy": "pairing"
+              ${DC_DM_ALLOW}
+            }
+            ${DG}
           }
         },
         "skills": {
