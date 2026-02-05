@@ -84,6 +84,8 @@ for f in "$INSTALL_DIR"/scripts/*.sh; do
   [ -f "$f" ] || continue
   bn=$(basename "$f")
   case "$bn" in
+    bootstrap.sh)
+      ;; # skip -- do not overwrite ourselves mid-execution
     phase1-critical.sh|phase2-background.sh|build-full-config.sh)
       cp "$f" /usr/local/sbin/
       ;;
