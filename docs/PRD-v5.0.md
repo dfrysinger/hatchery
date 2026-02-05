@@ -659,24 +659,39 @@ The multi-agent council deliberation protocol works well structurally but fights
 - `council archive` → compiles DECISIONS.md + updates KNOWLEDGE.md
 - State machine: CLARIFYING → REPORTING → SYNTHESIS → DECISION → ARCHIVED
 
-### 10.5 Platform Roadmap
+### 10.5 Platform: Discord as Default
 
-**v4.5 (now):** Stay on Telegram. Apply delivery model changes (files + summaries), structured dispatch, timeouts.
+**Decision:** Discord is the default council platform. Telegram remains supported but is secondary.
 
-**v5.0+:** Add Discord as deliberation channel option. Discord advantages: threading (forum channels), 2000 char + file embeds, better bot-to-bot visibility. Telegram remains as user-facing notification channel. Judge bridges between platforms.
+**Discord advantages over Telegram for council:**
+- **Forum channels** — each deliberation topic gets a thread, reports stay organized
+- **File embeds** — full reports as .md file uploads, readable inline
+- **Bot-to-bot** — bots see all messages in channels without @mention requirements
+- **Reactions** — ⏳ "working", ✅ "done", 👀 "reviewing"
+- **Pinned messages** — pin synthesis for easy reference
+- **No message limit issues** — 2000 chars + file uploads for longer content
 
-**Habitat config addition:**
+**Requirements:**
+- R10.5.1: Clawdbot Discord channel MUST be configured as the default council platform for new habitats.
+- R10.5.2: Each agent gets a Discord bot (same approach as Telegram — one bot token per agent).
+- R10.5.3: Council group is a Discord server with a `#council` forum channel. Each topic becomes a forum post with threads for rounds.
+- R10.5.4: Telegram remains available as an option (`council.platform: "telegram"`) for users who prefer it.
+- R10.5.5: Agent DMs (1:1 with user) can be on either platform — user's choice.
+
+**Habitat config:**
 ```json
 {
   "council": {
     "groupId": "...",
     "groupName": "The Council",
     "judge": "Opus",
-    "platform": "telegram",
+    "platform": "discord",
     "deliveryMode": "summary+file"
   }
 }
 ```
+
+**Action item:** Set up a Discord server for The Council and migrate ASAP. Telegram group stays active during transition.
 
 ---
 
