@@ -1,8 +1,8 @@
 #cloud-config
-# version: 3.11
-# Droplet Init Config v3.11 - 2026-02-03
+# version: 3.12
+# Droplet Init Config v3.12 - 2026-02-03
 # FAST BOOT: Bot online in ~3 min, desktop ready in background
-# Phase 1: nodejs + clawdbot + minimal config → bot talks
+# Phase 1: nodejs + clawdbot + minimal config -> bot talks
 # Phase 2: packages, desktop, xrdp, skills (background)
 #
 # Changes from v3.10:
@@ -36,47 +36,47 @@ write_files:
    content: |
      USERNAME="bot"
      SSH_KEY_B64=""
-     DO_TOKEN_B64="__DO_TOKEN_B64__"
-     PASSWORD_B64="__PASSWORD_B64__"
-     DESTRUCT_MINS_B64="__DESTRUCT_MINS_B64__"
-     AGENT1_BOT_TOKEN_B64="__AGENT1_BOT_TOKEN_B64__"
-     TELEGRAM_USER_ID_B64="__TELEGRAM_USER_ID_B64__"
-     ANTHROPIC_KEY_B64="__ANTHROPIC_KEY_B64__"
-     BRAVE_KEY_B64="__BRAVE_KEY_B64__"
-     GOOGLE_API_KEY_B64="__GOOGLE_API_KEY_B64__"
-     DROPBOX_TOKEN_B64="__DROPBOX_TOKEN_B64__"
-     EMAIL_B64="__EMAIL_B64__"
-     IMAP_HOST_B64="__IMAP_HOST_B64__"
-     SMTP_HOST_B64="__SMTP_HOST_B64__"
-     EMAIL_PASSWORD_B64="__EMAIL_PASSWORD_B64__"
-     CALDAV_URL_B64="__CALDAV_URL_B64__"
-     CALDAV_USER_B64="__CALDAV_USER_B64__"
-     CALDAV_PASSWORD_B64="__CALDAV_PASSWORD_B64__"
-     AGENT_GEN_B64="__AGENT_GEN_B64__"
-     GH_TOKEN_B64="__GH_TOKEN_B64__"
-     GMAIL_CLIENT_ID_B64="__GMAIL_CLIENT_ID_B64__"
-     GMAIL_CLIENT_SECRET_B64="__GMAIL_CLIENT_SECRET_B64__"
-     GMAIL_REFRESH_TOKEN_B64="__GMAIL_REFRESH_TOKEN_B64__"
-     DROPLET_TAG_B64="__DROPLET_TAG_B64__"
-     USER_REALNAME_B64="__USER_REALNAME_B64__"
-     USER_LOCATION_B64="__USER_LOCATION_B64__"
-     USER_NOTES_B64="__USER_NOTES_B64__"
-     BOT_NAME_B64="__BOT_NAME_B64__"
-     BOT_NOTES_B64="__BOT_NOTES_B64__"
-     BOOT_INSTRUCTIONS_B64="__BOOT_INSTRUCTIONS_B64__"
-     HABITAT_NAME_B64="__HABITAT_NAME_B64__"
-     OPENAI_ACCESS_B64="__OPENAI_ACCESS_B64__"
-     OPENAI_REFRESH_B64="__OPENAI_REFRESH_B64__"
-     OPENAI_EXPIRES_B64="__OPENAI_EXPIRES_B64__"
-     OPENAI_ACCOUNT_ID_B64="__OPENAI_ACCOUNT_ID_B64__"
-     AGENT1_NAME_B64="__AGENT1_NAME_B64__"
-     AGENT2_NAME_B64="__AGENT2_NAME_B64__"
-     AGENT2_BOT_TOKEN_B64="__AGENT2_BOT_TOKEN_B64__"
-     AGENT3_NAME_B64="__AGENT3_NAME_B64__"
-     AGENT3_BOT_TOKEN_B64="__AGENT3_BOT_TOKEN_B64__"
-     AGENT4_NAME_B64="__AGENT4_NAME_B64__"
-     AGENT4_BOT_TOKEN_B64="__AGENT4_BOT_TOKEN_B64__"
-     COUNCIL_GROUP_ID_B64="__COUNCIL_GROUP_ID_B64__"
+     DO_TOKEN_B64="[[DO_TOKEN_B64]]"
+     PASSWORD_B64="[[PASSWORD_B64]]"
+     DESTRUCT_MINS_B64="[[DESTRUCT_MINS_B64]]"
+     AGENT1_BOT_TOKEN_B64="[[AGENT1_BOT_TOKEN_B64]]"
+     TELEGRAM_USER_ID_B64="[[TELEGRAM_USER_ID_B64]]"
+     ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
+     BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
+     GOOGLE_API_KEY_B64="[[GOOGLE_API_KEY_B64]]"
+     DROPBOX_TOKEN_B64="[[DROPBOX_TOKEN_B64]]"
+     EMAIL_B64="[[EMAIL_B64]]"
+     IMAP_HOST_B64="[[IMAP_HOST_B64]]"
+     SMTP_HOST_B64="[[SMTP_HOST_B64]]"
+     EMAIL_PASSWORD_B64="[[EMAIL_PASSWORD_B64]]"
+     CALDAV_URL_B64="[[CALDAV_URL_B64]]"
+     CALDAV_USER_B64="[[CALDAV_USER_B64]]"
+     CALDAV_PASSWORD_B64="[[CALDAV_PASSWORD_B64]]"
+     AGENT_GEN_B64="[[AGENT_GEN_B64]]"
+     GH_TOKEN_B64="[[GH_TOKEN_B64]]"
+     GMAIL_CLIENT_ID_B64="[[GMAIL_CLIENT_ID_B64]]"
+     GMAIL_CLIENT_SECRET_B64="[[GMAIL_CLIENT_SECRET_B64]]"
+     GMAIL_REFRESH_TOKEN_B64="[[GMAIL_REFRESH_TOKEN_B64]]"
+     DROPLET_TAG_B64="[[DROPLET_TAG_B64]]"
+     USER_REALNAME_B64="[[USER_REALNAME_B64]]"
+     USER_LOCATION_B64="[[USER_LOCATION_B64]]"
+     USER_NOTES_B64="[[USER_NOTES_B64]]"
+     BOT_NAME_B64="[[BOT_NAME_B64]]"
+     BOT_NOTES_B64="[[BOT_NOTES_B64]]"
+     BOOT_INSTRUCTIONS_B64="[[BOOT_INSTRUCTIONS_B64]]"
+     HABITAT_NAME_B64="[[HABITAT_NAME_B64]]"
+     OPENAI_ACCESS_B64="[[OPENAI_ACCESS_B64]]"
+     OPENAI_REFRESH_B64="[[OPENAI_REFRESH_B64]]"
+     OPENAI_EXPIRES_B64="[[OPENAI_EXPIRES_B64]]"
+     OPENAI_ACCOUNT_ID_B64="[[OPENAI_ACCOUNT_ID_B64]]"
+     AGENT1_NAME_B64="[[AGENT1_NAME_B64]]"
+     AGENT2_NAME_B64="[[AGENT2_NAME_B64]]"
+     AGENT2_BOT_TOKEN_B64="[[AGENT2_BOT_TOKEN_B64]]"
+     AGENT3_NAME_B64="[[AGENT3_NAME_B64]]"
+     AGENT3_BOT_TOKEN_B64="[[AGENT3_BOT_TOKEN_B64]]"
+     AGENT4_NAME_B64="[[AGENT4_NAME_B64]]"
+     AGENT4_BOT_TOKEN_B64="[[AGENT4_BOT_TOKEN_B64]]"
+     COUNCIL_GROUP_ID_B64="[[COUNCIL_GROUP_ID_B64]]"
 
  - path: /etc/needrestart/conf.d/99-autorestart.conf
    permissions: "0644"
@@ -505,13 +505,13 @@ write_files:
      curl -s "https://api.telegram.org/bot${TBT}/sendMessage" \
        -d "chat_id=${TUI}" \
        -d "parse_mode=Markdown" \
-       -d "text=🔄 *Desktop setup complete!*
+       -d "text=*Desktop setup complete!*
      
      Phase 2 finished in ${DURATION}s. Rebooting for clean state...
      
-     ✅ RDP will be ready in ~60 seconds
-     ✅ All skills installed
-     ✅ Browser configured
+     - RDP will be ready in ~60 seconds
+     - All skills installed
+     - Browser configured
      
      _Back shortly!_"
      
