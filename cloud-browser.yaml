@@ -1,5 +1,5 @@
 #cloud-config
-# version: 4.2
+# version: 4.3
 package_update: false
 package_upgrade: false
 bootcmd:
@@ -98,8 +98,10 @@ write_files:
           f.write('DESTRUCT_MINS="{}"\n'.format(hab.get("destructMinutes", 0)))
           f.write('DESTRUCT_MINS_B64="{}"\n'.format(b64(str(hab.get("destructMinutes", 0)))))
           f.write('BG_COLOR="{}"\n'.format(hab.get("bgColor", "2D3748")))
-          f.write('COUNCIL_GROUP_ID="{}"\n'.format(hab.get("councilGroupId", "")))
-          f.write('COUNCIL_GROUP_ID_B64="{}"\n'.format(b64(hab.get("councilGroupId", ""))))
+          council = hab.get("council", {})
+          f.write('COUNCIL_GROUP_ID="{}"\n'.format(council.get("groupId", hab.get("councilGroupId", ""))))
+          f.write('COUNCIL_GROUP_NAME="{}"\n'.format(council.get("groupName", "")))
+          f.write('COUNCIL_JUDGE="{}"\n'.format(council.get("judge", "")))
           f.write('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
           f.write('GLOBAL_IDENTITY_B64="{}"\n'.format(b64(hab.get("globalIdentity", ""))))
           f.write('GLOBAL_BOOT_B64="{}"\n'.format(b64(hab.get("globalBoot", ""))))
@@ -403,6 +405,9 @@ write_files:
       PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
       [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
+      for sc in gmail-api.py set-council-group.sh; do
+        curl -sf -o "/usr/local/bin/$sc" "https://raw.githubusercontent.com/dfrysinger/cloud-browser-scripts/main/$sc" && chmod 755 "/usr/local/bin/$sc" >> "$LOG" 2>&1 || echo "WARN: Failed to download $sc" >> "$LOG"
+      done
       $S 7 "desktop-services"
       cat > /etc/systemd/system/xvfb.service <<SVC
       [Unit]
@@ -606,6 +611,8 @@ write_files:
       GSO=$(d "$GLOBAL_SOUL_B64"); GAG=$(d "$GLOBAL_AGENTS_B64"); GU=$(d "$GLOBAL_USER_B64")
       URN=$(d "$USER_REALNAME_B64"); UL=$(d "$USER_LOCATION_B64")
       CGI="$COUNCIL_GROUP_ID"
+      CGN="$COUNCIL_GROUP_NAME"
+      CJ="$COUNCIL_JUDGE"
       GT=$(cat $H/.clawdbot/gateway-token.txt)
       AC=${AGENT_COUNT:-1}
       mkdir -p $H/.clawdbot/credentials
@@ -618,7 +625,8 @@ write_files:
         MV="AGENT${i}_MODEL"; MODEL="${!MV}"
         [ $i -gt 1 ] && AL="$AL,"
         IS_DEFAULT="false"; [ $i -eq 1 ] && IS_DEFAULT="true"
-        AL="$AL{\"id\":\"agent${i}\",\"default\":${IS_DEFAULT},\"name\":\"${NAME}\",\"model\":\"${MODEL}\",\"workspace\":\"$H/clawd/agents/agent${i}\",\"groupChat\":{\"mentionPatterns\":[\"${NAME},\",\"${NAME}:\"]}}"
+        THINK=""; [ -n "$CJ" ] && [ "$NAME" = "$CJ" ] && THINK=",\"thinking\":\"high\""
+        AL="$AL{\"id\":\"agent${i}\",\"default\":${IS_DEFAULT},\"name\":\"${NAME}\",\"model\":\"${MODEL}\"${THINK},\"workspace\":\"$H/clawd/agents/agent${i}\",\"groupChat\":{\"mentionPatterns\":[\"${NAME},\",\"${NAME}:\"]}}"
       done
       AL="$AL]"
       BD="["
@@ -700,7 +708,6 @@ write_files:
         }
       }
       CFG
-      # --- Generate per-agent MD files with global+agent layering ---
       for i in $(seq 1 $AC); do
         AD="$H/clawd/agents/agent${i}"
         NV="AGENT${i}_NAME"; ANAME="${!NV}"
@@ -710,8 +717,6 @@ write_files:
         BOV="AGENT${i}_BOOT_B64"; ABOOT=$(d "${!BOV}")
         BSV="AGENT${i}_BOOTSTRAP_B64"; ABOOTSTRAP=$(d "${!BSV}")
         AUV="AGENT${i}_USER_B64"; AUSER=$(d "${!AUV}")
-
-        # IDENTITY.md: global + agent identity + project context
         { echo "- Name: ${ANAME}"
           [ -n "$GI" ] && printf '\n%s\n' "$GI"
           [ -n "$AIDENT" ] && printf '\n%s\n' "$AIDENT"
@@ -727,26 +732,56 @@ write_files:
       - Previous transcripts restored from Dropbox on boot
       IDMD
         } > "$AD/IDENTITY.md"
-
-        # SOUL.md: global + agent soul
         if [ -n "$GSO" ] || [ -n "$ASOUL" ]; then
           { [ -n "$GSO" ] && printf '%s\n' "$GSO"
             [ -n "$GSO" ] && [ -n "$ASOUL" ] && echo ""
             [ -n "$ASOUL" ] && printf '%s\n' "$ASOUL"
           } > "$AD/SOUL.md"
         fi
-
-        # AGENTS.md: global + agent agents (fallback to default)
-        if [ -n "$GAG" ] || [ -n "$AAGENTS" ]; then
+        if [ -n "$GAG" ] || [ -n "$AAGENTS" ] || [ -n "$CGI" ]; then
           { [ -n "$GAG" ] && printf '%s\n' "$GAG"
-            [ -n "$GAG" ] && [ -n "$AAGENTS" ] && echo ""
+            [ -n "$GAG" ] && { [ -n "$AAGENTS" ] || [ -n "$CGI" ]; } && echo ""
             [ -n "$AAGENTS" ] && printf '%s\n' "$AAGENTS"
+            [ -n "$AAGENTS" ] && [ -n "$CGI" ] && echo ""
+            if [ -n "$CGI" ]; then
+              PANELISTS=""
+              for pi in $(seq 1 $AC); do
+                PNV="AGENT${pi}_NAME"; PN="${!PNV}"
+                PMV="AGENT${pi}_MODEL"; PM="${!PMV}"
+                [ "$PN" = "$CJ" ] && continue
+                [ -n "$PANELISTS" ] && PANELISTS="${PANELISTS}, "
+                PANELISTS="${PANELISTS}${PN} (${PM})"
+              done
+              if [ "$ANAME" = "$CJ" ]; then
+                cat <<JUDGE_PROTO
+      ## Council Deliberation (Group: "${CGN}")
+      You are the **Judge/Facilitator** - a rigorous senior scientist ensuring structured debate leads to truth.
+      ### Protocol
+      **CLARIFICATION:** When a new topic is posed, YOU respond first with 3-5 clarifying questions (ambiguity, constraints, scope, assumptions).
+      **SIGNAL:** Once clarified, say "Panelists, please proceed with your reports." Then WAIT for all reports.
+      **SYNTHESIS:** Once all reports are in, produce: 1) Individual critiques (errors, gaps, strong points) 2) Your own analysis 3) Synthesis of best ideas 4) Conclusions 5) Open questions 6) Ask "Would you like another round?"
+      **SUBSEQUENT ROUNDS:** Skip clarification, signal panelists directly, note where positions shifted.
+      **ARCHIVE:** When human says "no", save to ~/clawd/shared/DECISIONS.md and update KNOWLEDGE.md.
+      ### Panelists: ${PANELISTS}
+      ### Shared Files (you maintain): ~/clawd/shared/{KNOWLEDGE,DECISIONS,CONTEXT}.md
+      JUDGE_PROTO
+              else
+                cat <<PARTICIPANT_PROTO
+      ## Council Deliberation (Group: "${CGN}")
+      You are a **Research Panelist** - a passionate scientist who challenges assumptions, demands evidence, and seeks truth through rigorous debate.
+      ### Protocol
+      **WAIT** for ${CJ} to complete clarification. Do NOT begin your report yet.
+      **REPORT** when ${CJ} signals "proceed": 1) Summary 2) Analysis with evidence 3) Considerations/caveats 4) Open questions. Work independently in parallel.
+      **SUBSEQUENT ROUNDS:** Review peers, consider ${CJ}'s critiques, update your analysis. Note where your thinking changed.
+      ### Panelists: ${PANELISTS} | ${CJ} (Judge)
+      ### Shared Files (read-only): ~/clawd/shared/{KNOWLEDGE,DECISIONS,CONTEXT}.md
+      PARTICIPANT_PROTO
+              fi
+            fi
           } > "$AD/AGENTS.md"
         else
           echo -e "# Agent: ${ANAME}\nBe helpful and natural." > "$AD/AGENTS.md"
         fi
-
-        # BOOT.md: hardcoded system health + global + agent custom instructions
         cat > "$AD/BOOT.md" <<'BOOTMD'
       ## System Health (DO NOT MODIFY)
       If this is your first message since the system started, announce yourself:
@@ -783,8 +818,6 @@ write_files:
           [ -n "$ABOOT" ] && printf '%s\n' "$ABOOT" >> "$AD/BOOT.md"
         fi
         printf '\nIf BOOT.md asks you to send a message, use the message tool (action=send with channel + target).\nUse the `target` field (not `to`) for message tool destinations.\nAfter sending with the message tool, reply with ONLY: NO_REPLY.\nIf nothing needs attention, reply with ONLY: NO_REPLY.\n' >> "$AD/BOOT.md"
-
-        # BOOTSTRAP.md: hardcoded preamble + global + agent custom instructions
         BSPRE="You are a new instance with no prior context. Before doing anything else:
       1. Find chat transcripts from previous sessions: find ~ -path '*/sessions/*.jsonl' -name '*.jsonl' 2>/dev/null
       2. Read through the last ~100 messages from the most recent transcript
@@ -797,18 +830,25 @@ write_files:
           [ -n "$GBS" ] && [ -n "$ABOOTSTRAP" ] && echo "" >> "$AD/BOOTSTRAP.md"
           [ -n "$ABOOTSTRAP" ] && printf '%s\n' "$ABOOTSTRAP" >> "$AD/BOOTSTRAP.md"
         fi
-
-        # USER.md: structured fields + global + agent user notes
         { [ -n "$URN" ] && echo "- Name: $URN" || echo "- Name: (learn)"
           [ -n "$UL" ] && echo "- Location: $UL" || echo "- Location: (learn)"
           [ -n "$GU" ] && printf '\n%s\n' "$GU"
           [ -n "$AUSER" ] && printf '\n%s\n' "$AUSER"
         } > "$AD/USER.md"
-
-        # Shared symlinks (TOOLS.md, HEARTBEAT.md)
         ln -sf "$H/clawd/TOOLS.md" "$AD/TOOLS.md" 2>/dev/null || true
         ln -sf "$H/clawd/HEARTBEAT.md" "$AD/HEARTBEAT.md" 2>/dev/null || true
+        [ -n "$CGI" ] && ln -sf "$H/clawd/shared" "$AD/shared" 2>/dev/null || true
       done
+      if [ -n "$CGI" ]; then
+        mkdir -p "$H/clawd/shared"
+        for sf in KNOWLEDGE.md DECISIONS.md CONTEXT.md; do
+          [ ! -f "$H/clawd/shared/$sf" ] && cat > "$H/clawd/shared/$sf" <<SHMD
+      # ${sf%.md}
+      *Maintained by the Judge. Updated after council deliberations.*
+      SHMD
+        done
+        chown -R $USERNAME:$USERNAME "$H/clawd/shared"
+      fi
       mkdir -p $H/.clawdbot/agents/main/agent
       cat > $H/.clawdbot/agents/main/agent/auth-profiles.json <<APJ
       {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
@@ -1028,103 +1068,6 @@ write_files:
       OnUnitActiveSec=2min
       [Install]
       WantedBy=timers.target
-  - path: /usr/local/bin/gmail-api.py
-    permissions: "0755"
-    content: |
-      #!/usr/bin/env python3
-      import argparse,base64,os,sys,mimetypes
-      from email.mime.text import MIMEText
-      from email.mime.multipart import MIMEMultipart
-      from email.mime.base import MIMEBase
-      from email import encoders
-      try:
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-      except ImportError:
-        sys.exit("Run: pip3 install google-auth google-api-python-client")
-      def get_creds():
-        cid,csc,rtk=os.environ.get('GMAIL_CLIENT_ID'),os.environ.get('GMAIL_CLIENT_SECRET'),os.environ.get('GMAIL_REFRESH_TOKEN')
-        if not all([cid,csc,rtk]):
-          for envf in [os.path.expanduser('~/.clawdbot/.env'),'/etc/droplet.env']:
-            try:
-              with open(envf,'r') as f:
-                for l in f:
-                  l=l.strip()
-                  if l.startswith('GMAIL_CLIENT_ID='):cid=cid or l.split('=',1)[1].strip('"')
-                  elif l.startswith('GMAIL_CLIENT_SECRET='):csc=csc or l.split('=',1)[1].strip('"')
-                  elif l.startswith('GMAIL_REFRESH_TOKEN='):rtk=rtk or l.split('=',1)[1].strip('"')
-                  elif l.startswith('GMAIL_CLIENT_ID_B64='):v=l.split('=',1)[1].strip('"');cid=cid or (base64.b64decode(v).decode() if v else None)
-                  elif l.startswith('GMAIL_CLIENT_SECRET_B64='):v=l.split('=',1)[1].strip('"');csc=csc or (base64.b64decode(v).decode() if v else None)
-                  elif l.startswith('GMAIL_REFRESH_TOKEN_B64='):v=l.split('=',1)[1].strip('"');rtk=rtk or (base64.b64decode(v).decode() if v else None)
-            except:pass
-            if all([cid,csc,rtk]):break
-        if not all([cid,csc,rtk]):sys.exit("Gmail API credentials not configured")
-        return Credentials(None,refresh_token=rtk,token_uri="https://oauth2.googleapis.com/token",client_id=cid,client_secret=csc)
-      def cmd_send(args):
-        svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
-        msg=MIMEMultipart('mixed');msg['To']=args.to;msg['Subject']=args.subject
-        if args.cc:msg['Cc']=args.cc
-        msg.attach(MIMEText(args.body,'html' if args.html else 'plain'))
-        if args.attach:
-          for fp in args.attach:
-            if os.path.isfile(fp):
-              ct,_=mimetypes.guess_type(fp);ct=ct or 'application/octet-stream';mt,st=ct.split('/',1)
-              with open(fp,'rb') as f:
-                part=MIMEBase(mt,st);part.set_payload(f.read());encoders.encode_base64(part)
-              part.add_header('Content-Disposition','attachment',filename=os.path.basename(fp));msg.attach(part)
-        r=svc.users().messages().send(userId='me',body={'raw':base64.urlsafe_b64encode(msg.as_bytes()).decode()}).execute()
-        print(f"Sent to {args.to} (ID: {r['id']})")
-      def cmd_list(args):
-        svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
-        res=svc.users().messages().list(userId='me',maxResults=args.n,q=args.q or '').execute()
-        for msg in res.get('messages',[]):
-          m=svc.users().messages().get(userId='me',id=msg['id'],format='metadata',metadataHeaders=['From','Subject','Date']).execute()
-          h={x['name']:x['value'] for x in m['payload']['headers']}
-          print(f"ID: {msg['id']}\n  From: {h.get('From','?')}\n  Subject: {h.get('Subject','(no subject)')}\n  Date: {h.get('Date','?')}\n")
-      def cmd_read(args):
-        svc=build('gmail','v1',credentials=get_creds(),cache_discovery=False)
-        m=svc.users().messages().get(userId='me',id=args.id,format='full').execute()
-        h={x['name']:x['value'] for x in m['payload']['headers']}
-        print(f"From: {h.get('From','?')}\nTo: {h.get('To','?')}\nSubject: {h.get('Subject','?')}\nDate: {h.get('Date','?')}\n{'='*60}")
-        def get_body(pl):
-          if 'body' in pl and pl['body'].get('data'):return base64.urlsafe_b64decode(pl['body']['data']).decode('utf-8',errors='replace')
-          if 'parts' in pl:
-            for p in pl['parts']:
-              if p.get('filename'):continue
-              if p['mimeType']=='text/plain' and p['body'].get('data'):return base64.urlsafe_b64decode(p['body']['data']).decode('utf-8',errors='replace')
-              if 'parts' in p:
-                r=get_body(p);
-                if r:return r
-          return None
-        print(get_body(m['payload']) or "(Could not extract body)")
-      def main():
-        p=argparse.ArgumentParser();sub=p.add_subparsers(dest='cmd',required=True)
-        ps=sub.add_parser('send');ps.add_argument('to');ps.add_argument('subject');ps.add_argument('body');ps.add_argument('--html',action='store_true');ps.add_argument('--cc');ps.add_argument('--attach','-a',action='append')
-        pl=sub.add_parser('list');pl.add_argument('-n',type=int,default=10);pl.add_argument('-q',default='')
-        pr=sub.add_parser('read');pr.add_argument('id')
-        args=p.parse_args();{'send':cmd_send,'list':cmd_list,'read':cmd_read}[args.cmd](args)
-      if __name__=='__main__':main()
-  - path: /usr/local/bin/set-council-group.sh
-    permissions: "0755"
-    content: |
-      #!/bin/bash
-      [ -z "$1" ] && { echo "Usage: set-council-group.sh <group_id>"; exit 1; }
-      GID="$1"; set -a; source /etc/droplet.env; set +a
-      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-      H="/home/$USERNAME"; CFG="$H/.clawdbot/clawdbot.json"
-      [ ! -f "$CFG" ] && { echo "Config not found"; exit 1; }
-      cp "$CFG" "$CFG.bak"
-      if grep -q '"groups":{' "$CFG"; then
-        sed -i "s|\"groups\":{[^}]*}|\"groups\":{\"${GID}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}|" "$CFG"
-      else
-        sed -i "s|\"telegram\":{\"enabled\":true|\"telegram\":{\"enabled\":true,\"groups\":{\"${GID}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}|" "$CFG"
-      fi
-      echo "$GID" > "$H/clawd/.council-group-id"
-      echo "true" > "$H/clawd/.council-enabled"
-      chown $USERNAME:$USERNAME "$H/clawd/.council-group-id" "$H/clawd/.council-enabled"
-      systemctl restart clawdbot
-      sleep 3
-      systemctl is-active --quiet clawdbot && echo "Council group set to $GID. Clawdbot restarted." || { echo "Restart failed, restoring backup"; cp "$CFG.bak" "$CFG"; systemctl restart clawdbot; exit 1; }
   - path: /usr/local/bin/mount-dropbox.sh
     permissions: "0755"
     content: |
