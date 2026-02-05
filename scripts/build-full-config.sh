@@ -102,6 +102,15 @@ cat > $H/.clawdbot/clawdbot.full.json <<CFG
     "headless": false,
     "noSandbox": true
   },
+  "tools": {
+    "agentToAgent": {
+      "enabled": true
+    },
+    "exec": {
+      "security": "full",
+      "ask": "off"
+    }
+  },
   "agents": {
     "defaults": {
       "model": {"primary": "anthropic/claude-opus-4-5"},
