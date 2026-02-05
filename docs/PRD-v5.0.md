@@ -20,8 +20,9 @@
 9. [Accessibility](#9-accessibility)
 10. [Council UX Improvements](#10-council-ux-improvements)
 11. [Migration Path](#11-migration-path)
-12. [Open Questions](#12-open-questions)
-13. [Appendix: Round 1 Findings Traceability](#appendix-round-1-findings-traceability)
+12. [Automatic Safe Mode Detection](#12-automatic-safe-mode-detection)
+13. [Open Questions](#13-open-questions)
+14. [Appendix: Round 1 Findings Traceability](#appendix-round-1-findings-traceability)
 
 ---
 
@@ -747,7 +748,46 @@ If a release tarball fails to download:
 
 ---
 
-## 11. Open Questions
+## 12. Automatic Safe Mode Detection
+
+*Ref: [Issue #23](https://github.com/dfrysinger/hatchery/issues/23)*
+
+### 12.1 Problem
+
+When the Clawdbot gateway crash-loops due to a bad config patch or other persistent error, the systemd service restarts indefinitely with the same broken configuration. There is no automatic detection, no notification, and no recovery path — the user must SSH in and manually diagnose the issue. This violates G6 ("Safe mode is bulletproof — bot recoverable from any failure state without user SSH access").
+
+### 12.2 Solution
+
+Add systemd-level crash detection that automatically triggers a safe mode when rapid restarts are detected. The system:
+
+1. **Detects crash-loops** via systemd `StartLimitBurst` / `StartLimitIntervalSec` — after N rapid restarts (e.g., 3 in 60 seconds), systemd stops restarting and triggers an `OnFailure=` handler.
+2. **Creates `SAFE_MODE.md`** in all agent workspaces with diagnostic instructions (recent logs, last config change, rollback steps).
+3. **Backs up and rolls back config** — maintains a last-known-good config snapshot; on crash-loop detection, reverts to it.
+4. **Notifies the user** via the last working channel (Discord or Telegram) that safe mode was triggered and what action is needed.
+5. **Enables agent self-heal** — the agent can read `SAFE_MODE.md`, diagnose the issue, and attempt a fix without user intervention.
+
+### 12.3 Requirements
+
+| # | Requirement | Priority |
+|---|------------|----------|
+| R12.1 | **Crash detection:** The `clawdbot.service` systemd unit MUST be configured with `StartLimitBurst=3` and `StartLimitIntervalSec=60`. An `OnFailure=clawdbot-safe-mode.service` handler MUST be defined that runs a safe-mode script when the start limit is hit. | MUST |
+| R12.2 | **Notification:** The safe-mode script MUST send a notification to the user via the last working channel (Discord, Telegram, or /status API) with: what happened, what was rolled back, and what to do next. The notification MUST follow the user-friendly messaging requirements in R9.2.1–R9.2.2. | MUST |
+| R12.3 | **Config backup/restore:** `build-config.py` MUST snapshot the current working config to `/var/lib/clawdbot/last-known-good/` after every successful gateway health check (healthy for ≥30 seconds after config apply). The safe-mode script MUST restore from this snapshot when triggered. If no snapshot exists, fall back to minimal safe-mode config (R4.6.5–R4.6.6). | MUST |
+| R12.4 | **Agent self-heal:** `SAFE_MODE.md` MUST contain actionable diagnostic information: the last 50 lines of `journalctl -u clawdbot`, the last config change (diff between current and last-known-good), and step-by-step rollback instructions the agent can execute. The agent SHOULD be able to recover by following these instructions without user intervention. | SHOULD |
+| R12.5 | **Manual recovery:** The safe-mode script MUST write a `/var/lib/init-status/safe-mode-triggered` marker file. Documentation (in SAFE_MODE.md and repo README) MUST describe manual recovery steps for cases where the agent cannot self-heal: SSH in, check logs, restore config, restart service. The `try-full-config.sh` script (R4.6.3) MUST check for and clear this marker on successful recovery. | MUST |
+
+### 12.4 Implementation Notes
+
+- The `OnFailure=` handler runs as a separate oneshot service (`clawdbot-safe-mode.service`) so it has full systemd context.
+- The safe-mode script lives at `/opt/hatchery/scripts/safe-mode.sh` and is included in the release tarball (§3.5).
+- `SAFE_MODE.md` is generated dynamically (not from a static template) because it must include live diagnostic data.
+- The last-known-good snapshot includes `clawdbot.json`, all agent workspace files, and the `.env` file.
+- After restoring the last-known-good config, the safe-mode script restarts `clawdbot.service` with `systemctl reset-failed clawdbot && systemctl start clawdbot`.
+- User outreach retries follow R4.6.9 (3 attempts at 30-minute intervals).
+
+---
+
+## 13. Open Questions
 
 | # | Question | Impact | Owner | Resolution |
 |---|----------|--------|-------|------------|
@@ -768,7 +808,7 @@ If a release tarball fails to download:
 
 ---
 
-## Appendix: Round 1 Findings Traceability
+## 14. Appendix: Round 1 Findings Traceability
 
 | # | Finding | Severity | v5.0 Section | Status |
 |---|---------|----------|-------------|--------|
