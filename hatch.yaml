@@ -18,7 +18,7 @@ write_files:
       DO_TOKEN_B64="[[DO_TOKEN_B64]]"
       PASSWORD_B64="[[PASSWORD_B64]]"
       # PLATFORM, DISCORD_*, TELEGRAM_OWNER_ID are extracted from HABITAT_B64
-      # by parse-habitat.py → /etc/habitat-parsed.env (no Shortcut placeholders needed)
+      # by parse-habitat.py -> /etc/habitat-parsed.env (no Shortcut placeholders needed)
       TELEGRAM_USER_ID_B64="[[TELEGRAM_USER_ID_B64]]"
       ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
       BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"

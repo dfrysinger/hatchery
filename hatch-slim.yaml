@@ -1,5 +1,5 @@
 #cloud-config
-# version: main (slim) — bootstrap.sh fetches large scripts from GitHub
+# version: main (slim) -- bootstrap.sh fetches large scripts from GitHub
 package_update: false
 package_upgrade: false
 bootcmd:
@@ -19,7 +19,7 @@ write_files:
       DO_TOKEN_B64="[[DO_TOKEN_B64]]"
       PASSWORD_B64="[[PASSWORD_B64]]"
       # PLATFORM, DISCORD_*, TELEGRAM_OWNER_ID are extracted from HABITAT_B64
-      # by parse-habitat.py → /etc/habitat-parsed.env (no Shortcut placeholders needed)
+      # by parse-habitat.py -> /etc/habitat-parsed.env (no Shortcut placeholders needed)
       TELEGRAM_USER_ID_B64="[[TELEGRAM_USER_ID_B64]]"
       ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
       BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
@@ -232,7 +232,7 @@ write_files:
       VER=$(cat /etc/hatchery-version 2>/dev/null||echo "main")
       log(){ echo "[bootstrap] $*";}
       notify(){ [ -x /usr/local/bin/tg-notify.sh ]&&/usr/local/bin/tg-notify.sh "$1" 2>/dev/null||true;}
-      fetch(){ local u="$1" d="$2" i;for i in 1 2 3;do curl -fSL --max-time 60 -o "$d" "$u"&&return 0;sleep $((i*5));done;notify "bootstrap: fetch failed — $u";return 1;}
+      fetch(){ local u="$1" d="$2" i;for i in 1 2 3;do curl -fSL --max-time 60 -o "$d" "$u"&&return 0;sleep $((i*5));done;notify "bootstrap: fetch failed -- $u";return 1;}
       mkdir -p "$DIR";T=$(mktemp)
       if [ "$VER" = "main" ];then
         log "Fetching main";fetch "https://github.com/${REPO}/archive/refs/heads/main.tar.gz" "$T"
@@ -253,7 +253,7 @@ write_files:
       [ -f "$DIR/gmail-api.py" ]&&cp "$DIR/gmail-api.py" /usr/local/bin/gmail-api.py&&chmod 755 /usr/local/bin/gmail-api.py
       [ -f "$DIR/set-council-group.sh" ]&&cp "$DIR/set-council-group.sh" /usr/local/bin/set-council-group.telegram.sh&&chmod 755 /usr/local/bin/set-council-group.telegram.sh
       chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null||true
-      notify "bootstrap: hatchery ${VER} installed — starting phase1"
+      notify "bootstrap: hatchery ${VER} installed -- starting phase1"
       /usr/local/sbin/phase1-critical.sh
 users:
   - default

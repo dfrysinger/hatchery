@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bootstrap.sh — fetch hatchery release tarball from GitHub and hand off to phase1
+# bootstrap.sh -- fetch hatchery release tarball from GitHub and hand off to phase1
 set -euo pipefail
 
 # Source env vars so helpers (notify, etc.) and VERSION can resolve
@@ -23,7 +23,7 @@ notify() {
 log() { echo "[bootstrap] $*"; }
 
 # ---------------------------------------------------------------------------
-# fetch URL DEST — download with 3 retries & exponential backoff
+# fetch URL DEST -- download with 3 retries & exponential backoff
 # ---------------------------------------------------------------------------
 fetch() {
   local url="$1" dest="$2"
@@ -33,11 +33,11 @@ fetch() {
     if curl -fSL --max-time 60 -o "$dest" "$url"; then
       return 0
     fi
-    log "Attempt $((attempt+1)) failed; retrying in ${delays[$attempt]}s…"
+    log "Attempt $((attempt+1)) failed; retrying in ${delays[$attempt]}s..."
     sleep "${delays[$attempt]}"
     attempt=$((attempt + 1))
   done
-  notify "bootstrap: fetch failed after 3 retries — $url"
+  notify "bootstrap: fetch failed after 3 retries -- $url"
   return 1
 }
 
@@ -47,14 +47,14 @@ fetch() {
 mkdir -p "$INSTALL_DIR"
 
 if [ "$VERSION" = "main" ]; then
-  # Dev mode — pull HEAD archive
+  # Dev mode -- pull HEAD archive
   log "Dev mode: fetching main branch archive"
   TARBALL=$(mktemp)
   fetch "https://github.com/${REPO}/archive/refs/heads/main.tar.gz" "$TARBALL"
   tar -xzf "$TARBALL" --strip-components=1 -C "$INSTALL_DIR"
   rm -f "$TARBALL"
 else
-  # Release mode — fetch versioned tarball + checksum
+  # Release mode -- fetch versioned tarball + checksum
   log "Release mode: fetching v${VERSION}"
   TARBALL=$(mktemp)
   SUMFILE=$(mktemp)
@@ -102,6 +102,6 @@ done
 
 chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null || true
 
-notify "bootstrap: hatchery ${VERSION} installed — starting phase1"
+notify "bootstrap: hatchery ${VERSION} installed -- starting phase1"
 log "Handing off to phase1-critical.sh"
 /usr/local/sbin/phase1-critical.sh
