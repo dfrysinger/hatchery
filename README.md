@@ -41,7 +41,7 @@ GET https://raw.githubusercontent.com/dfrysinger/hatchery/main/version.json
 | Shortcut | Description |
 |---|---|
 | Create Habitat | Provision a new habitat from `hatch.yaml` |
-| Open Habitat | Connect to a running habitat |
+| Open Habitat | Open a habitat — connects if running, creates if not |
 | Shutdown Habitat | Graceful shutdown with state sync |
 | Destroy Habitat | Tear down a habitat |
 | Destroy All Droplets | Nuclear option — destroy everything |
@@ -69,10 +69,10 @@ GET https://raw.githubusercontent.com/dfrysinger/hatchery/main/version.json
 |---|---|
 | Get Habitat Info | Fetch droplet metadata from DO API |
 | Get Habitat Variable | Read a specific habitat config value |
-| Get Habitat Filename | Resolve the YAML template filename |
+| Get Habitat Filename | Resolve the habitat JSON config file path |
 | Get Habitat Status Filename | Resolve status log filename |
 | Get Habitat Name | Get the habitat's display name |
-| Get Habitat Selection Filename | Multi-habitat selector |
+| Get Habitat Selection Filename | Resolve the stored habitat selection (user's chosen habitat) |
 | Get Elapsed Time | Calculate provisioning duration |
 | Get Token | Retrieve API authentication token |
 | Creating Droplet | Droplet creation sub-routine |
