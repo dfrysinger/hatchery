@@ -1,8 +1,9 @@
 #cloud-config
-# version: 2.52
-# Cloud Browser Config v2.52 - 2026-02-01
-# Added: /prepare-shutdown endpoint for reliable memory sync before destroy
-# Changed: BOOT.md -> BOOTSTRAP.md (one-time bootstrap)
+# version: 2.54
+# Cloud Browser Config v2.54 - 2026-02-01
+# Fixed: bootcmd stage 10 logic, background color grep, GH_TOKEN check
+# Fixed: AGEN->GENNUM, USR->USNM placeholder collisions
+# Added: HEARTBEAT.md template for bootstrap execution
 package_update: false
 package_upgrade: false
 
@@ -11,14 +12,14 @@ bootcmd:
   - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
   - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
   - [ bash, -lc, "mkdir -p /etc/needrestart/conf.d && echo \"\\$nrconf{restart} = 'a';\" > /etc/needrestart/conf.d/99-autorestart.conf" ]
-  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && [ ! -f /var/lib/cloud-browser/boot-complete ] && echo '10' > /var/lib/cloud-browser/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=10 DESC=ready\" >> /var/log/cloud-init-stages.log && touch /var/lib/cloud-browser/boot-complete || true" ]
+  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && [ ! -f /var/lib/cloud-browser/boot-complete ] && { echo '10' > /var/lib/cloud-browser/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=10 DESC=ready\" >> /var/log/cloud-init-stages.log; touch /var/lib/cloud-browser/boot-complete; } || true" ]
 
 write_files:
   - path: /etc/droplet.env
     owner: root:root
     permissions: "0600"
     content: |
-      USERNAME="USR"
+      USERNAME="USNM"
       SSH_KEY="SSHK"
       DO_TOKEN="DOTK"
       PASSWORD="PSWD"
@@ -43,7 +44,7 @@ write_files:
       BOT_NOTES="BNOTES"
       BOOT_INSTRUCTIONS="BINST"
       BG_COLOR="BGCLR"
-      AGENT_GEN="AGEN"
+      AGENT_GEN="GENNUM"
       GH_TOKEN="GHTOK"
       GMAIL_CLIENT_ID="GMCID"
       GMAIL_CLIENT_SECRET="GMCSEC"
@@ -366,6 +367,17 @@ write_files:
       ### Workspace
       `__HOMEDIR__/clawd`
 
+  - path: /tmp/templates/HEARTBEAT.md
+    permissions: "0644"
+    content: |
+      # HEARTBEAT.md
+      
+      ## On Wake
+      - If BOOTSTRAP.md exists, execute it first and delete when done.
+      
+      ## Periodic Tasks
+      - Add recurring tasks below this line as needed.
+
   - path: /usr/local/bin/mount-dropbox.sh
     owner: root:root
     permissions: "0755"
@@ -388,23 +400,18 @@ write_files:
         source "$HOME/.config/bg-color.env"
       fi
       sleep 3
-      HEX="${BG_COLOR:-2d3748}"; [ "$HEX" = "BGCLR" ] && HEX="2d3748"
+      HEX="${BG_COLOR:-2d3748}"
+      [ -z "$HEX" ] && HEX="2d3748"
       HEX="${HEX#\#}"
       R=$(printf "scale=4; %d/255\n" 0x${HEX:0:2} | bc)
       G=$(printf "scale=4; %d/255\n" 0x${HEX:2:2} | bc)
       B=$(printf "scale=4; %d/255\n" 0x${HEX:4:2} | bc)
-      xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -E "workspace[0-9]+$" | while read ws; do
+      # Find all workspace paths and apply color
+      xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -oE '/backdrop/screen[0-9]+/[^/]+/workspace[0-9]+' | sort -u | while read ws; do
         xfconf-query -c xfce4-desktop -p "$ws/color-style" -n -t int -s 0 2>/dev/null
         xfconf-query -c xfce4-desktop -p "$ws/image-style" -n -t int -s 0 2>/dev/null
         xfconf-query -c xfce4-desktop -p "$ws/rgba1" -n -t double -t double -t double -t double -s $R -s $G -s $B -s 1.0 2>/dev/null
       done
-      if ! xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -q "workspace"; then
-        for mon in "monitor0" "monitorscreen" "monitorrdp0" "monitorVNC-0"; do
-          xfconf-query -c xfce4-desktop -p "/backdrop/screen0/$mon/workspace0/color-style" -n -t int -s 0 2>/dev/null
-          xfconf-query -c xfce4-desktop -p "/backdrop/screen0/$mon/workspace0/image-style" -n -t int -s 0 2>/dev/null
-          xfconf-query -c xfce4-desktop -p "/backdrop/screen0/$mon/workspace0/rgba1" -n -t double -t double -t double -t double -s $R -s $G -s $B -s 1.0 2>/dev/null
-        done
-      fi
       rm -f "$HOME/.config/autostart/set-background.desktop"
 
   - path: /usr/local/bin/restore-clawdbot-state.sh
@@ -425,7 +432,7 @@ write_files:
       fi
 
       MY_GEN="$AGENT_GEN"
-      if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
+      if [ -z "$MY_GEN" ]; then
         MY_GEN="1"
         echo "AGENT_GEN not set, defaulting to gen-1" >> "$LOG"
       fi
@@ -468,13 +475,13 @@ write_files:
       fi
 
       MY_GEN="$AGENT_GEN"
-      if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
+      if [ -z "$MY_GEN" ]; then
         if [ -f "$HOMEDIR/clawd/.gen" ]; then
           MY_GEN=$(cat "$HOMEDIR/clawd/.gen")
         fi
       fi
 
-      if [ -z "$MY_GEN" ] || [ "$MY_GEN" = "AGEN" ]; then
+      if [ -z "$MY_GEN" ]; then
         MY_GEN="1"
       fi
 
@@ -903,6 +910,7 @@ write_files:
       CLAWDCONFIG
       sed "s|__ANTHRO_KEY__|$ANTHRO_KEY|g" /tmp/templates/auth-profiles.json > $HOMEDIR/.clawdbot/agents/main/agent/auth-profiles.json
       sed -e "s|__USERNAME__|$USERNAME|g" -e "s|__HOMEDIR__|$HOMEDIR|g" /tmp/templates/TOOLS.md > $HOMEDIR/clawd/TOOLS.md
+      cp /tmp/templates/HEARTBEAT.md $HOMEDIR/clawd/HEARTBEAT.md
       echo "# USER.md - About Your Human" > $HOMEDIR/clawd/USER.md
       echo "" >> $HOMEDIR/clawd/USER.md
       if [ -n "$USER_REALNAME" ]; then
@@ -1034,7 +1042,7 @@ write_files:
       fi
 
       # Configure GitHub CLI if token provided
-      if [ -n "$GH_TOKEN" ] && [ "$GH_TOKEN" != "GHTOK" ]; then
+      if [ -n "$GH_TOKEN" ]; then
         echo "Configuring GitHub CLI..." >> "$LOG"
         mkdir -p $HOMEDIR/.config/gh
         cat > $HOMEDIR/.config/gh/hosts.yml <<GHCONF
