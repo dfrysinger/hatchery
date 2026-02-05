@@ -1,71 +1,67 @@
 #cloud-config
-# version: 2.54
-# Cloud Browser Config v2.54 - 2026-02-01
-# Fixed: bootcmd stage 10 logic, background color grep, GH_TOKEN check
-# Fixed: AGEN->GENNUM, USR->USNM placeholder collisions
-# Added: HEARTBEAT.md template for bootstrap execution
+# version: 3
+# Droplet Init Config v3.0 - 2026-02-01
+# Major refactor: [[PLACEHOLDER]] format, direct paths, simplified scripts
+# Renamed: /var/lib/init-status/, stage file
+# Note: gmail-api.py removed for size - install separately if needed
 package_update: false
 package_upgrade: false
 
 bootcmd:
-  - [ bash, -lc, "mkdir -p /var/lib/cloud-browser; [ -f /var/lib/cloud-browser/setup-complete ] && exit 0; echo '0' > /var/lib/cloud-browser/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 DESC=init\" >> /var/log/cloud-init-stages.log" ]
-  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
-  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
+  - [ bash, -lc, "mkdir -p /var/lib/init-status; [ -f /var/lib/init-status/setup-complete ] && exit 0; echo '0' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 DESC=init\" >> /var/log/init-stages.log" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
   - [ bash, -lc, "mkdir -p /etc/needrestart/conf.d && echo \"\\$nrconf{restart} = 'a';\" > /etc/needrestart/conf.d/99-autorestart.conf" ]
-  - [ bash, -lc, "[ -f /var/lib/cloud-browser/setup-complete ] && [ ! -f /var/lib/cloud-browser/boot-complete ] && { echo '10' > /var/lib/cloud-browser/cloud-init-stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=10 DESC=ready\" >> /var/log/cloud-init-stages.log; touch /var/lib/cloud-browser/boot-complete; } || true" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '10' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=10 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
 
 write_files:
   - path: /etc/droplet.env
     owner: root:root
     permissions: "0600"
     content: |
-      USERNAME="USNM"
-      SSH_KEY="SSHK"
-      DO_TOKEN="DOTK"
-      PASSWORD="PSWD"
-      MIN_TO_DEST="MINS"
-      TG_BOT_TOKEN="TGBTOK"
-      TG_USER_ID="TGUID"
-      ANTHRO_KEY="ANTK"
-      BRAVE_KEY="BKEY"
-      GPLACES_KEY="GPKEY"
-      DROPBOX_TOK='DBTK'
-      EMAIL="EMADDR"
-      IMAP_HOST="IMHOST"
-      SMTP_HOST="SMHOST"
-      EMAIL_PASS="EMPW"
-      CALDAV_URL="CALURL"
-      CALDAV_USER="CALUN"
-      CALDAV_PASS="CALPW"
-      USER_REALNAME="URNAME"
-      USER_LOCATION="URLOC"
-      USER_NOTES="UNOTES"
-      BOT_NAME="BNAME"
-      BOT_NOTES="BNOTES"
-      BOOT_INSTRUCTIONS="BINST"
-      BG_COLOR="BGCLR"
-      AGENT_GEN="GENNUM"
-      GH_TOKEN="GHTOK"
-      GMAIL_CLIENT_ID="GMCID"
-      GMAIL_CLIENT_SECRET="GMCSEC"
-      GMAIL_REFRESH_TOKEN="GMRTOK"
+      USERNAME="[[USERNAME]]"
+      SSH_KEY="[[SSH_KEY]]"
+      DO_TOKEN="[[DO_TOKEN]]"
+      PASSWORD="[[PASSWORD]]"
+      DESTRUCT_MINS="[[DESTRUCT_MINS]]"
+      TELEGRAM_BOT_TOKEN="[[TELEGRAM_BOT_TOKEN]]"
+      TELEGRAM_USER_ID="[[TELEGRAM_USER_ID]]"
+      ANTHROPIC_KEY="[[ANTHROPIC_KEY]]"
+      BRAVE_KEY="[[BRAVE_KEY]]"
+      GPLACES_KEY="[[GPLACES_KEY]]"
+      DROPBOX_TOKEN="[[DROPBOX_TOKEN]]"
+      EMAIL="[[EMAIL]]"
+      IMAP_HOST="[[IMAP_HOST]]"
+      SMTP_HOST="[[SMTP_HOST]]"
+      EMAIL_PASSWORD="[[EMAIL_PASSWORD]]"
+      CALDAV_URL="[[CALDAV_URL]]"
+      CALDAV_USER="[[CALDAV_USER]]"
+      CALDAV_PASSWORD="[[CALDAV_PASSWORD]]"
+      BG_COLOR="[[BG_COLOR]]"
+      AGENT_GEN="[[AGENT_GEN]]"
+      GH_TOKEN="[[GH_TOKEN]]"
+      GMAIL_CLIENT_ID="[[GMAIL_CLIENT_ID]]"
+      GMAIL_CLIENT_SECRET="[[GMAIL_CLIENT_SECRET]]"
+      GMAIL_REFRESH_TOKEN="[[GMAIL_REFRESH_TOKEN]]"
+      DROPLET_TAG="[[DROPLET_TAG]]"
+      USER_REALNAME_B64="[[USER_REALNAME_B64]]"
+      USER_LOCATION_B64="[[USER_LOCATION_B64]]"
+      USER_NOTES_B64="[[USER_NOTES_B64]]"
+      BOT_NAME_B64="[[BOT_NAME_B64]]"
+      BOT_NOTES_B64="[[BOT_NOTES_B64]]"
+      BOOT_INSTRUCTIONS_B64="[[BOOT_INSTRUCTIONS_B64]]"
 
   - path: /etc/update-manager/release-upgrades
-    owner: root:root
     permissions: "0644"
     content: |
       [DEFAULT]
       Prompt=never
 
   - path: /etc/apt/apt.conf.d/50unattended-upgrades
-    owner: root:root
     permissions: "0644"
     content: |
-      Unattended-Upgrade::Allowed-Origins {
-        "${distro_id}:${distro_codename}-security";
-      };
-      Unattended-Upgrade::Package-Blacklist {
-      };
+      Unattended-Upgrade::Allowed-Origins {"${distro_id}:${distro_codename}-security";};
+      Unattended-Upgrade::Package-Blacklist {};
       Unattended-Upgrade::AutoFixInterruptedDpkg "true";
       Unattended-Upgrade::MinimalSteps "true";
       Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
@@ -74,7 +70,6 @@ write_files:
       Unattended-Upgrade::Automatic-Reboot-Time "04:00";
 
   - path: /etc/apt/apt.conf.d/20auto-upgrades
-    owner: root:root
     permissions: "0644"
     content: |
       APT::Periodic::Update-Package-Lists "1";
@@ -83,7 +78,6 @@ write_files:
       APT::Periodic::AutocleanInterval "7";
 
   - path: /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla
-    owner: root:root
     permissions: "0644"
     content: |
       [Allow Colord all Users]
@@ -94,7 +88,6 @@ write_files:
       ResultActive=yes
 
   - path: /etc/ssh/sshd_config.d/99-password-auth.conf
-    owner: root:root
     permissions: "0644"
     content: |
       PasswordAuthentication yes
@@ -104,122 +97,123 @@ write_files:
       PermitRootLogin prohibit-password
 
   - path: /etc/systemd/system/api-server.service
-    owner: root:root
     permissions: "0644"
     content: |
       [Unit]
-      Description=Droplet Control API
+      Description=Droplet Status API
       After=network.target
       [Service]
-      ExecStart=/usr/local/bin/api_server.py
+      ExecStart=/usr/local/bin/api-server.py
       Restart=always
       RestartSec=3
       User=root
       [Install]
       WantedBy=multi-user.target
 
-  - path: /tmp/templates/chrome-local-state.json
+  - path: /etc/systemd/system/xvfb.service
     permissions: "0644"
     content: |
-      {
-        "browser": {
-          "default_browser_infobar_last_declined": "99999999999999.0",
-          "default_browser_setting_enabled": false
-        },
-        "toolkit_views": {"bookmark_bar_view_mode": 0 }
-      }
+      [Unit]
+      Description=Xvfb Virtual Framebuffer
+      After=network.target
+      [Service]
+      Type=simple
+      User=[[USERNAME]]
+      ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -ac
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
 
-  - path: /tmp/templates/chrome-preferences.json
+  - path: /etc/systemd/system/clawdbot-sync.service
     permissions: "0644"
     content: |
-      {
-        "browser": {
-          "check_default_browser": false,
-          "show_home_button": true
-        },
-        "session": {
-          "restore_on_startup": 1
-        },
-        "signin": {
-          "allowed": true
-        },
-        "sync": {
-          "requested": false
-        },
-        "credentials_enable_service": true,
-        "profile": {
-          "password_manager_enabled": true,
-          "default_content_setting_values": {
-            "notifications": 2
-          }
-        },
-        "distribution": {
-          "skip_first_run_ui": true,
-          "suppress_first_run_default_browser_prompt": true,
-          "make_chrome_default_for_user": true,
-          "import_bookmarks": false,
-          "import_history": false,
-          "import_search_engine": false
-        }
-      }
+      [Unit]
+      Description=Sync Clawdbot memory to Dropbox
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/sync-clawdbot-state.sh
+      User=root
 
-  - path: /tmp/templates/khal-config
+  - path: /etc/systemd/system/clawdbot-sync.timer
     permissions: "0644"
     content: |
-      [calendars]
+      [Unit]
+      Description=Periodic Clawdbot memory sync
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=2min
+      [Install]
+      WantedBy=timers.target
 
-      [[default]]
-      path = ~/.local/share/khal/calendars/*
-      type = discover
+  - path: /home/[[USERNAME]]/.config/google-chrome/Local State
+    defer: true
+    content: |
+      {"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false},"toolkit_views":{"bookmark_bar_view_mode":0}}
 
-      [locale]
-      timeformat = %H:%M
-      dateformat = %Y-%m-%d
-      longdateformat = %Y-%m-%d
-      datetimeformat = %Y-%m-%d %H:%M
-      longdatetimeformat = %Y-%m-%d %H:%M
+  - path: /home/[[USERNAME]]/.config/google-chrome/Default/Preferences
+    defer: true
+    content: |
+      {"browser":{"check_default_browser":false,"show_home_button":true},"session":{"restore_on_startup":1},"signin":{"allowed":true},"sync":{"requested":false},"credentials_enable_service":true,"profile":{"password_manager_enabled":true,"default_content_setting_values":{"notifications":2}},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true,"make_chrome_default_for_user":true,"import_bookmarks":false,"import_history":false,"import_search_engine":false}}
 
-  - path: /tmp/templates/view-automation.desktop
-    permissions: "0644"
+  - path: /home/[[USERNAME]]/.config/chrome-debug/Local State
+    defer: true
+    content: |
+      {"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false},"toolkit_views":{"bookmark_bar_view_mode":0}}
+
+  - path: /home/[[USERNAME]]/.config/chrome-debug/Default/Preferences
+    defer: true
+    content: |
+      {"browser":{"check_default_browser":false,"show_home_button":true},"session":{"restore_on_startup":1},"signin":{"allowed":true},"sync":{"requested":false},"credentials_enable_service":true,"profile":{"password_manager_enabled":true,"default_content_setting_values":{"notifications":2}},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true,"make_chrome_default_for_user":true,"import_bookmarks":false,"import_history":false,"import_search_engine":false}}
+
+  - path: /home/[[USERNAME]]/Desktop/google-chrome.desktop
+    permissions: "0755"
+    defer: true
+    content: |
+      [Desktop Entry]
+      Version=1.0
+      Name=Google Chrome
+      Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --disable-sync --remote-debugging-port=18800 --user-data-dir=/home/[[USERNAME]]/.config/chrome-debug %U
+      Terminal=false
+      Icon=google-chrome
+      Type=Application
+      Categories=Network;WebBrowser;
+      MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+
+  - path: /home/[[USERNAME]]/Desktop/view-automation.desktop
+    permissions: "0755"
+    defer: true
     content: |
       [Desktop Entry]
       Version=1.0
       Type=Application
       Name=View Automation Display
-      Comment=Start x11vnc to view Clawdbot browser on :99
       Exec=xfce4-terminal -e "bash -c 'x11vnc -display :99 -nopw -forever -rfbport 5900; exec bash'"
       Icon=video-display
       Terminal=false
-      Categories=Utility;
 
-  - path: /tmp/templates/thunderbird.desktop
-    permissions: "0644"
+  - path: /home/[[USERNAME]]/Desktop/thunderbird.desktop
+    permissions: "0755"
+    defer: true
     content: |
       [Desktop Entry]
       Version=1.0
       Type=Application
       Name=Thunderbird Mail
-      Comment=Email and Calendar
       Exec=thunderbird
       Icon=thunderbird
       Terminal=false
-      Categories=Network;Email;
 
-  - path: /tmp/templates/dropbox.desktop
-    permissions: "0644"
+  - path: /home/[[USERNAME]]/.xsession
+    defer: true
+    content: xfce4-session
+
+  - path: /home/[[USERNAME]]/.config/bg-color.env
+    defer: true
     content: |
-      [Desktop Entry]
-      Version=1.0
-      Type=Application
-      Name=Dropbox
-      Comment=Mount and open Dropbox folder
-      Exec=/usr/local/bin/mount-dropbox.sh
-      Icon=folder-remote
-      Terminal=false
-      Categories=Utility;
+      BG_COLOR="[[BG_COLOR]]"
 
-  - path: /tmp/templates/set-background.desktop
-    permissions: "0644"
+  - path: /home/[[USERNAME]]/.config/autostart/set-background.desktop
+    defer: true
     content: |
       [Desktop Entry]
       Type=Application
@@ -229,184 +223,123 @@ write_files:
       Terminal=false
       Hidden=false
 
-  - path: /tmp/templates/xvfb.service
-    permissions: "0644"
+  - path: /home/[[USERNAME]]/.config/khal/config
+    defer: true
     content: |
-      [Unit]
-      Description=Xvfb Virtual Framebuffer
-      After=network.target
+      [calendars]
+      [[default]]
+      path = ~/.local/share/khal/calendars/*
+      type = discover
+      [locale]
+      timeformat = %H:%M
+      dateformat = %Y-%m-%d
+      longdateformat = %Y-%m-%d
+      datetimeformat = %Y-%m-%d %H:%M
+      longdatetimeformat = %Y-%m-%d %H:%M
 
-      [Service]
-      Type=simple
-      User=__USERNAME__
-      ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -ac
-      Restart=always
-
-      [Install]
-      WantedBy=multi-user.target
-
-  - path: /tmp/templates/auth-profiles.json
-    permissions: "0644"
+  - path: /home/[[USERNAME]]/clawd/TOOLS.md
+    defer: true
     content: |
-      {
-        "version": 1,
-        "profiles": {
-          "anthropic:default": {
-            "type": "api_key",
-            "provider": "anthropic",
-            "token": "__ANTHRO_KEY__"
-          }
-        }
-      }
+      ### Environment
+      - Running on cloud VM (Ubuntu) as `[[USERNAME]]` user
+      - User has RDP access on display :10
+      - Virtual display :99 (Xvfb) for invisible automation
+      - Chrome at `/usr/bin/google-chrome-stable`
+
+      ### Email
+      **DigitalOcean blocks SMTP.** For sending, use Gmail API script (install separately).
+      For reading via IMAP, **himalaya** works: `himalaya list` / `himalaya read 1`
+
+      ### Browser Control
+      Desktop Chrome has remote debugging on port 18800.
+      Launch programmatically:
+          DISPLAY=:10 google-chrome-stable --remote-debugging-port=18800 --user-data-dir=/home/[[USERNAME]]/.config/chrome-debug <url> &
+      For invisible automation on :99: `x11vnc -display :99 -nopw -forever &`
+
+      ### Tools
+      - **Chrome**: Remote debugging (port 18800)
+      - **Thunderbird**: Email/calendar client
+      - **goplaces**: Google Places CLI
+      - **ffmpeg**: Video/audio processing
+      - **LibreOffice**: Documents
+      - **rclone**: Cloud storage
+      - **pandoc**: Document conversion
+      - **himalaya**: Email CLI (IMAP reading)
+      - **khal/vdirsyncer**: Calendar CLI
+      - **yt-dlp**: Video downloads
+      - **ImageMagick**: Image manipulation
+      - **scrot/flameshot**: Screenshots
+      - **qpdf**: PDF manipulation
+      - **jq**: JSON processing
+      - **gh**: GitHub CLI
+      - **vlc**: Media player
+      - **htop/ncdu**: System monitoring
+
+      ### ClawdHub Skills
+      weather, github, youtube-transcript, yt-dlp-downloader-skill, video-frames, goplaces
+
+      ### Workspace
+      `/home/[[USERNAME]]/clawd`
+
+  - path: /home/[[USERNAME]]/clawd/HEARTBEAT.md
+    defer: true
+    content: |
+      # HEARTBEAT.md
+      ## On Wake
+      - If BOOTSTRAP.md exists, execute it first and delete when done.
+      ## Periodic Tasks
+      - Add recurring tasks below this line as needed.
 
   - path: /tmp/templates/clawdbot-dashboard.desktop
-    permissions: "0644"
     content: |
       [Desktop Entry]
       Version=1.0
       Type=Application
       Name=Clawdbot Dashboard
-      Comment=Open Clawdbot Dashboard in Browser
-      Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --remote-debugging-port=18800 --user-data-dir=__HOMEDIR__/.config/chrome-debug "http://localhost:18789?token=__GATEWAY_TOKEN__"
+      Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --remote-debugging-port=18800 --user-data-dir=/home/[[USERNAME]]/.config/chrome-debug "http://localhost:18789?token=__GATEWAY_TOKEN__"
       Icon=utilities-terminal
       Terminal=false
-      Categories=Development;
 
-  - path: /tmp/templates/google-chrome.desktop
-    permissions: "0644"
+  - path: /usr/local/bin/set-stage.sh
+    permissions: "0755"
     content: |
-      [Desktop Entry]
-      Version=1.0
-      Name=Google Chrome
-      GenericName=Web Browser
-      Comment=Access the Internet
-      Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --disable-sync --remote-debugging-port=18800 --user-data-dir=__HOMEDIR__/.config/chrome-debug %U
-      StartupNotify=true
-      Terminal=false
-      Icon=google-chrome
-      Type=Application
-      Categories=Network;WebBrowser;
-      MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+      #!/bin/bash
+      echo "$1" > /var/lib/init-status/stage
+      echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) STAGE=$1 DESC=$2" >> /var/log/init-stages.log
 
-  - path: /tmp/templates/TOOLS.md
-    permissions: "0644"
+  - path: /usr/local/bin/schedule-destruct.sh
+    permissions: "0755"
     content: |
-      ### Environment
-      - Running on cloud VM (Ubuntu) as `__USERNAME__` user
-      - User has RDP access on display :10
-      - Virtual display :99 (Xvfb) available for invisible automation
-      - Chrome is at `/usr/bin/google-chrome-stable`
+      #!/bin/bash
+      source /etc/droplet.env
+      [ -n "$DESTRUCT_MINS" ] && [ "$DESTRUCT_MINS" != "0" ] && [ "$DESTRUCT_MINS" -gt 0 ] 2>/dev/null && systemd-run --unit=self-destruct --on-active=${DESTRUCT_MINS}m /usr/local/bin/kill-droplet.sh
 
-      ### Email Limitations (DigitalOcean)
-      - **Direct SMTP is blocked** - DO blocks outbound port 25 by default
-      - Email must be sent via:
-        - **API** (SendGrid, Mailgun, Gmail API, etc.)
-        - **Authenticated SMTP on port 587** (current himalaya setup uses this)
-        - **Third-party relay/proxy**
-      - The current himalaya config uses Gmail SMTP on port 587 with app password, which works
-
-      ### Package Installation
-      - **Homebrew is NOT installed** - do not use `brew`
-      - Use `apt` for system packages: `sudo apt install <package>`
-      - Use `pip` for Python packages: `pip3 install <package>`
-      - Use `npm` for Node packages: `npm install -g <package>`
-      - For tools not in apt/pip/npm, download binaries directly with curl
-
-      ### Browser Control
-
-      The desktop Chrome shortcut is pre-configured with remote debugging enabled.
-      - User sees it in their RDP session on display :10
-      - You have full CDP control via port 18800
-      - Uses the chrome-debug profile (no onboarding prompts)
-
-      To launch Chrome programmatically with control:
-
-          DISPLAY=:10 google-chrome-stable --remote-debugging-port=18800 --user-data-dir=__HOMEDIR__/.config/chrome-debug <url> &
-
-      For invisible automation, use the clawd-managed browser on :99:
-      - Runs in background, user cannot see it
-      - To let user view it: `x11vnc -display :99 -nopw -forever &`
-
-      ### File Sharing with User's Phone (Jump RDP)
-      When user connects via Jump iOS app, their phone storage is available at:
-      `__HOMEDIR__/thinclient_drives/`
-
-      ### Cloud Storage (Dropbox via rclone)
-      If configured, Dropbox is mounted at `__HOMEDIR__/Dropbox` (click desktop icon to mount).
-      CLI: `rclone ls dropbox:`, `rclone copy`, etc.
-
-      ### Available Tools
-      - **Chrome**: Desktop shortcut has remote debugging enabled (port 18800)
-      - **Thunderbird**: Email and calendar client (configure on first launch)
-      - **goplaces**: Google Places search CLI (if API key configured)
-      - **ffmpeg**: Video/audio processing and frame extraction
-      - **LibreOffice**: Document creation
-      - **rclone**: Cloud storage (Dropbox, etc.)
-      - **pandoc**: Document conversion
-      - **himalaya**: Email CLI (if configured)
-      - **khal/vdirsyncer**: Calendar CLI tools (if configured)
-
-      ### Additional Tools
-      - **yt-dlp**: Download videos from YouTube and other sites
-      - **ImageMagick**: Image manipulation (`convert`, `mogrify`, `identify`)
-      - **scrot/flameshot**: Screenshots (CLI and GUI)
-      - **qpdf**: PDF manipulation
-      - **jq**: JSON processing
-      - **gh**: GitHub CLI (issues, PRs, CI)
-      - **vlc**: Media player
-      - **htop/ncdu**: System monitoring
-
-      ### ClawdHub Skills
-      - **weather**: Weather forecasts (no API key needed)
-      - **github**: GitHub via gh CLI
-      - **youtube-transcript**: Extract video transcripts
-      - **yt-dlp-downloader-skill**: Download videos
-      - **video-frames**: Extract frames from videos
-      - **goplaces**: Google Places search
-
-      ### Workspace
-      `__HOMEDIR__/clawd`
-
-  - path: /tmp/templates/HEARTBEAT.md
-    permissions: "0644"
+  - path: /usr/local/bin/kill-droplet.sh
+    permissions: "0755"
     content: |
-      # HEARTBEAT.md
-      
-      ## On Wake
-      - If BOOTSTRAP.md exists, execute it first and delete when done.
-      
-      ## Periodic Tasks
-      - Add recurring tasks below this line as needed.
+      #!/bin/bash
+      source /etc/droplet.env
+      curl -X DELETE -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/droplets?tag_name=$DROPLET_TAG"
 
   - path: /usr/local/bin/mount-dropbox.sh
-    owner: root:root
     permissions: "0755"
     content: |
       #!/bin/bash
-      DROPBOX_DIR="$HOME/Dropbox"
-      mkdir -p "$DROPBOX_DIR"
-      fusermount -uz "$DROPBOX_DIR" 2>/dev/null || true
-      rclone mount dropbox: "$DROPBOX_DIR" --vfs-cache-mode writes --daemon
-      sleep 2
-      thunar "$DROPBOX_DIR"
+      mkdir -p "$HOME/Dropbox"
+      fusermount -uz "$HOME/Dropbox" 2>/dev/null || true
+      rclone mount dropbox: "$HOME/Dropbox" --vfs-cache-mode writes --daemon
+      sleep 2 && thunar "$HOME/Dropbox"
 
   - path: /usr/local/bin/set-desktop-background.sh
-    owner: root:root
     permissions: "0755"
     content: |
       #!/bin/bash
-      # Source user-readable bg-color file (created by setup-desktop.sh)
-      if [ -f "$HOME/.config/bg-color.env" ]; then
-        source "$HOME/.config/bg-color.env"
-      fi
+      [ -f "$HOME/.config/bg-color.env" ] && source "$HOME/.config/bg-color.env"
       sleep 3
-      HEX="${BG_COLOR:-2d3748}"
-      [ -z "$HEX" ] && HEX="2d3748"
-      HEX="${HEX#\#}"
+      HEX="${BG_COLOR:-2d3748}"; [ -z "$HEX" ] && HEX="2d3748"; HEX="${HEX#\#}"
       R=$(printf "scale=4; %d/255\n" 0x${HEX:0:2} | bc)
       G=$(printf "scale=4; %d/255\n" 0x${HEX:2:2} | bc)
       B=$(printf "scale=4; %d/255\n" 0x${HEX:4:2} | bc)
-      # Find all workspace paths and apply color
       xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -oE '/backdrop/screen[0-9]+/[^/]+/workspace[0-9]+' | sort -u | while read ws; do
         xfconf-query -c xfce4-desktop -p "$ws/color-style" -n -t int -s 0 2>/dev/null
         xfconf-query -c xfce4-desktop -p "$ws/image-style" -n -t int -s 0 2>/dev/null
@@ -415,400 +348,165 @@ write_files:
       rm -f "$HOME/.config/autostart/set-background.desktop"
 
   - path: /usr/local/bin/restore-clawdbot-state.sh
-    owner: root:root
     permissions: "0755"
     content: |
       #!/bin/bash
       source /etc/droplet.env
-      HOMEDIR="/home/$USERNAME"
-      REMOTE="dropbox:clawdbot-memory"
-      LOG="/var/log/clawdbot-restore.log"
-
-      echo "=== Memory Restore Started: $(date) ===" > "$LOG"
-
-      if [ -z "$DROPBOX_TOK" ]; then
-        echo "No Dropbox configured, skipping restore" >> "$LOG"
-        exit 0
-      fi
-
-      MY_GEN="$AGENT_GEN"
-      if [ -z "$MY_GEN" ]; then
-        MY_GEN="1"
-        echo "AGENT_GEN not set, defaulting to gen-1" >> "$LOG"
-      fi
-      PREV_GEN=$((MY_GEN - 1))
-
-      echo "I am gen-${MY_GEN}, restoring from gen-${PREV_GEN}" >> "$LOG"
-
-      mkdir -p "$HOMEDIR/clawd/memory"
-      mkdir -p "$HOMEDIR/clawd/memory/archive"
-
-      su - $USERNAME -c "rclone copy '$REMOTE/MEMORY.md' '$HOMEDIR/clawd/' 2>/dev/null" >> "$LOG" 2>&1
-
-      if [ "$PREV_GEN" -gt 0 ]; then
-        su - $USERNAME -c "rclone copy '$REMOTE/gen-${PREV_GEN}/memory' '$HOMEDIR/clawd/memory/' 2>/dev/null" >> "$LOG" 2>&1
-        echo "Restored memory from gen-${PREV_GEN}" >> "$LOG"
-      fi
-
-      for i in $(seq 1 $((PREV_GEN - 1))); do
-        su - $USERNAME -c "rclone copy '$REMOTE/gen-${i}/memory' '$HOMEDIR/clawd/memory/archive/gen-${i}/' 2>/dev/null" >> "$LOG" 2>&1
-      done
-
-      echo "$MY_GEN" > "$HOMEDIR/clawd/.gen"
-      date -u +%s > "$HOMEDIR/clawd/.gen-created"
-      chown $USERNAME:$USERNAME "$HOMEDIR/clawd/.gen" "$HOMEDIR/clawd/.gen-created"
-
+      HOMEDIR="/home/$USERNAME"; REMOTE="dropbox:clawdbot-memory"
+      [ -z "$DROPBOX_TOKEN" ] && exit 0
+      MY_GEN="${AGENT_GEN:-1}"; PREV_GEN=$((MY_GEN - 1))
+      mkdir -p "$HOMEDIR/clawd/memory" "$HOMEDIR/clawd/memory/archive"
+      su - $USERNAME -c "rclone copy '$REMOTE/MEMORY.md' '$HOMEDIR/clawd/' 2>/dev/null"
+      [ "$PREV_GEN" -gt 0 ] && su - $USERNAME -c "rclone copy '$REMOTE/gen-${PREV_GEN}/memory' '$HOMEDIR/clawd/memory/' 2>/dev/null"
+      for i in $(seq 1 $((PREV_GEN - 1))); do su - $USERNAME -c "rclone copy '$REMOTE/gen-${i}/memory' '$HOMEDIR/clawd/memory/archive/gen-${i}/' 2>/dev/null"; done
+      echo "$MY_GEN" > "$HOMEDIR/clawd/.gen"; date -u +%s > "$HOMEDIR/clawd/.gen-created"
       chown -R $USERNAME:$USERNAME "$HOMEDIR/clawd"
-      echo "=== Memory Restore Finished: $(date) ===" >> "$LOG"
 
   - path: /usr/local/bin/sync-clawdbot-state.sh
-    owner: root:root
     permissions: "0755"
     content: |
       #!/bin/bash
       source /etc/droplet.env
-      HOMEDIR="/home/$USERNAME"
-      REMOTE="dropbox:clawdbot-memory"
-
-      if [ -z "$DROPBOX_TOK" ]; then
-        exit 0
-      fi
-
-      MY_GEN="$AGENT_GEN"
-      if [ -z "$MY_GEN" ]; then
-        if [ -f "$HOMEDIR/clawd/.gen" ]; then
-          MY_GEN=$(cat "$HOMEDIR/clawd/.gen")
-        fi
-      fi
-
-      if [ -z "$MY_GEN" ]; then
-        MY_GEN="1"
-      fi
-
+      HOMEDIR="/home/$USERNAME"; REMOTE="dropbox:clawdbot-memory"
+      [ -z "$DROPBOX_TOKEN" ] && exit 0
+      MY_GEN="${AGENT_GEN:-$(cat "$HOMEDIR/clawd/.gen" 2>/dev/null)}"; [ -z "$MY_GEN" ] && MY_GEN="1"
       su - $USERNAME -c "rclone sync '$HOMEDIR/clawd/memory' '$REMOTE/gen-${MY_GEN}/memory' --exclude 'archive/**' 2>/dev/null"
+      [ -f "$HOMEDIR/clawd/MEMORY.md" ] && su - $USERNAME -c "rclone copy '$HOMEDIR/clawd/MEMORY.md' '$REMOTE/' 2>/dev/null"
+      date -u +%s > "$HOMEDIR/clawd/.last-sync"; chown $USERNAME:$USERNAME "$HOMEDIR/clawd/.last-sync" 2>/dev/null
 
-      if [ -f "$HOMEDIR/clawd/MEMORY.md" ]; then
-        su - $USERNAME -c "rclone copy '$HOMEDIR/clawd/MEMORY.md' '$REMOTE/' 2>/dev/null"
-      fi
-
-      date -u +%s > "$HOMEDIR/clawd/.last-sync"
-      chown $USERNAME:$USERNAME "$HOMEDIR/clawd/.last-sync" 2>/dev/null
-
-  - path: /usr/local/bin/consolidate-memory.sh
-    owner: root:root
+  - path: /usr/local/bin/api-server.py
     permissions: "0755"
     content: |
-      #!/bin/bash
-      source /etc/droplet.env
-      HOMEDIR="/home/$USERNAME"
-      REMOTE="dropbox:clawdbot-memory"
-      DAYS_OLD="${1:-30}"
-
-      echo "Consolidating generations older than $DAYS_OLD days..."
-
-      NOW=$(date +%s)
-      CUTOFF=$((NOW - DAYS_OLD * 86400))
-
-      GENS=$(su - $USERNAME -c "rclone lsf '$REMOTE/' --dirs-only 2>/dev/null" | grep '^gen-' | sed 's|/$||' | sort -t- -k2 -n)
-
-      for GEN in $GENS; do
-        CREATED_FILE=$(su - $USERNAME -c "rclone cat '$REMOTE/$GEN/.created' 2>/dev/null")
-        if [ -n "$CREATED_FILE" ] && [ "$CREATED_FILE" -lt "$CUTOFF" ]; then
-          echo "Would consolidate $GEN (created $(date -d @$CREATED_FILE))"
-        fi
-      done
-
-  - path: /etc/systemd/system/clawdbot-sync.service
-    owner: root:root
-    permissions: "0644"
-    content: |
-      [Unit]
-      Description=Sync Clawdbot memory to Dropbox
-
-      [Service]
-      Type=oneshot
-      ExecStart=/usr/local/bin/sync-clawdbot-state.sh
-      User=root
-
-  - path: /etc/systemd/system/clawdbot-sync.timer
-    owner: root:root
-    permissions: "0644"
-    content: |
-      [Unit]
-      Description=Periodic Clawdbot memory sync
-
-      [Timer]
-      OnBootSec=2min
-      OnUnitActiveSec=2min
-
-      [Install]
-      WantedBy=timers.target
+      #!/usr/bin/env python3
+      import http.server,socketserver,subprocess,json,re,os
+      PORT=8080
+      STAGES={0:"init",1:"packages",2:"credentials",3:"chrome",4:"desktop",5:"clawdbot",6:"productivity",7:"cleanup",8:"xrdp",9:"reboot",10:"ready"}
+      def get_destruct_mins():
+          try:
+              with open('/etc/droplet.env','r') as f:
+                  for l in f:
+                      m=re.match(r'DESTRUCT_MINS="(\d+)"',l.strip())
+                      if m:return int(m.group(1))
+          except:pass
+          return 0
+      def get_status():
+          errors=[]
+          if os.path.exists('/var/run/init-errors'):
+              try:
+                  with open('/var/run/init-errors','r') as f:errors=[l.strip() for l in f if l.strip()]
+              except:pass
+          stage=0
+          try:
+              with open('/var/lib/init-status/stage','r') as f:stage=int(f.read().strip())
+          except:pass
+          return {"stage":stage,"desc":STAGES.get(stage,"unknown"),"errors":errors}
+      class H(http.server.BaseHTTPRequestHandler):
+          def log_message(self,*a):pass
+          def do_GET(self):
+              if self.path=='/status':
+                  s=get_status();self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(s).encode())
+              elif self.path=='/timer':
+                  self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();m=get_destruct_mins();self.wfile.write(json.dumps({"destruct_mins":m,"enabled":m>0}).encode())
+              elif self.path=='/stages':
+                  self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
+                  try:
+                      with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
+                  except:self.wfile.write(b"No log")
+              elif self.path=='/sync':
+                  self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+                  try:r=subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
+                  except Exception as e:self.wfile.write(json.dumps({"ok":False,"error":str(e)}).encode())
+              else:self.send_response(404);self.end_headers()
+          def do_POST(self):
+              if self.path=='/prepare-shutdown':
+                  self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+                  try:r=subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,capture_output=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":r.returncode==0,"ready_for_shutdown":True}).encode())
+                  except Exception as e:self.wfile.write(json.dumps({"ok":False,"error":str(e)}).encode())
+              elif self.path=='/keepalive':
+                  self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+                  try:subprocess.run("systemctl stop self-destruct.timer self-destruct.service 2>/dev/null;systemctl reset-failed self-destruct.timer 2>/dev/null;/usr/local/bin/schedule-destruct.sh",shell=True);self.wfile.write(json.dumps({"ok":True}).encode())
+                  except Exception as e:self.wfile.write(json.dumps({"ok":False,"error":str(e)}).encode())
+      class R(socketserver.TCPServer):allow_reuse_address=True
+      with R(("",PORT),H) as h:h.serve_forever()
 
   - path: /usr/local/sbin/install-packages.sh
-    owner: root:root
     permissions: "0755"
     content: |
       #!/bin/bash
-      LOG="/var/log/package-install.log"
-      echo "=== Package Install Started: $(date) ===" > "$LOG"
-
-      echo "Starting parallel downloads..." >> "$LOG"
+      LOG="/var/log/package-install.log"; echo "=== Package Install Started: $(date) ===" > "$LOG"
       wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb &
       PID_CHROME=$!
-
-      (
-        GPURL=$(curl -s https://api.github.com/repos/steipete/goplaces/releases/latest | grep -o 'https://[^"]*linux_amd64.tar.gz')
-        if [ -n "$GPURL" ]; then
-          curl -sL "$GPURL" -o /tmp/goplaces.tar.gz
-        fi
-      ) &
-      PID_GOPLACES=$!
-
-      echo "Setting up NodeJS repository..." >> "$LOG"
+      (GPURL=$(curl -s https://api.github.com/repos/steipete/goplaces/releases/latest | grep -o 'https://[^"]*linux_amd64.tar.gz'); [ -n "$GPURL" ] && curl -sL "$GPURL" -o /tmp/goplaces.tar.gz) &
+      PID_GP=$!
       curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >> "$LOG" 2>&1
-
-      echo "Setting up GitHub CLI repository..." >> "$LOG"
       curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
       chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
-
-      echo "Stopping apt services..." >> "$LOG"
-      systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-      systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-      systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
-      systemctl stop unattended-upgrades 2>/dev/null || true
-      systemctl disable unattended-upgrades 2>/dev/null || true
-
-      killall -9 apt apt-get dpkg unattended-upgr 2>/dev/null || true
-      sleep 2
-
-      for lockfile in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
-        if [ -f "$lockfile" ]; then
-          if ! fuser "$lockfile" >/dev/null 2>&1; then
-            rm -f "$lockfile"
-          fi
-        fi
-      done
-
-      WAIT_COUNT=0
-      while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-        if [ $((WAIT_COUNT % 10)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
-          killall -9 apt apt-get dpkg 2>/dev/null || true
-        fi
-        sleep 2
-        WAIT_COUNT=$((WAIT_COUNT + 1))
-        if [ $WAIT_COUNT -gt 90 ]; then
-          rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
-          dpkg --configure -a >> "$LOG" 2>&1 || true
-          break
-        fi
-      done
-
-      echo "Running consolidated apt install..." >> "$LOG"
-      flock -x /var/lib/dpkg/lock-frontend -c '
-        apt-get update && \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y \
-          xrdp xorgxrdp xfce4 xfce4-goodies xfce4-terminal \
-          dbus-x11 wget xz-utils lightdm xserver-xorg-video-dummy \
-          python3 python3-pip xvfb x11vnc ffmpeg unattended-upgrades \
-          imagemagick scrot flameshot qpdf jq htop ncdu vlc bc \
-          nodejs build-essential git gh \
-          libreoffice-writer pandoc rclone fuse3 khal vdirsyncer thunderbird
-      ' >> "$LOG" 2>&1
-
-      APT_STATUS=$?
-      if [ $APT_STATUS -ne 0 ]; then
-        echo "ERROR: apt failed with $APT_STATUS, retrying..." >> "$LOG"
-        echo "packages" >> /var/run/cloud-init-errors
-        sleep 5
-        DEBIAN_FRONTEND=noninteractive apt-get install -y \
-          xrdp xorgxrdp xfce4 xfce4-goodies xfce4-terminal \
-          dbus-x11 wget xz-utils lightdm xserver-xorg-video-dummy \
-          python3 python3-pip xvfb x11vnc ffmpeg unattended-upgrades \
-          imagemagick scrot flameshot qpdf jq htop ncdu vlc bc \
-          nodejs build-essential git gh \
-          libreoffice-writer pandoc rclone fuse3 khal vdirsyncer thunderbird >> "$LOG" 2>&1
-        if [ $? -eq 0 ]; then
-          sed -i '/^packages$/d' /var/run/cloud-init-errors 2>/dev/null || true
-        fi
-      fi
-
-      echo "Waiting for downloads..." >> "$LOG"
-      wait $PID_CHROME
-      wait $PID_GOPLACES
-
-      if [ -f /tmp/chrome.deb ]; then
-        echo "Installing Chrome..." >> "$LOG"
-        apt-get install -y /tmp/chrome.deb >> "$LOG" 2>&1
-        rm -f /tmp/chrome.deb
-      fi
-
-      apt-get purge -y gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
-      apt-get autoremove -y >> "$LOG" 2>&1
-
-      if [ -f /tmp/goplaces.tar.gz ]; then
-        echo "Installing goplaces..." >> "$LOG"
-        tar -xzf /tmp/goplaces.tar.gz -C /usr/local/bin 2>/dev/null
-        chmod +x /usr/local/bin/goplaces 2>/dev/null
-        rm -f /tmp/goplaces.tar.gz
-      fi
-
-      echo "Installing yt-dlp..." >> "$LOG"
-      pip3 install -U yt-dlp >> "$LOG" 2>&1
-
-      echo "Installing himalaya..." >> "$LOG"
+      systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true
+      systemctl disable apt-daily.timer apt-daily-upgrade.timer unattended-upgrades 2>/dev/null || true
+      killall -9 apt apt-get dpkg unattended-upgr 2>/dev/null || true; sleep 2
+      for lf in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do [ -f "$lf" ] && ! fuser "$lf" >/dev/null 2>&1 && rm -f "$lf"; done
+      WC=0; while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do [ $((WC % 10)) -eq 0 ] && [ $WC -gt 0 ] && killall -9 apt apt-get dpkg 2>/dev/null || true; sleep 2; WC=$((WC + 1)); [ $WC -gt 90 ] && { rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock; dpkg --configure -a >> "$LOG" 2>&1 || true; break; }; done
+      flock -x /var/lib/dpkg/lock-frontend -c 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y xrdp xorgxrdp xfce4 xfce4-goodies xfce4-terminal dbus-x11 wget xz-utils lightdm xserver-xorg-video-dummy python3 python3-pip xvfb x11vnc ffmpeg unattended-upgrades imagemagick scrot flameshot qpdf jq htop ncdu vlc bc nodejs build-essential git gh libreoffice-writer pandoc rclone fuse3 khal vdirsyncer thunderbird' >> "$LOG" 2>&1 || { echo "packages" >> /var/run/init-errors; sleep 5; DEBIAN_FRONTEND=noninteractive apt-get install -y xrdp xorgxrdp xfce4 xfce4-goodies xfce4-terminal dbus-x11 wget xz-utils lightdm xserver-xorg-video-dummy python3 python3-pip xvfb x11vnc ffmpeg unattended-upgrades imagemagick scrot flameshot qpdf jq htop ncdu vlc bc nodejs build-essential git gh libreoffice-writer pandoc rclone fuse3 khal vdirsyncer thunderbird >> "$LOG" 2>&1 && sed -i '/^packages$/d' /var/run/init-errors 2>/dev/null || true; }
+      wait $PID_CHROME; wait $PID_GP
+      [ -f /tmp/chrome.deb ] && apt-get install -y /tmp/chrome.deb >> "$LOG" 2>&1 && rm -f /tmp/chrome.deb
+      apt-get purge -y gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true; apt-get autoremove -y >> "$LOG" 2>&1
+      [ -f /tmp/goplaces.tar.gz ] && tar -xzf /tmp/goplaces.tar.gz -C /usr/local/bin 2>/dev/null && chmod +x /usr/local/bin/goplaces 2>/dev/null && rm -f /tmp/goplaces.tar.gz
+      pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
       curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
-      if [ -f "/root/.local/bin/himalaya" ]; then
-        ln -sf "/root/.local/bin/himalaya" /usr/local/bin/himalaya
-      fi
-
+      [ -f "/root/.local/bin/himalaya" ] && ln -sf "/root/.local/bin/himalaya" /usr/local/bin/himalaya
       echo "=== Package Install Finished: $(date) ===" >> "$LOG"
 
-  - path: /usr/local/sbin/apply-credentials.sh
-    owner: root:root
+  - path: /usr/local/sbin/setup-user.sh
     permissions: "0755"
     content: |
       #!/bin/bash
       source /etc/droplet.env
-      if ! id "$USERNAME" &>/dev/null; then
-        useradd -m -s /bin/bash -G sudo "$USERNAME"
-      fi
-      if [ -n "$SSH_KEY" ]; then
-        mkdir -p /home/$USERNAME/.ssh
-        echo "$SSH_KEY" >> /home/$USERNAME/.ssh/authorized_keys
-        chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh
-        chmod 700 /home/$USERNAME/.ssh
-        chmod 600 /home/$USERNAME/.ssh/authorized_keys
-      fi
+      id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
+      [ -n "$SSH_KEY" ] && { mkdir -p /home/$USERNAME/.ssh; echo "$SSH_KEY" >> /home/$USERNAME/.ssh/authorized_keys; chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh; chmod 700 /home/$USERNAME/.ssh; chmod 600 /home/$USERNAME/.ssh/authorized_keys; }
       echo "$USERNAME:$PASSWORD" | chpasswd
-      echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
-      chmod 440 /etc/sudoers.d/$USERNAME
+      echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME; chmod 440 /etc/sudoers.d/$USERNAME
       usermod -aG systemd-journal $USERNAME
-      if [ -n "$GPLACES_KEY" ]; then
-        echo "export GOOGLE_PLACES_API_KEY=\"$GPLACES_KEY\"" >> /home/$USERNAME/.bashrc
-      fi
-      if [ -n "$BRAVE_KEY" ]; then
-        echo "export BRAVE_API_KEY=\"$BRAVE_KEY\"" >> /home/$USERNAME/.bashrc
-      fi
+      [ -n "$GPLACES_KEY" ] && echo "export GOOGLE_PLACES_API_KEY=\"$GPLACES_KEY\"" >> /home/$USERNAME/.bashrc
+      [ -n "$BRAVE_KEY" ] && echo "export BRAVE_API_KEY=\"$BRAVE_KEY\"" >> /home/$USERNAME/.bashrc
       chown $USERNAME:$USERNAME /home/$USERNAME/.bashrc
 
-  - path: /usr/local/sbin/configure-chrome.sh
-    owner: root:root
+  - path: /usr/local/sbin/setup-chrome.sh
     permissions: "0755"
     content: |
       #!/bin/bash
       source /etc/droplet.env
       HOMEDIR="/home/$USERNAME"
-      mkdir -p $HOMEDIR/Desktop
-      mkdir -p $HOMEDIR/.config/google-chrome/Default
-      mkdir -p $HOMEDIR/.config/chrome-debug/Default
-      touch "$HOMEDIR/.config/google-chrome/First Run"
-      touch "$HOMEDIR/.config/chrome-debug/First Run"
-      cp /tmp/templates/chrome-local-state.json "$HOMEDIR/.config/google-chrome/Local State"
-      cp /tmp/templates/chrome-local-state.json "$HOMEDIR/.config/chrome-debug/Local State"
-      cp /tmp/templates/chrome-preferences.json $HOMEDIR/.config/google-chrome/Default/Preferences
-      cp /tmp/templates/chrome-preferences.json $HOMEDIR/.config/chrome-debug/Default/Preferences
-      sed "s|__HOMEDIR__|$HOMEDIR|g" /tmp/templates/google-chrome.desktop > $HOMEDIR/Desktop/google-chrome.desktop
-      chmod +x $HOMEDIR/Desktop/google-chrome.desktop
-      chown -R $USERNAME:$USERNAME $HOMEDIR/.config
-      chown -R $USERNAME:$USERNAME $HOMEDIR/Desktop
+      touch "$HOMEDIR/.config/google-chrome/First Run" "$HOMEDIR/.config/chrome-debug/First Run"
+      chown -R $USERNAME:$USERNAME $HOMEDIR/.config/google-chrome $HOMEDIR/.config/chrome-debug $HOMEDIR/Desktop
       update-alternatives --set x-www-browser /usr/bin/google-chrome-stable 2>/dev/null || true
       update-alternatives --set gnome-www-browser /usr/bin/google-chrome-stable 2>/dev/null || true
       su - $USERNAME -c 'xdg-settings set default-web-browser google-chrome.desktop' 2>/dev/null || true
-      su - $USERNAME -c 'xdg-mime default google-chrome.desktop x-scheme-handler/http' 2>/dev/null || true
-      su - $USERNAME -c 'xdg-mime default google-chrome.desktop x-scheme-handler/https' 2>/dev/null || true
-
-  - path: /usr/local/bin/schedule-destruct.sh
-    owner: root:root
-    permissions: "0755"
-    content: |
-      #!/bin/bash
-      source /etc/droplet.env
-      if [ -n "$MIN_TO_DEST" ] && [ "$MIN_TO_DEST" != "0" ] && [ "$MIN_TO_DEST" -gt 0 ] 2>/dev/null; then
-        systemd-run --unit=self-destruct --on-active=${MIN_TO_DEST}m /usr/local/bin/kill-droplet.sh
-      fi
-
-  - path: /usr/local/bin/kill-droplet.sh
-    owner: root:root
-    permissions: "0755"
-    content: |
-      #!/bin/bash
-      source /etc/droplet.env
-      curl -X DELETE -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/droplets?tag_name=cloud-browser"
-
-
-  - path: /usr/local/bin/set-stage.sh
-    owner: root:root
-    permissions: "0755"
-    content: |
-      #!/bin/bash
-      # Helper script to set stage with logging
-      STAGE="$1"
-      DESC="$2"
-      echo "$STAGE" > /var/lib/cloud-browser/cloud-init-stage
-      TS=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
-      echo "$TS STAGE=$STAGE DESC=$DESC" >> /var/log/cloud-init-stages.log
-
-  - path: /usr/local/sbin/setup-xvfb.sh
-    owner: root:root
-    permissions: "0755"
-    content: |
-      #!/bin/bash
-      source /etc/droplet.env
-      sed "s|__USERNAME__|$USERNAME|g" /tmp/templates/xvfb.service > /etc/systemd/system/xvfb.service
-      systemctl daemon-reload
-      systemctl enable xvfb
-      systemctl start xvfb
+      su - $USERNAME -c 'xdg-mime default google-chrome.desktop x-scheme-handler/http x-scheme-handler/https' 2>/dev/null || true
 
   - path: /usr/local/sbin/setup-clawdbot.sh
-    owner: root:root
     permissions: "0755"
     content: |
-      #!/usr/bin/env bash
+      #!/bin/bash
       source /etc/droplet.env
-      HOMEDIR="/home/$USERNAME"
-      LOG="/var/log/clawdbot-setup.log"
+      HOMEDIR="/home/$USERNAME"; LOG="/var/log/clawdbot-setup.log"
       echo "=== Clawdbot Setup Started: $(date) ===" > "$LOG"
-      if [ ! -f /swapfile ]; then
-        fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo '/swapfile none swap sw 0 0' >> /etc/fstab
-      fi
-      echo "Installing npm packages in parallel..." >> "$LOG"
-      npm install -g clawdbot@latest >> "$LOG" 2>&1 &
-      PID_CLAWDBOT=$!
-      npm install -g clawdhub@latest >> "$LOG" 2>&1 &
-      PID_CLAWDHUB=$!
-      wait $PID_CLAWDBOT || echo "clawdbot" >> /var/run/cloud-init-errors
-      wait $PID_CLAWDHUB || echo "clawdhub" >> /var/run/cloud-init-errors
+      [ ! -f /swapfile ] && { fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048; chmod 600 /swapfile; mkswap /swapfile; swapon /swapfile; echo '/swapfile none swap sw 0 0' >> /etc/fstab; }
+      npm install -g clawdbot@latest >> "$LOG" 2>&1 & PID1=$!
+      npm install -g clawdhub@latest >> "$LOG" 2>&1 & PID2=$!
+      wait $PID1 || echo "clawdbot" >> /var/run/init-errors
+      wait $PID2 || echo "clawdhub" >> /var/run/init-errors
       cd /usr/lib/node_modules/clawdhub && npm install undici >> "$LOG" 2>&1
-      mkdir -p $HOMEDIR/.clawdbot
-      mkdir -p $HOMEDIR/.clawdbot/agents/main/agent
-      mkdir -p $HOMEDIR/.clawdbot/agents/main/sessions
-      mkdir -p $HOMEDIR/.clawdbot/credentials
-      mkdir -p $HOMEDIR/clawd
-      mkdir -p $HOMEDIR/clawd/skills
-      mkdir -p $HOMEDIR/clawd/memory
-      GATEWAY_TOKEN=$(openssl rand -hex 24)
-      echo "$GATEWAY_TOKEN" > $HOMEDIR/.clawdbot/gateway-token.txt
-      CLAWDBOT_ENV="Environment=NODE_ENV=production"
-      CLAWDBOT_ENV="$CLAWDBOT_ENV\nEnvironment=PATH=/usr/bin:/usr/local/bin"
-      CLAWDBOT_ENV="$CLAWDBOT_ENV\nEnvironment=DISPLAY=:99"
-      CLAWDBOT_ENV="$CLAWDBOT_ENV\nEnvironment=ANTHROPIC_API_KEY=${ANTHRO_KEY}"
-      if [ -n "$BRAVE_KEY" ]; then
-        CLAWDBOT_ENV="$CLAWDBOT_ENV\nEnvironment=BRAVE_API_KEY=${BRAVE_KEY}"
-      fi
-      if [ -n "$GPLACES_KEY" ]; then
-        CLAWDBOT_ENV="$CLAWDBOT_ENV\nEnvironment=GOOGLE_PLACES_API_KEY=${GPLACES_KEY}"
-      fi
-      cat > /etc/systemd/system/clawdbot.service <<CLAWDSERVICE
+      mkdir -p $HOMEDIR/.clawdbot/agents/main/{agent,sessions} $HOMEDIR/.clawdbot/credentials $HOMEDIR/clawd/{skills,memory}
+      GATEWAY_TOKEN=$(openssl rand -hex 24); echo "$GATEWAY_TOKEN" > $HOMEDIR/.clawdbot/gateway-token.txt
+      CENV="Environment=NODE_ENV=production\nEnvironment=PATH=/usr/bin:/usr/local/bin\nEnvironment=DISPLAY=:99\nEnvironment=ANTHROPIC_API_KEY=${ANTHROPIC_KEY}"
+      [ -n "$BRAVE_KEY" ] && CENV="$CENV\nEnvironment=BRAVE_API_KEY=${BRAVE_KEY}"
+      [ -n "$GPLACES_KEY" ] && CENV="$CENV\nEnvironment=GOOGLE_PLACES_API_KEY=${GPLACES_KEY}"
+      cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
       After=network.target xvfb.service
       Requires=xvfb.service
-
       [Service]
       Type=simple
       User=$USERNAME
@@ -818,447 +516,134 @@ write_files:
       ExecStop=/usr/local/bin/sync-clawdbot-state.sh
       TimeoutStopSec=30
       Restart=always
-      $(echo -e "$CLAWDBOT_ENV")
-
+      $(echo -e "$CENV")
       [Install]
       WantedBy=multi-user.target
-      CLAWDSERVICE
-      cat > $HOMEDIR/.clawdbot/.env <<ENVFILE
-      ANTHROPIC_API_KEY=${ANTHRO_KEY}
-      DISPLAY=:99
-      ENVFILE
-      if [ -n "$BRAVE_KEY" ]; then
-        echo "BRAVE_API_KEY=${BRAVE_KEY}" >> $HOMEDIR/.clawdbot/.env
-      fi
-      if [ -n "$GPLACES_KEY" ]; then
-        echo "GOOGLE_PLACES_API_KEY=${GPLACES_KEY}" >> $HOMEDIR/.clawdbot/.env
-      fi
-      BRAVE_JSON=""
-      if [ -n "$BRAVE_KEY" ]; then
-        BRAVE_JSON="\"BRAVE_API_KEY\": \"${BRAVE_KEY}\","
-      fi
-      GPLACES_JSON=""
-      if [ -n "$GPLACES_KEY" ]; then
-        GPLACES_JSON="\"GOOGLE_PLACES_API_KEY\": \"${GPLACES_KEY}\","
-      fi
-      cat > $HOMEDIR/.clawdbot/clawdbot.json <<CLAWDCONFIG
-      {
-        "env": {
-          "ANTHROPIC_API_KEY": "${ANTHRO_KEY}",
-          ${BRAVE_JSON}
-          ${GPLACES_JSON}
-          "DISPLAY": ":99"
-        },
-        "browser": {
-          "enabled": true,
-          "executablePath": "/usr/bin/google-chrome-stable",
-          "headless": false,
-          "noSandbox": true,
-          "defaultProfile": "clawd"
-        },
-        "tools": {
-          "web": {
-            "search": {"enabled": true},
-            "fetch": {"enabled": true}
-          }
-        },
-        "messages": {"ackReactionScope": "group-mentions"},
-        "agents": {
-          "defaults": {
-            "model": {"primary": "anthropic/claude-opus-4-5"},
-            "maxConcurrent": 4,
-            "subagents": {"maxConcurrent": 8},
-            "compaction": {"mode": "safeguard"},
-            "workspace": "$HOMEDIR/clawd"
-          }
-        },
-        "gateway": {
-          "mode": "local",
-          "port": 18789,
-          "bind": "lan",
-          "controlUi": {"enabled": true, "allowInsecureAuth": true},
-          "auth": {"mode": "token", "token": "${GATEWAY_TOKEN}"},
-          "tailscale": {"mode": "off", "resetOnExit": false}
-        },
-        "auth": {
-          "profiles": {
-            "anthropic:default": {"provider": "anthropic", "mode": "api_key"}
-          }
-        },
-        "plugins": {"entries": {"telegram": {"enabled": true}}},
-        "channels": {
-          "telegram": {
-            "enabled": true,
-            "botToken": "${TG_BOT_TOKEN}",
-            "dmPolicy": "allowlist",
-            "allowFrom": ["${TG_USER_ID}"]
-          }
-        },
-        "skills": {"install": {"nodeManager": "npm"}},
-        "hooks": {"internal": {"enabled": true, "entries": {"boot-md": {"enabled": true}}}},
-        "wizard": {
-          "lastRunAt": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)",
-          "lastRunVersion": "2026.1.24-3",
-          "lastRunCommand": "cloud-init",
-          "lastRunMode": "local"
-        },
-        "meta": {
-          "lastTouchedVersion": "2026.1.24-3",
-          "lastTouchedAt": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-        }
-      }
-      CLAWDCONFIG
-      sed "s|__ANTHRO_KEY__|$ANTHRO_KEY|g" /tmp/templates/auth-profiles.json > $HOMEDIR/.clawdbot/agents/main/agent/auth-profiles.json
-      sed -e "s|__USERNAME__|$USERNAME|g" -e "s|__HOMEDIR__|$HOMEDIR|g" /tmp/templates/TOOLS.md > $HOMEDIR/clawd/TOOLS.md
-      cp /tmp/templates/HEARTBEAT.md $HOMEDIR/clawd/HEARTBEAT.md
-      echo "# USER.md - About Your Human" > $HOMEDIR/clawd/USER.md
-      echo "" >> $HOMEDIR/clawd/USER.md
-      if [ -n "$USER_REALNAME" ]; then
-        echo -n "- **Name:** " >> $HOMEDIR/clawd/USER.md
-        echo "$USER_REALNAME" | base64 -d >> $HOMEDIR/clawd/USER.md
-      else
-        echo "- **Name:** *(learn and fill in)*" >> $HOMEDIR/clawd/USER.md
-      fi
-      if [ -n "$USER_LOCATION" ]; then
-        echo -n "- **Location:** " >> $HOMEDIR/clawd/USER.md
-        echo "$USER_LOCATION" | base64 -d >> $HOMEDIR/clawd/USER.md
-      else
-        echo "- **Location:** *(learn and fill in)*" >> $HOMEDIR/clawd/USER.md
-      fi
-      echo "" >> $HOMEDIR/clawd/USER.md
-      echo "## Additional Context" >> $HOMEDIR/clawd/USER.md
-      if [ -n "$USER_NOTES" ]; then
-        echo "$USER_NOTES" | base64 -d >> $HOMEDIR/clawd/USER.md
-      else
-        echo "*(add notes as you learn about your human)*" >> $HOMEDIR/clawd/USER.md
-      fi
-      echo "" >> $HOMEDIR/clawd/USER.md
-      echo "---" >> $HOMEDIR/clawd/USER.md
-      echo "*Update this file as you learn. Respect privacy.*" >> $HOMEDIR/clawd/USER.md
-      echo "# IDENTITY.md - Who Am I?" > $HOMEDIR/clawd/IDENTITY.md
-      echo "" >> $HOMEDIR/clawd/IDENTITY.md
-      if [ -n "$BOT_NAME" ]; then
-        echo -n "- **Name:** " >> $HOMEDIR/clawd/IDENTITY.md
-        echo "$BOT_NAME" | base64 -d >> $HOMEDIR/clawd/IDENTITY.md
-      else
-        echo "- **Name:** *(choose your own)*" >> $HOMEDIR/clawd/IDENTITY.md
-      fi
-      echo "" >> $HOMEDIR/clawd/IDENTITY.md
-      echo "## About Me" >> $HOMEDIR/clawd/IDENTITY.md
-      if [ -n "$BOT_NOTES" ]; then
-        echo "$BOT_NOTES" | base64 -d >> $HOMEDIR/clawd/IDENTITY.md
-      else
-        echo "I'm an AI assistant living in a cloud VM with browser automation, email, calendar, and file access." >> $HOMEDIR/clawd/IDENTITY.md
-      fi
-      echo "" >> $HOMEDIR/clawd/IDENTITY.md
-      echo "---" >> $HOMEDIR/clawd/IDENTITY.md
-      echo "*This file is yours to evolve as you discover who you are.*" >> $HOMEDIR/clawd/IDENTITY.md
-      if [ -n "$BOOT_INSTRUCTIONS" ]; then
-        echo "$BOOT_INSTRUCTIONS" | base64 -d > $HOMEDIR/clawd/BOOTSTRAP.md
-        chown $USERNAME:$USERNAME $HOMEDIR/clawd/BOOTSTRAP.md
-      fi
-      chmod 700 $HOMEDIR/.clawdbot
-      chmod 600 $HOMEDIR/.clawdbot/clawdbot.json
-      chown -R $USERNAME:$USERNAME $HOMEDIR/.clawdbot
-      chown -R $USERNAME:$USERNAME $HOMEDIR/clawd
-      echo "Installing skills in parallel..." >> "$LOG"
+      SVC
+      echo -e "ANTHROPIC_API_KEY=${ANTHROPIC_KEY}\nDISPLAY=:99" > $HOMEDIR/.clawdbot/.env
+      [ -n "$BRAVE_KEY" ] && echo "BRAVE_API_KEY=${BRAVE_KEY}" >> $HOMEDIR/.clawdbot/.env
+      [ -n "$GPLACES_KEY" ] && echo "GOOGLE_PLACES_API_KEY=${GPLACES_KEY}" >> $HOMEDIR/.clawdbot/.env
+      BJ=""; [ -n "$BRAVE_KEY" ] && BJ="\"BRAVE_API_KEY\":\"${BRAVE_KEY}\","
+      GJ=""; [ -n "$GPLACES_KEY" ] && GJ="\"GOOGLE_PLACES_API_KEY\":\"${GPLACES_KEY}\","
+      cat > $HOMEDIR/.clawdbot/clawdbot.json <<CFG
+      {"env":{"ANTHROPIC_API_KEY":"${ANTHROPIC_KEY}",${BJ}${GJ}"DISPLAY":":99"},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":false,"noSandbox":true,"defaultProfile":"clawd"},"tools":{"web":{"search":{"enabled":true},"fetch":{"enabled":true}}},"messages":{"ackReactionScope":"group-mentions"},"agents":{"defaults":{"model":{"primary":"anthropic/claude-opus-4-5"},"maxConcurrent":4,"subagents":{"maxConcurrent":8},"compaction":{"mode":"safeguard"},"workspace":"$HOMEDIR/clawd"}},"gateway":{"mode":"local","port":18789,"bind":"lan","controlUi":{"enabled":true,"allowInsecureAuth":true},"auth":{"mode":"token","token":"${GATEWAY_TOKEN}"},"tailscale":{"mode":"off","resetOnExit":false}},"auth":{"profiles":{"anthropic:default":{"provider":"anthropic","mode":"api_key"}}},"plugins":{"entries":{"telegram":{"enabled":true}}},"channels":{"telegram":{"enabled":true,"botToken":"${TELEGRAM_BOT_TOKEN}","dmPolicy":"allowlist","allowFrom":["${TELEGRAM_USER_ID}"]}},"skills":{"install":{"nodeManager":"npm"}},"hooks":{"internal":{"enabled":true,"entries":{"boot-md":{"enabled":true}}}}}
+      CFG
+      cat > $HOMEDIR/.clawdbot/agents/main/agent/auth-profiles.json <<AP
+      {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${ANTHROPIC_KEY}"}}}
+      AP
+      echo -e "# USER.md - About Your Human\n" > $HOMEDIR/clawd/USER.md
+      [ -n "$USER_REALNAME_B64" ] && { echo -n "- **Name:** " >> $HOMEDIR/clawd/USER.md; echo "$USER_REALNAME_B64" | base64 -d >> $HOMEDIR/clawd/USER.md; echo "" >> $HOMEDIR/clawd/USER.md; } || echo "- **Name:** *(learn and fill in)*" >> $HOMEDIR/clawd/USER.md
+      [ -n "$USER_LOCATION_B64" ] && { echo -n "- **Location:** " >> $HOMEDIR/clawd/USER.md; echo "$USER_LOCATION_B64" | base64 -d >> $HOMEDIR/clawd/USER.md; echo "" >> $HOMEDIR/clawd/USER.md; } || echo "- **Location:** *(learn and fill in)*" >> $HOMEDIR/clawd/USER.md
+      echo -e "\n## Additional Context" >> $HOMEDIR/clawd/USER.md
+      [ -n "$USER_NOTES_B64" ] && echo "$USER_NOTES_B64" | base64 -d >> $HOMEDIR/clawd/USER.md || echo "*(add notes as you learn about your human)*" >> $HOMEDIR/clawd/USER.md
+      echo -e "\n---\n*Update this file as you learn. Respect privacy.*" >> $HOMEDIR/clawd/USER.md
+      echo -e "# IDENTITY.md - Who Am I?\n" > $HOMEDIR/clawd/IDENTITY.md
+      [ -n "$BOT_NAME_B64" ] && { echo -n "- **Name:** " >> $HOMEDIR/clawd/IDENTITY.md; echo "$BOT_NAME_B64" | base64 -d >> $HOMEDIR/clawd/IDENTITY.md; echo "" >> $HOMEDIR/clawd/IDENTITY.md; } || echo "- **Name:** *(choose your own)*" >> $HOMEDIR/clawd/IDENTITY.md
+      echo -e "\n## About Me" >> $HOMEDIR/clawd/IDENTITY.md
+      [ -n "$BOT_NOTES_B64" ] && echo "$BOT_NOTES_B64" | base64 -d >> $HOMEDIR/clawd/IDENTITY.md || echo "I'm an AI assistant living in a cloud VM with browser automation, email, calendar, and file access." >> $HOMEDIR/clawd/IDENTITY.md
+      echo -e "\n---\n*This file is yours to evolve as you discover who you are.*" >> $HOMEDIR/clawd/IDENTITY.md
+      [ -n "$BOOT_INSTRUCTIONS_B64" ] && { echo "$BOOT_INSTRUCTIONS_B64" | base64 -d > $HOMEDIR/clawd/BOOTSTRAP.md; chown $USERNAME:$USERNAME $HOMEDIR/clawd/BOOTSTRAP.md; }
+      sed "s|__GATEWAY_TOKEN__|$GATEWAY_TOKEN|g" /tmp/templates/clawdbot-dashboard.desktop > $HOMEDIR/Desktop/clawdbot-dashboard.desktop
+      chmod +x $HOMEDIR/Desktop/clawdbot-dashboard.desktop
+      chmod 700 $HOMEDIR/.clawdbot; chmod 600 $HOMEDIR/.clawdbot/clawdbot.json
+      chown -R $USERNAME:$USERNAME $HOMEDIR/.clawdbot $HOMEDIR/clawd $HOMEDIR/Desktop
       SKILLS="video-frames goplaces weather github youtube-transcript yt-dlp-downloader-skill"
-      for skill in $SKILLS; do
-        su - $USERNAME -c "cd $HOMEDIR/clawd && clawdhub install $skill" >> "$LOG" 2>&1 &
-      done
-      wait
+      for s in $SKILLS; do su - $USERNAME -c "cd $HOMEDIR/clawd && clawdhub install $s" >> "$LOG" 2>&1 & done; wait
       find $HOMEDIR/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null
       chown -R $USERNAME:$USERNAME $HOMEDIR/clawd
-      mkdir -p $HOMEDIR/Desktop
-      sed -e "s|__GATEWAY_TOKEN__|$GATEWAY_TOKEN|g" -e "s|__HOMEDIR__|$HOMEDIR|g" /tmp/templates/clawdbot-dashboard.desktop > $HOMEDIR/Desktop/clawdbot-dashboard.desktop
-      cp /tmp/templates/view-automation.desktop $HOMEDIR/Desktop/view-automation.desktop
-      chmod +x $HOMEDIR/Desktop/*.desktop
-      chown -R $USERNAME:$USERNAME $HOMEDIR/Desktop
-      systemctl daemon-reload
-      systemctl enable clawdbot
-      systemctl start clawdbot
+      systemctl daemon-reload; systemctl enable clawdbot; systemctl start clawdbot
       echo "=== Clawdbot Setup Finished: $(date) ===" >> "$LOG"
 
-  - path: /usr/local/sbin/setup-productivity-tools.sh
-    owner: root:root
+  - path: /usr/local/sbin/setup-optional.sh
     permissions: "0755"
     content: |
-      #!/usr/bin/env bash
+      #!/bin/bash
       source /etc/droplet.env
-      HOMEDIR="/home/$USERNAME"
-      LOG="/var/log/productivity-tools-install.log"
-      echo "=== Productivity Tools Config Started: $(date) ===" > "$LOG"
-      mkdir -p $HOMEDIR/.config/himalaya
-      mkdir -p $HOMEDIR/.config/vdirsyncer
-      mkdir -p $HOMEDIR/.config/khal
-      mkdir -p $HOMEDIR/.config/rclone
-      mkdir -p $HOMEDIR/.local/share/vdirsyncer
-      mkdir -p $HOMEDIR/.local/share/khal
-      mkdir -p $HOMEDIR/Desktop
-      cp /tmp/templates/khal-config $HOMEDIR/.config/khal/config
-      cp /tmp/templates/thunderbird.desktop $HOMEDIR/Desktop/thunderbird.desktop
-      chmod +x $HOMEDIR/Desktop/thunderbird.desktop
-      if [ -n "$DROPBOX_TOK" ]; then
-        echo "Configuring rclone for Dropbox..." >> "$LOG"
-        cat > $HOMEDIR/.config/rclone/rclone.conf <<RCLONECONF
+      HOMEDIR="/home/$USERNAME"; LOG="/var/log/optional-setup.log"
+      echo "=== Optional Config Started: $(date) ===" > "$LOG"
+      mkdir -p $HOMEDIR/.config/{himalaya,vdirsyncer,rclone,gh} $HOMEDIR/.local/share/{vdirsyncer,khal/calendars}
+      if [ -n "$DROPBOX_TOKEN" ]; then
+        cat > $HOMEDIR/.config/rclone/rclone.conf <<RC
       [dropbox]
       type = dropbox
-      token = ${DROPBOX_TOK}
-      RCLONECONF
+      token = $DROPBOX_TOKEN
+      RC
         mkdir -p $HOMEDIR/Dropbox
-        cp /tmp/templates/dropbox.desktop $HOMEDIR/Desktop/dropbox.desktop
-        chmod +x $HOMEDIR/Desktop/dropbox.desktop
-        chown $USERNAME:$USERNAME $HOMEDIR/Dropbox
-        echo "Dropbox configured" >> "$LOG"
+        cat > $HOMEDIR/Desktop/dropbox.desktop <<DD
+      [Desktop Entry]
+      Version=1.0
+      Type=Application
+      Name=Dropbox
+      Exec=/usr/local/bin/mount-dropbox.sh
+      Icon=folder-remote
+      Terminal=false
+      DD
+        chmod +x $HOMEDIR/Desktop/dropbox.desktop; chown $USERNAME:$USERNAME $HOMEDIR/Dropbox
       fi
-      IMAP_H="${IMAP_HOST}"
-      SMTP_H="${SMTP_HOST}"
-      [ -z "$IMAP_H" ] && IMAP_H="imap.gmail.com"
-      [ -z "$SMTP_H" ] && SMTP_H="smtp.gmail.com"
-      if [ -n "$EMAIL" ] && [ -n "$EMAIL_PASS" ]; then
-        echo "Configuring himalaya..." >> "$LOG"
-        cat > $HOMEDIR/.config/himalaya/config.toml <<HIMALAYACONF
+      IMAP_H="${IMAP_HOST:-imap.gmail.com}"
+      if [ -n "$EMAIL" ] && [ -n "$EMAIL_PASSWORD" ]; then
+        cat > $HOMEDIR/.config/himalaya/config.toml <<HIM
       [accounts.default]
       email = "${EMAIL}"
       default = true
-
       backend.type = "imap"
       backend.host = "${IMAP_H}"
       backend.port = 993
       backend.encryption.type = "tls"
       backend.login = "${EMAIL}"
       backend.auth.type = "password"
-      backend.auth.raw = "${EMAIL_PASS}"
-
-      message.send.backend.type = "smtp"
-      message.send.backend.host = "${SMTP_H}"
-      message.send.backend.port = 587
-      message.send.backend.encryption.type = "start-tls"
-      message.send.backend.login = "${EMAIL}"
-      message.send.backend.auth.type = "password"
-      message.send.backend.auth.raw = "${EMAIL_PASS}"
-      HIMALAYACONF
-        echo "himalaya configured" >> "$LOG"
+      backend.auth.raw = "${EMAIL_PASSWORD}"
+      HIM
       fi
-
-      # Configure GitHub CLI if token provided
       if [ -n "$GH_TOKEN" ]; then
-        echo "Configuring GitHub CLI..." >> "$LOG"
-        mkdir -p $HOMEDIR/.config/gh
-        cat > $HOMEDIR/.config/gh/hosts.yml <<GHCONF
+        cat > $HOMEDIR/.config/gh/hosts.yml <<GH
       github.com:
           oauth_token: ${GH_TOKEN}
           git_protocol: https
           user: ""
-      GHCONF
-        chown -R $USERNAME:$USERNAME $HOMEDIR/.config/gh
+      GH
         chmod 600 $HOMEDIR/.config/gh/hosts.yml
-        echo "gh configured" >> "$LOG"
       fi
       if [ -n "$CALDAV_URL" ] && [ -n "$CALDAV_USER" ]; then
-        echo "Configuring vdirsyncer..." >> "$LOG"
-        cat > $HOMEDIR/.config/vdirsyncer/config <<VDIRSYNCERCONF
+        cat > $HOMEDIR/.config/vdirsyncer/config <<VD
       [general]
       status_path = "~/.local/share/vdirsyncer/status/"
-
       [pair calendar]
       a = "calendar_local"
       b = "calendar_remote"
       collections = ["from a", "from b"]
       metadata = ["color"]
-
       [storage calendar_local]
       type = "filesystem"
       path = "~/.local/share/khal/calendars/"
       fileext = ".ics"
-
       [storage calendar_remote]
       type = "caldav"
       url = "${CALDAV_URL}"
       username = "${CALDAV_USER}"
-      password = "${CALDAV_PASS}"
-      VDIRSYNCERCONF
-        mkdir -p $HOMEDIR/.local/share/khal/calendars
+      password = "${CALDAV_PASSWORD}"
+      VD
         mkdir -p $HOMEDIR/.local/share/vdirsyncer/status
-        chown -R $USERNAME:$USERNAME $HOMEDIR/.config/vdirsyncer
-        chown -R $USERNAME:$USERNAME $HOMEDIR/.local/share/vdirsyncer
-        chown -R $USERNAME:$USERNAME $HOMEDIR/.local/share/khal
         su - $USERNAME -c "yes | vdirsyncer discover" >> "$LOG" 2>&1 || true
         su - $USERNAME -c "vdirsyncer sync" >> "$LOG" 2>&1 || true
-        echo "vdirsyncer configured" >> "$LOG"
       fi
-      chown -R $USERNAME:$USERNAME $HOMEDIR/.config
-      chown -R $USERNAME:$USERNAME $HOMEDIR/.local
-      chown -R $USERNAME:$USERNAME $HOMEDIR/Desktop
-      echo "=== Productivity Tools Config Finished: $(date) ===" >> "$LOG"
+      chown -R $USERNAME:$USERNAME $HOMEDIR/.config $HOMEDIR/.local $HOMEDIR/Desktop
+      echo "=== Optional Config Finished: $(date) ===" >> "$LOG"
 
-  - path: /usr/local/bin/api_server.py
-    owner: root:root
+  - path: /usr/local/sbin/setup-services.sh
     permissions: "0755"
     content: |
-      #!/usr/bin/env python3
-      import http.server
-      import socketserver
-      import subprocess
-      import json
-      import re
-      import os
-
-      PORT = 8080
-      STAGES = {
-          0: "init",
-          1: "packages",
-          2: "credentials",
-          3: "chrome",
-          4: "desktop",
-          5: "clawdbot",
-          6: "productivity",
-          7: "cleanup",
-          8: "xrdp",
-          9: "reboot",
-          10: "ready"
-      }
-
-      def get_min_to_dest():
-          try:
-              with open('/etc/droplet.env', 'r') as f:
-                  for line in f:
-                      m = re.match(r'MIN_TO_DEST="(\d+)"', line.strip())
-                      if m:
-                          return int(m.group(1))
-          except:
-              pass
-          return 0
-
-      def get_status():
-          errors = []
-          if os.path.exists('/var/run/cloud-init-errors'):
-              try:
-                  with open('/var/run/cloud-init-errors', 'r') as f:
-                      errors = [l.strip() for l in f if l.strip()]
-              except:
-                  pass
-          stage = 0
-          try:
-              with open('/var/lib/cloud-browser/cloud-init-stage', 'r') as f:
-                  stage = int(f.read().strip())
-          except:
-              pass
-          return {
-              "stage": stage,
-              "desc": STAGES.get(stage, "unknown"),
-              "errors": errors
-          }
-
-      LOG_FILE = "/var/log/api-server-requests.log"
-
-      def log_request(path, status, client):
-          try:
-              from datetime import datetime
-              with open(LOG_FILE, 'a') as f:
-                  ts = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-                  f.write(f"{ts} {path} stage={status.get('stage','-')} desc={status.get('desc','-')} client={client}\n")
-          except:
-              pass
-
-      class Handler(http.server.BaseHTTPRequestHandler):
-          def log_message(self, *args):
-              pass
-          def do_GET(self):
-              if self.path == '/status':
-                  status = get_status()
-                  log_request('/status', status, self.client_address[0])
-                  self.send_response(200)
-                  self.send_header('Content-type', 'application/json')
-                  self.end_headers()
-                  self.wfile.write(json.dumps(status).encode())
-              elif self.path == '/timer':
-                  self.send_response(200)
-                  self.send_header('Content-type', 'application/json')
-                  self.end_headers()
-                  m = get_min_to_dest()
-                  self.wfile.write(json.dumps({"min_to_dest": m, "enabled": m > 0}).encode())
-              elif self.path == '/stages':
-                  self.send_response(200)
-                  self.send_header('Content-type', 'text/plain')
-                  self.end_headers()
-                  try:
-                      with open('/var/log/cloud-init-stages.log', 'r') as f:
-                          self.wfile.write(f.read().encode())
-                  except:
-                      self.wfile.write(b"No stage log available")
-              elif self.path == '/sync':
-                  self.send_response(200)
-                  self.send_header('Content-type', 'application/json')
-                  self.end_headers()
-                  try:
-                      result = subprocess.run("/usr/local/bin/sync-clawdbot-state.sh", shell=True, capture_output=True, timeout=60)
-                      self.wfile.write(json.dumps({"ok": result.returncode == 0}).encode())
-                  except Exception as e:
-                      self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
-              else:
-                  self.send_response(404)
-                  self.end_headers()
-          def do_POST(self):
-              if self.path == '/prepare-shutdown':
-                  self.send_response(200)
-                  self.send_header('Content-type', 'application/json')
-                  self.end_headers()
-                  try:
-                      # Sync memory to Dropbox
-                      sync_result = subprocess.run("/usr/local/bin/sync-clawdbot-state.sh", shell=True, capture_output=True, timeout=60)
-                      # Stop clawdbot gracefully (will also trigger ExecStop sync)
-                      subprocess.run("systemctl stop clawdbot", shell=True, timeout=30)
-                      self.wfile.write(json.dumps({"ok": sync_result.returncode == 0, "ready_for_shutdown": True}).encode())
-                  except Exception as e:
-                      self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
-              elif self.path == '/keepalive':
-                  self.send_response(200)
-                  self.send_header('Content-type', 'application/json')
-                  self.end_headers()
-                  try:
-                      subprocess.run("systemctl stop self-destruct.timer self-destruct.service 2>/dev/null; systemctl reset-failed self-destruct.timer 2>/dev/null; /usr/local/bin/schedule-destruct.sh", shell=True)
-                      self.wfile.write(json.dumps({"ok": True}).encode())
-                  except Exception as e:
-                      self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
-
-      class ReusableTCPServer(socketserver.TCPServer):
-          allow_reuse_address = True
-
-      with ReusableTCPServer(("", PORT), Handler) as httpd:
-          httpd.serve_forever()
-
-  - path: /usr/local/sbin/setup-desktop.sh
-    owner: root:root
-    permissions: "0755"
-    content: |
-      #!/usr/bin/env bash
-      source /etc/droplet.env
-      HOMEDIR="/home/$USERNAME"
-      echo "xfce4-session" > $HOMEDIR/.xsession
-      chown $USERNAME:$USERNAME $HOMEDIR/.xsession
-      mkdir -p $HOMEDIR/.config/autostart
-      # Extract BG_COLOR to user-readable file (droplet.env is root-only)
-      echo "BG_COLOR=\"${BG_COLOR}\"" > $HOMEDIR/.config/bg-color.env
-      chmod 644 $HOMEDIR/.config/bg-color.env
-      chown $USERNAME:$USERNAME $HOMEDIR/.config/bg-color.env
-      cp /tmp/templates/set-background.desktop $HOMEDIR/.config/autostart/
-      chown -R $USERNAME:$USERNAME $HOMEDIR/.config/autostart
+      #!/bin/bash
+      systemctl daemon-reload; systemctl enable xvfb; systemctl start xvfb
 
   - path: /usr/local/sbin/configure-xrdp.sh
-    owner: root:root
     permissions: "0755"
     content: |
-      #!/usr/bin/env bash
-      echo "#!/bin/sh" > /etc/xrdp/startwm.sh
-      echo "unset DBUS_SESSION_BUS_ADDRESS" >> /etc/xrdp/startwm.sh
-      echo "unset XDG_RUNTIME_DIR" >> /etc/xrdp/startwm.sh
-      echo "exec dbus-launch --exit-with-session startxfce4" >> /etc/xrdp/startwm.sh
+      #!/bin/bash
+      echo -e "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nunset XDG_RUNTIME_DIR\nexec dbus-launch --exit-with-session startxfce4" > /etc/xrdp/startwm.sh
       chmod 755 /etc/xrdp/startwm.sh
       sed -i 's/^X11DisplayOffset=.*/X11DisplayOffset=10/' /etc/xrdp/sesman.ini
-      systemctl unmask xrdp xrdp-sesman
-      systemctl enable xrdp
-      systemctl restart xrdp
+      systemctl unmask xrdp xrdp-sesman; systemctl enable xrdp; systemctl restart xrdp
 
 users:
   - default
@@ -1266,16 +651,16 @@ users:
 runcmd:
   - [ bash, -lc, "systemctl daemon-reload; systemctl enable --now api-server; ufw allow 8080/tcp" ]
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 1 packages; /usr/local/sbin/install-packages.sh" ]
-  - [ bash, -lc, "/usr/local/bin/set-stage.sh 2 credentials; /usr/local/sbin/apply-credentials.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 2 credentials; /usr/local/sbin/setup-user.sh" ]
   - [ bash, -lc, "/usr/local/bin/schedule-destruct.sh" ]
-  - [ bash, -lc, "/usr/local/bin/set-stage.sh 3 chrome; /usr/local/sbin/configure-chrome.sh" ]
-  - [ bash, -lc, "/usr/local/bin/set-stage.sh 4 desktop; /usr/local/sbin/setup-desktop.sh; /usr/local/sbin/setup-xvfb.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 3 chrome; /usr/local/sbin/setup-chrome.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 4 desktop; /usr/local/sbin/setup-services.sh" ]
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 5 clawdbot; /usr/local/sbin/setup-clawdbot.sh" ]
-  - [ bash, -lc, "/usr/local/bin/set-stage.sh 6 productivity; /usr/local/sbin/setup-productivity-tools.sh" ]
+  - [ bash, -lc, "/usr/local/bin/set-stage.sh 6 productivity; /usr/local/sbin/setup-optional.sh" ]
   - [ bash, -lc, "/usr/local/bin/restore-clawdbot-state.sh" ]
   - [ bash, -lc, "systemctl enable clawdbot-sync.timer; systemctl start clawdbot-sync.timer" ]
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 7 cleanup; apt-get purge -y xfce4-screensaver light-locker 2>/dev/null || true; ufw allow 18789/tcp" ]
-  - [ bash, -lc, "touch /var/lib/cloud-browser/setup-complete" ]
+  - [ bash, -lc, "touch /var/lib/init-status/setup-complete" ]
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 8 xrdp; /usr/local/sbin/configure-xrdp.sh" ]
   - [ bash, -lc, "systemctl enable unattended-upgrades; systemctl enable apt-daily.timer apt-daily-upgrade.timer" ]
   - [ bash, -lc, "/usr/local/bin/set-stage.sh 9 reboot; reboot" ]
