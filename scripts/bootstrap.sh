@@ -2,11 +2,14 @@
 # bootstrap.sh — fetch hatchery release tarball from GitHub and hand off to phase1
 set -euo pipefail
 
+# Source env vars so helpers (notify, etc.) and VERSION can resolve
+set -a; source /etc/droplet.env; source /etc/habitat-parsed.env 2>/dev/null || true; set +a
+
 REPO="dfrysinger/hatchery"
 INSTALL_DIR="/opt/hatchery"
 VERSION="${HATCHERY_VERSION:-}"
 [ -z "$VERSION" ] && [ -f /etc/hatchery-version ] && VERSION=$(cat /etc/hatchery-version)
-VERSION="${VERSION:-5.0.0}"
+VERSION="${VERSION:-main}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -101,4 +104,4 @@ chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null || true
 
 notify "bootstrap: hatchery ${VERSION} installed — starting phase1"
 log "Handing off to phase1-critical.sh"
-exec /usr/local/sbin/phase1-critical.sh
+/usr/local/sbin/phase1-critical.sh
