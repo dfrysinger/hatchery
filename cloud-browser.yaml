@@ -1,7 +1,7 @@
 #cloud-config
-# version: 2.50
-# Cloud Browser Config v2.50 - 2026-02-01
-# Added: GH_TOKEN for GitHub CLI, Gmail OAuth placeholders
+# version: 2.51
+# Cloud Browser Config v2.51 - 2026-02-01
+# Added: Email limitations to TOOLS.md template, GH_TOKEN, Gmail OAuth placeholders
 # Changed: BOOT.md -> BOOTSTRAP.md (one-time bootstrap)
 package_update: false
 package_upgrade: false
@@ -295,6 +295,14 @@ write_files:
       - User has RDP access on display :10
       - Virtual display :99 (Xvfb) available for invisible automation
       - Chrome is at `/usr/bin/google-chrome-stable`
+      
+      ### Email Limitations (DigitalOcean)
+      - **Direct SMTP is blocked** - DO blocks outbound port 25 by default
+      - Email must be sent via:
+        - **API** (SendGrid, Mailgun, Gmail API, etc.)
+        - **Authenticated SMTP on port 587** (current himalaya setup uses this)
+        - **Third-party relay/proxy**
+      - The current himalaya config uses Gmail SMTP on port 587 with app password, which works
       
       ### Package Installation
       - **Homebrew is NOT installed** - do not use `brew`
