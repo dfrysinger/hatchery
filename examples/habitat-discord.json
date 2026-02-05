@@ -1,0 +1,39 @@
+{
+  "name": "MyHabitat",
+  "domain": "mybot.example.com",
+  "destructMinutes": 0,
+  "bgColor": "2D3748",
+  "platform": "discord",
+  "discord": {
+    "serverId": "YOUR_DISCORD_SERVER_ID",
+    "ownerId": "YOUR_DISCORD_USER_ID"
+  },
+  "council": {
+    "groupName": "The Council",
+    "judge": "Opus"
+  },
+  "globalIdentity": "You are a helpful assistant running on a cloud VM.",
+  "globalBoot": "",
+  "globalBootstrap": "",
+  "globalSoul": "",
+  "globalAgents": "",
+  "globalUser": "- Name: Your Name",
+  "agents": [
+    {
+      "agent": "Claude",
+      "discordBotToken": "YOUR_CLAUDE_DISCORD_BOT_TOKEN"
+    },
+    {
+      "agent": "ChatGPT",
+      "discordBotToken": "YOUR_CHATGPT_DISCORD_BOT_TOKEN"
+    },
+    {
+      "agent": "Gemini",
+      "discordBotToken": "YOUR_GEMINI_DISCORD_BOT_TOKEN"
+    },
+    {
+      "agent": "OpusBot",
+      "discordBotToken": "YOUR_OPUS_DISCORD_BOT_TOKEN"
+    }
+  ]
+}
