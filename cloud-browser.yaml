@@ -1,13 +1,13 @@
 #cloud-config
-# version: 3.9.1
-# Droplet Init Config v3.9.1 - 2026-02-03
+# version: 3.10
+# Droplet Init Config v3.10 - 2026-02-03
 # Multi-agent council support, habitat-based memory, hot-reload council group
 # GPT-5.2 with reasoning_effort:high, Gemini 3 Pro Preview
-# v3.9.1: OpenAI OAuth (Codex) instead of API key
-# v3.9.1: Symlink TOOLS.md/USER.md from root to agent workspaces (shared env context)
-# v3.9.1: Sync/restore agent context files (SOUL.md, IDENTITY.md, AGENTS.md, HEARTBEAT.md)
-# v3.9.1: Auto-rename Telegram bots to [AgentName]Bot on boot
-# v3.9.1: Symlink auth-profiles.json to all agent directories (fixes multi-agent auth)
+# v3.10: OpenAI OAuth (Codex) instead of API key
+# v3.10: Symlink TOOLS.md/USER.md from root to agent workspaces (shared env context)
+# v3.10: Sync/restore agent context files (SOUL.md, IDENTITY.md, AGENTS.md, HEARTBEAT.md)
+# v3.10: Auto-rename Telegram bots to [AgentName]Bot on boot
+# v3.10: Symlink auth-profiles.json to all agent directories (fixes multi-agent auth)
 #
 # === PLACEHOLDER REFERENCE ===
 # Plaintext: USERNAME, BG_R, BG_G, BG_B
@@ -584,7 +584,7 @@ write_files:
    content: |
      #!/bin/bash
      LOG="/var/log/package-install.log"; T="/usr/local/bin/tlog.sh"
-     echo "=== v3.9.1 Package Install: $(date) ===" > "$LOG"
+     echo "=== v3.10 Package Install: $(date) ===" > "$LOG"
      $T start total_install
      $T start dl_chrome
      wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb &
@@ -677,7 +677,7 @@ write_files:
      A4N=$(d "$AGENT4_NAME_B64"); A4N="${A4N:-Opus}"; A4T=$(d "$AGENT4_BOT_TOKEN_B64")
      CGI=$(d "$COUNCIL_GROUP_ID_B64"); HN=$(d "$HABITAT_NAME_B64"); HN="${HN:-default}"
      H="/home/$USERNAME"; LOG="/var/log/clawdbot-setup.log"
-     echo "=== v3.9.1 Clawdbot Setup (OAuth): $(date) ===" > "$LOG"
+     echo "=== v3.10 Clawdbot Setup (OAuth): $(date) ===" > "$LOG"
      $T start total_clawdbot
      AC=1; [ -n "$A2T" ] && AC=$((AC+1)); [ -n "$A3T" ] && AC=$((AC+1)); [ -n "$A4T" ] && AC=$((AC+1))
      CE="false"; [ -n "$CGI" ] && CE="true"
