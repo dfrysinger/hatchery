@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # =============================================================================
-# api-server.py — Droplet Status API (HTTP server on port 8080)
+# api-server.py -- Droplet Status API (HTTP server on port 8080)
 # =============================================================================
 # Purpose:  Lightweight HTTP API exposing droplet provisioning status.
 #           Provides /status, /health, /stages (GET) and /sync,
 #           /prepare-shutdown (POST) endpoints.
 #
 # Endpoints:
-#   GET  /status  — Full status JSON (phase, stage, services, safe_mode)
-#   GET  /health  — Health check (200 if bot online, 503 if not)
-#   GET  /stages  — Raw init-stages.log text
-#   POST /sync    — Trigger clawdbot state sync to Dropbox
-#   POST /prepare-shutdown — Sync state and stop clawdbot for shutdown
+#   GET  /status  -- Full status JSON (phase, stage, services, safe_mode)
+#   GET  /health  -- Health check (200 if bot online, 503 if not)
+#   GET  /stages  -- Raw init-stages.log text
+#   POST /sync    -- Trigger clawdbot state sync to Dropbox
+#   POST /prepare-shutdown -- Sync state and stop clawdbot for shutdown
 #
 # Dependencies: systemctl, /usr/local/bin/sync-clawdbot-state.sh
 #

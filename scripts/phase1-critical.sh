@@ -1,18 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# phase1-critical.sh — Early boot: get bot online ASAP
+# phase1-critical.sh -- Early boot: get bot online ASAP
 # =============================================================================
 # Purpose:  Critical first phase of droplet provisioning. Installs Node.js,
 #           clawdbot, creates user account, generates minimal clawdbot.json
 #           config, starts the clawdbot gateway service, and notifies owner.
 #           Launches phase2-background.sh when complete.
 #
-# Inputs:   /etc/droplet.env — all B64-encoded secrets and config
-#           /etc/habitat-parsed.env — parsed habitat config (generated here)
+# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
+#           /etc/habitat-parsed.env -- parsed habitat config (generated here)
 #
-# Outputs:  /home/$USERNAME/.clawdbot/clawdbot.json — minimal bot config
-#           /etc/systemd/system/clawdbot.service — systemd unit
-#           /var/lib/init-status/phase1-complete — completion marker
+# Outputs:  /home/$USERNAME/.clawdbot/clawdbot.json -- minimal bot config
+#           /etc/systemd/system/clawdbot.service -- systemd unit
+#           /var/lib/init-status/phase1-complete -- completion marker
 #
 # Dependencies: parse-habitat.py, tg-notify.sh, set-stage.sh, npm, curl
 #

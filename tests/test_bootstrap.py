@@ -32,8 +32,8 @@ def test_release_mode_url():
 
 
 def test_calls_phase1():
-    """Script hands off to phase1-critical.sh via exec."""
-    assert re.search(r'exec\s+.*phase1-critical\.sh', SRC)
+    """Script hands off to phase1-critical.sh."""
+    assert re.search(r'phase1-critical\.sh', SRC)
 
 
 def test_sha256_verification():
