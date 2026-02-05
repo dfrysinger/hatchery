@@ -733,9 +733,14 @@ If a release tarball fails to download:
 
 A root-vs-bot permissions issue was identified in v3.20 that blocks VNC from working in some configurations. The fix was attempted but the v3.20 YAML failed for unrelated reasons, so the fix never propagated to v4.0+.
 
-**Current state on v4.4:** Services appear correctly configured (`User=bot` on xvfb/desktop/x11vnc, X10 socket owned by bot). However, the user reports the issue persists in some deployments. This needs investigation — likely a race condition where xrdp creates a session as root before the bot-owned Xvfb is ready, or a permissions mismatch on `/tmp/.X11-unix/X10`.
+**Root cause identified and fixed (2026-02-05):** `/run/user/<uid>` (XDG_RUNTIME_DIR) was never created for the `bot` user because systemd services don't trigger systemd-logind. Without it, D-Bus session bus fails → xfconfd can't connect → XFCE loads with "Unable to contact settings server" error.
 
-**Action item for v4.5:** Reproduce and fix. Add integration test for VNC connectivity.
+**Fix (apply to desktop.service):**
+1. Add `Environment=XDG_RUNTIME_DIR=/run/user/<uid>`
+2. Add `ExecStartPre=/bin/bash -c 'mkdir -p /run/user/<uid> && chown bot:bot /run/user/<uid> && chmod 700 /run/user/<uid>'`
+3. Change ExecStart to `dbus-launch --exit-with-session xfce4-session`
+
+**Action item:** Apply this fix in hatch.yaml immediately (v4.5 critical fix). Verified working on Habitat-1.
 
 ### What's Still Missing (future PRD revisions)
 - **iOS Shortcut PRD** — Map out and plan the Shortcut code side of the work. Significant refactoring needed. User will record new videos of Shortcuts for transcription → architectural diagram → PRD. Existing (slightly outdated) Shortcut code transcriptions in `Dropbox/Droplets/shortcuts/` with video recordings in `shortcuts/Videos/`. **This is a separate workstream and should be tracked as its own project.**
