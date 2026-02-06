@@ -121,7 +121,13 @@ exit 0
     )
 
     # Prepend PATH override so our fake curl is used
-    modified = f'export PATH="{os.path.join(tmp_dir, "bin")}:$PATH"\n' + modified
+    # Also isolate Discord DM cache per test run to avoid cross-test contamination.
+    dm_cache_path = os.path.join(tmp_dir, "discord-dm-cache")
+    modified = (
+        f'export PATH="{os.path.join(tmp_dir, "bin")}:$PATH"\n'
+        f'export DISCORD_DM_CACHE_FILE="{dm_cache_path}"\n'
+        + modified
+    )
 
     return modified, droplet_env, parsed_env, curl_log
 
