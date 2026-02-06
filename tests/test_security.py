@@ -135,6 +135,34 @@ class TestFirewallPolicy:
                         )
 
 
+class TestPortDocumentation:
+    """Ensure firewall port policy is documented and consistent."""
+
+    def test_allowed_ports_doc_exists(self):
+        """ALLOWED_PORTS.md must exist and define forbidden ports."""
+        content = read_file("docs/ALLOWED_PORTS.md")
+        assert content, "docs/ALLOWED_PORTS.md must exist"
+        assert "5900" in content, "Must document port 5900 as forbidden"
+        assert "Forbidden" in content, "Must have Forbidden Ports section"
+
+    def test_verify_script_exists(self):
+        """verify-firewall.sh must exist for runtime checks."""
+        content = read_file("scripts/verify-firewall.sh")
+        assert content, "scripts/verify-firewall.sh must exist"
+        assert "5900" in content, "Script must check for port 5900"
+        assert "FORBIDDEN_PORTS" in content, "Script must define FORBIDDEN_PORTS"
+
+    def test_verify_script_matches_docs(self):
+        """verify-firewall.sh forbidden ports must match documentation."""
+        doc = read_file("docs/ALLOWED_PORTS.md")
+        script = read_file("scripts/verify-firewall.sh")
+        
+        # Extract forbidden ports from both
+        for port in ['5900', '5901']:
+            assert port in doc, f"Port {port} must be in ALLOWED_PORTS.md"
+            assert port in script, f"Port {port} must be in verify-firewall.sh"
+
+
 class TestSecretsHandling:
     """Ensure secrets are not hardcoded."""
 
