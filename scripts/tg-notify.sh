@@ -38,17 +38,36 @@ send_discord() {
   local DBT="${AGENT1_DISCORD_BOT_TOKEN}"
   local DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
   [ -z "$DBT" ] || [ -z "$DOI" ] && return 1
-  # Create DM channel with owner
-  local DM_RESP
-  DM_RESP=$(curl -sf --max-time 10 \
-    -X POST "https://discord.com/api/v10/users/@me/channels" \
-    -H "Authorization: Bot ${DBT}" \
-    -H "Content-Type: application/json" \
-    -d "{\"recipient_id\":\"${DOI}\"}" 2>/dev/null)
-  [ -z "$DM_RESP" ] && return 1
-  local CHANNEL_ID
-  CHANNEL_ID=$(echo "$DM_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
-  [ -z "$CHANNEL_ID" ] && return 1
+
+  local CHANNEL_ID=""
+  local CACHE_FILE="/tmp/discord-dm-cache-${DOI}"
+  local CACHE_MAX_AGE=86400  # 24 hours in seconds
+
+  # Check cache first
+  if [ -f "$CACHE_FILE" ]; then
+    local CACHE_AGE=$(( $(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0) ))
+    if [ "$CACHE_AGE" -lt "$CACHE_MAX_AGE" ]; then
+      CHANNEL_ID=$(cat "$CACHE_FILE" 2>/dev/null)
+    fi
+  fi
+
+  # If no cached channel ID, fetch from API
+  if [ -z "$CHANNEL_ID" ]; then
+    local DM_RESP
+    DM_RESP=$(curl -sf --max-time 10 \
+      -X POST "https://discord.com/api/v10/users/@me/channels" \
+      -H "Authorization: Bot ${DBT}" \
+      -H "Content-Type: application/json" \
+      -d "{\"recipient_id\":\"${DOI}\"}" 2>/dev/null)
+    [ -z "$DM_RESP" ] && return 1
+
+    CHANNEL_ID=$(echo "$DM_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+    [ -z "$CHANNEL_ID" ] && return 1
+
+    # Cache the channel ID for future use
+    echo "$CHANNEL_ID" > "$CACHE_FILE" 2>/dev/null
+  fi
+
   # Send message to DM channel
   curl -sf --max-time 10 \
     -X POST "https://discord.com/api/v10/channels/${CHANNEL_ID}/messages" \
