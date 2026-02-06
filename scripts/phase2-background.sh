@@ -75,7 +75,8 @@ After=network.target
 [Service]
 Type=simple
 User=$USERNAME
-ExecStart=/usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac
+ExecStart=/bin/bash -c 'echo \$\$ > /tmp/xvfb.pid && exec /usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac'
+ExecStopPost=/bin/rm -f /tmp/xvfb.pid
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -118,7 +119,13 @@ chown -R $USERNAME:$USERNAME $H/.config
 systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc
 systemctl start xvfb
-sleep 2
+# Wait for Xvfb PID file and verify process is running (avoids cross-shell $! race)
+for i in {1..30}; do
+  if [ -f /tmp/xvfb.pid ] && kill -0 "$(cat /tmp/xvfb.pid 2>/dev/null)" 2>/dev/null; then
+    break
+  fi
+  sleep 0.5
+done
 systemctl start desktop
 sleep 3
 systemctl start x11vnc
