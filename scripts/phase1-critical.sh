@@ -58,7 +58,8 @@ DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
 DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
 GK=$(d "$GOOGLE_API_KEY_B64")
 A1N="$AGENT1_NAME"
-PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+# PLATFORM must be explicitly set - no silent defaults
+PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 GT=$(openssl rand -hex 24)
 mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
 echo "$GT" > $H/.clawdbot/gateway-token.txt
@@ -69,7 +70,12 @@ case "$PLATFORM" in
   telegram) TG_ENABLED="true" ;;
   discord)  DC_ENABLED="true" ;;
   both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
-  *)        TG_ENABLED="true" ;;
+  *)
+    echo "[build-minimal-config] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+    echo "  Valid options: telegram, discord, both" >&2
+    echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+    exit 1
+    ;;
 esac
 # Build plugins entries
 PLUGINS_JSON="\"telegram\":{\"enabled\":${TG_ENABLED}},\"discord\":{\"enabled\":${DC_ENABLED}}"

@@ -27,7 +27,8 @@ H="/home/$USERNAME"
 AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
 OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
 TUI=$(d "$TELEGRAM_USER_ID_B64")
-PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+# PLATFORM must be explicitly set - no silent defaults
+PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
 DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
 TG_ENABLED="false"; DC_ENABLED="false"
@@ -35,7 +36,12 @@ case "$PLATFORM" in
   telegram) TG_ENABLED="true" ;;
   discord)  DC_ENABLED="true" ;;
   both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
-  *)        TG_ENABLED="true" ;;
+  *)
+    echo "[build-full-config] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+    echo "  Valid options: telegram, discord, both" >&2
+    echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+    exit 1
+    ;;
 esac
 HN="${HABITAT_NAME:-default}"
 GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")

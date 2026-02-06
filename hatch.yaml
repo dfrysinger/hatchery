@@ -172,7 +172,8 @@ write_files:
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
       MSG="$1"
       [ -z "$MSG" ] && exit 1
       TG_OK=0; DC_OK=0
@@ -224,7 +225,10 @@ write_files:
           [ $TG_OK -ne 0 ] && [ $DC_OK -ne 0 ] && exit 1
           ;;
         *)
-          send_telegram; exit $?
+          echo "[tg-notify] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+          echo "  Valid options: telegram, discord, both" >&2
+          echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+          exit 1
           ;;
       esac
       exit 0
@@ -234,7 +238,8 @@ write_files:
       #!/bin/bash
       set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
       # Discord droplets don't have Telegram council config; no-op safely.
       if [ "$PLATFORM" = "discord" ]; then
         exit 0
@@ -349,7 +354,8 @@ write_files:
       DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
       GK=$(d "$GOOGLE_API_KEY_B64")
       A1N="$AGENT1_NAME"
-      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
       GT=$(openssl rand -hex 24)
       mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
       echo "$GT" > $H/.clawdbot/gateway-token.txt
@@ -360,7 +366,12 @@ write_files:
         telegram) TG_ENABLED="true" ;;
         discord)  DC_ENABLED="true" ;;
         both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
-        *)        TG_ENABLED="true" ;;
+        *)
+          echo "[build-minimal-config] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+          echo "  Valid options: telegram, discord, both" >&2
+          echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+          exit 1
+          ;;
       esac
       # Build plugins entries
       PLUGINS_JSON="\"telegram\":{\"enabled\":${TG_ENABLED}},\"discord\":{\"enabled\":${DC_ENABLED}}"
@@ -728,7 +739,8 @@ write_files:
       AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
       OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
       TUI=$(d "$TELEGRAM_USER_ID_B64")
-      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
       DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
       DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
       TG_ENABLED="false"; DC_ENABLED="false"
@@ -736,7 +748,12 @@ write_files:
         telegram) TG_ENABLED="true" ;;
         discord)  DC_ENABLED="true" ;;
         both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
-        *)        TG_ENABLED="true" ;;
+        *)
+          echo "[build-full-config] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+          echo "  Valid options: telegram, discord, both" >&2
+          echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+          exit 1
+          ;;
       esac
       HN="${HABITAT_NAME:-default}"
       GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
@@ -1347,7 +1364,8 @@ write_files:
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
       AC=${AGENT_COUNT:-1}
       HN="${HABITAT_NAME:-}"
       rename_telegram() {
@@ -1378,8 +1396,10 @@ write_files:
           log_discord_skip
           ;;
         *)
-          echo "[rename-bots] Unknown platform '${PLATFORM}', defaulting to telegram"
-          rename_telegram
+          echo "[rename-bots] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+          echo "  Valid options: telegram, discord, both" >&2
+          echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+          exit 1
           ;;
       esac
       exit 0

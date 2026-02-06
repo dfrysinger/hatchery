@@ -19,7 +19,8 @@ set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"; PLATFORM="${PLATFORM:-telegram}"
+# PLATFORM must be explicitly set - no silent defaults
+PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 MSG="$1"
 [ -z "$MSG" ] && exit 1
 TG_OK=0; DC_OK=0
@@ -71,7 +72,10 @@ case "$PLATFORM" in
     [ $TG_OK -ne 0 ] && [ $DC_OK -ne 0 ] && exit 1
     ;;
   *)
-    send_telegram; exit $?
+    echo "[tg-notify] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+    echo "  Valid options: telegram, discord, both" >&2
+    echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+    exit 1
     ;;
 esac
 exit 0
