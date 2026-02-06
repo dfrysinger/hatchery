@@ -270,7 +270,10 @@ class TestNotifyEdgeCases:
         # Script should exit 1 for empty message
         assert rc != 0
 
-    def test_unknown_platform_falls_back_to_telegram(self):
-        """Unknown platform should fall back to telegram."""
+    def test_unknown_platform_fails_fast(self):
+        """Unknown platform should fail with non-zero exit (TASK-1 fail-fast)."""
         rc, calls = run_notify(platform="unknown_platform")
-        assert any("api.telegram.org" in c for c in calls)
+        assert rc != 0, "Unknown PLATFORM should cause script to fail"
+        # Should NOT have made any API calls
+        assert not any("api.telegram.org" in c for c in calls), "Should not fall back to telegram"
+        assert not any("discord.com" in c for c in calls), "Should not fall back to discord"

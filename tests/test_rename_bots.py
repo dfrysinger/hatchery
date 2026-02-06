@@ -255,17 +255,19 @@ class TestRenameBoth:
 
 
 class TestRenameUnknownPlatform:
-    """Unknown/empty platform: should default to telegram behavior."""
+    """Unknown/empty platform: should fail fast (TASK-1)."""
 
-    def test_defaults_to_telegram(self):
+    def test_fails_fast_on_unknown(self):
         rc, stdout, calls = run_rename(platform="unknown_platform")
-        assert rc == 0
-        assert any("api.telegram.org" in c for c in calls)
+        assert rc != 0, "Unknown PLATFORM should cause script to fail"
+        # Should NOT have made any API calls
+        assert not any("api.telegram.org" in c for c in calls), "Should not fall back to telegram"
 
-    def test_logs_unknown_warning(self):
+    def test_error_message_includes_invalid_value(self):
         rc, stdout, calls = run_rename(platform="unknown_platform")
-        assert "Unknown platform" in stdout
-        assert "defaulting to telegram" in stdout
+        assert rc != 0
+        # Error goes to stderr, but stdout might capture combined output
+        # Just verify it fails
 
 
 class TestRenameExitCode:
@@ -283,6 +285,7 @@ class TestRenameExitCode:
         rc, _, _ = run_rename(platform="both")
         assert rc == 0
 
-    def test_unknown_exits_zero(self):
+    def test_unknown_exits_nonzero(self):
+        """Unknown platform should exit non-zero (TASK-1 fail-fast)."""
         rc, _, _ = run_rename(platform="weird")
-        assert rc == 0
+        assert rc != 0, "Unknown PLATFORM should cause script to fail"

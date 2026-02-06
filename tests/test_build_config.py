@@ -339,6 +339,150 @@ class TestBindings:
         assert da["agent3"]["token"] == "dc-3"
 
 
+class TestPlatformFailFast:
+    """Tests for fail-fast behavior on invalid PLATFORM values (TASK-1)."""
+
+    def test_empty_platform_fails(self):
+        """Empty PLATFORM should fail with non-zero exit."""
+        # Functions are defined at module level
+        import tempfile
+        import subprocess
+        
+        build_script = extract_build_script()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_script, home = make_stub_script(build_script, tmp_dir)
+            
+            env = os.environ.copy()
+            env["USERNAME"] = "bot"
+            env["PLATFORM"] = ""
+            env["PLATFORM_B64"] = ""
+            env["AGENT_COUNT"] = "1"
+            env["AGENT1_NAME"] = "Claude"
+            env["AGENT1_MODEL"] = "anthropic/claude-opus-4-5"
+            env["AGENT1_BOT_TOKEN"] = "test-token"
+            env["ANTHROPIC_KEY_B64"] = b64("sk-ant-test-key")
+            for key in ["GOOGLE_API_KEY_B64", "BRAVE_KEY_B64", "OPENAI_ACCESS_B64", 
+                        "OPENAI_REFRESH_B64", "OPENAI_EXPIRES_B64", "OPENAI_ACCOUNT_ID_B64",
+                        "DISCORD_GUILD_ID", "DISCORD_GUILD_ID_B64", "DISCORD_OWNER_ID", 
+                        "DISCORD_OWNER_ID_B64", "GLOBAL_IDENTITY_B64", "GLOBAL_BOOT_B64",
+                        "GLOBAL_BOOTSTRAP_B64", "GLOBAL_SOUL_B64", "GLOBAL_AGENTS_B64",
+                        "GLOBAL_USER_B64", "COUNCIL_GROUP_ID", "COUNCIL_GROUP_NAME", "COUNCIL_JUDGE"]:
+                env[key] = ""
+            env["TELEGRAM_USER_ID_B64"] = b64("12345")
+            env["HABITAT_NAME"] = "test-habitat"
+            
+            script_path = os.path.join(tmp_dir, "test-build.sh")
+            with open(script_path, "w") as f:
+                f.write("#!/bin/bash\nset -e\n")
+                f.write(config_script)
+            os.chmod(script_path, 0o755)
+            
+            result = subprocess.run(
+                ["bash", script_path],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            
+            assert result.returncode != 0, "Empty PLATFORM should cause script to fail"
+            assert "PLATFORM" in result.stderr, "Error should mention PLATFORM"
+
+    def test_invalid_platform_fails(self):
+        """Invalid PLATFORM value (e.g., 'slack') should fail with non-zero exit."""
+        # Functions are defined at module level
+        import tempfile
+        import subprocess
+        
+        build_script = extract_build_script()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_script, home = make_stub_script(build_script, tmp_dir)
+            
+            env = os.environ.copy()
+            env["USERNAME"] = "bot"
+            env["PLATFORM"] = "slack"
+            env["PLATFORM_B64"] = b64("slack")
+            env["AGENT_COUNT"] = "1"
+            env["AGENT1_NAME"] = "Claude"
+            env["AGENT1_MODEL"] = "anthropic/claude-opus-4-5"
+            env["AGENT1_BOT_TOKEN"] = "test-token"
+            env["ANTHROPIC_KEY_B64"] = b64("sk-ant-test-key")
+            for key in ["GOOGLE_API_KEY_B64", "BRAVE_KEY_B64", "OPENAI_ACCESS_B64", 
+                        "OPENAI_REFRESH_B64", "OPENAI_EXPIRES_B64", "OPENAI_ACCOUNT_ID_B64",
+                        "DISCORD_GUILD_ID", "DISCORD_GUILD_ID_B64", "DISCORD_OWNER_ID", 
+                        "DISCORD_OWNER_ID_B64", "GLOBAL_IDENTITY_B64", "GLOBAL_BOOT_B64",
+                        "GLOBAL_BOOTSTRAP_B64", "GLOBAL_SOUL_B64", "GLOBAL_AGENTS_B64",
+                        "GLOBAL_USER_B64", "COUNCIL_GROUP_ID", "COUNCIL_GROUP_NAME", "COUNCIL_JUDGE"]:
+                env[key] = ""
+            env["TELEGRAM_USER_ID_B64"] = b64("12345")
+            env["HABITAT_NAME"] = "test-habitat"
+            
+            script_path = os.path.join(tmp_dir, "test-build.sh")
+            with open(script_path, "w") as f:
+                f.write("#!/bin/bash\nset -e\n")
+                f.write(config_script)
+            os.chmod(script_path, 0o755)
+            
+            result = subprocess.run(
+                ["bash", script_path],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            
+            assert result.returncode != 0, "Invalid PLATFORM='slack' should cause script to fail"
+            assert "slack" in result.stderr, "Error should include the invalid value"
+            assert "telegram" in result.stderr.lower() or "discord" in result.stderr.lower(), \
+                "Error should list valid options"
+
+    def test_wrong_case_platform_fails(self):
+        """Wrong case PLATFORM (e.g., 'TELEGRAM') should fail with non-zero exit."""
+        # Functions are defined at module level
+        import tempfile
+        import subprocess
+        
+        build_script = extract_build_script()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_script, home = make_stub_script(build_script, tmp_dir)
+            
+            env = os.environ.copy()
+            env["USERNAME"] = "bot"
+            env["PLATFORM"] = "TELEGRAM"
+            env["PLATFORM_B64"] = b64("TELEGRAM")
+            env["AGENT_COUNT"] = "1"
+            env["AGENT1_NAME"] = "Claude"
+            env["AGENT1_MODEL"] = "anthropic/claude-opus-4-5"
+            env["AGENT1_BOT_TOKEN"] = "test-token"
+            env["ANTHROPIC_KEY_B64"] = b64("sk-ant-test-key")
+            for key in ["GOOGLE_API_KEY_B64", "BRAVE_KEY_B64", "OPENAI_ACCESS_B64", 
+                        "OPENAI_REFRESH_B64", "OPENAI_EXPIRES_B64", "OPENAI_ACCOUNT_ID_B64",
+                        "DISCORD_GUILD_ID", "DISCORD_GUILD_ID_B64", "DISCORD_OWNER_ID", 
+                        "DISCORD_OWNER_ID_B64", "GLOBAL_IDENTITY_B64", "GLOBAL_BOOT_B64",
+                        "GLOBAL_BOOTSTRAP_B64", "GLOBAL_SOUL_B64", "GLOBAL_AGENTS_B64",
+                        "GLOBAL_USER_B64", "COUNCIL_GROUP_ID", "COUNCIL_GROUP_NAME", "COUNCIL_JUDGE"]:
+                env[key] = ""
+            env["TELEGRAM_USER_ID_B64"] = b64("12345")
+            env["HABITAT_NAME"] = "test-habitat"
+            
+            script_path = os.path.join(tmp_dir, "test-build.sh")
+            with open(script_path, "w") as f:
+                f.write("#!/bin/bash\nset -e\n")
+                f.write(config_script)
+            os.chmod(script_path, 0o755)
+            
+            result = subprocess.run(
+                ["bash", script_path],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            
+            assert result.returncode != 0, "Wrong case PLATFORM='TELEGRAM' should cause script to fail"
+            assert "TELEGRAM" in result.stderr, "Error should include the invalid value"
+
+
 class TestConfigStructure:
     """Tests for overall config structure integrity."""
 
