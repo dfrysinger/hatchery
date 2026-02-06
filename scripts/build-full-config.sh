@@ -382,6 +382,10 @@ if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
   cat > "$DXML" <<BGXML
 <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="${R}"/><value type="double" value="${G}"/><value type="double" value="${B}"/><value type="double" value="1"/></property></property></property></property></property></channel>
 BGXML
+  # Reload desktop config if xfdesktop is running (for config rebuilds while desktop is active)
+  if pgrep -x xfdesktop >/dev/null 2>&1; then
+    DISPLAY=:10 su - $USERNAME -c "xfdesktop --reload" 2>/dev/null || true
+  fi
 fi
 chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
 chmod 700 $H/.clawdbot
