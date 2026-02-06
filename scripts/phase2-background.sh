@@ -11,7 +11,7 @@
 # Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
 #           /etc/habitat-parsed.env -- parsed habitat config
 #
-# Outputs:  Desktop environment on :10, XRDP on port 3389, VNC on 5900
+# Outputs:  Desktop environment on :10, XRDP on port 3389, VNC on 5900 (localhost only)
 #           Skills installed, full config built, state restored from Dropbox
 #           /var/lib/init-status/phase2-complete -- completion marker
 #
@@ -234,7 +234,7 @@ systemctl daemon-reload
 systemctl enable xrdp
 systemctl restart xrdp
 ufw allow 3389/tcp
-ufw allow 5900/tcp
+#ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
 $S 10 "finalizing"
 /usr/local/bin/restore-clawdbot-state.sh
 /usr/local/sbin/build-full-config.sh

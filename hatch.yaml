@@ -696,7 +696,7 @@ write_files:
       systemctl enable xrdp
       systemctl restart xrdp
       ufw allow 3389/tcp
-      ufw allow 5900/tcp
+      #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
       $S 10 "finalizing"
       /usr/local/bin/restore-clawdbot-state.sh
       /usr/local/sbin/build-full-config.sh

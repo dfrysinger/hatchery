@@ -237,7 +237,7 @@ class TestPlatformDiscord:
     def test_discord_accounts(self):
         config = run_build_config(platform="discord")
         assert "default" in config["channels"]["discord"]["accounts"]
-        assert config["channels"]["discord"]["accounts"]["default"]["botToken"] == "dc-token-1"
+        assert config["channels"]["discord"]["accounts"]["default"]["token"] == "dc-token-1"
 
     def test_discord_dm_config(self):
         config = run_build_config(platform="discord")
@@ -334,9 +334,9 @@ class TestBindings:
     def test_multi_agent_discord_accounts(self):
         config = run_build_config(platform="discord", agent_count=3, agents=self.MULTI_AGENTS)
         da = config["channels"]["discord"]["accounts"]
-        assert da["default"]["botToken"] == "dc-1"
-        assert da["agent2"]["botToken"] == "dc-2"
-        assert da["agent3"]["botToken"] == "dc-3"
+        assert da["default"]["token"] == "dc-1"
+        assert da["agent2"]["token"] == "dc-2"
+        assert da["agent3"]["token"] == "dc-3"
 
 
 class TestConfigStructure:
@@ -379,4 +379,4 @@ class TestConfigStructure:
         assert dc["enabled"] is True
         assert dc["guilds"]["guild-123"]["requireMention"] is True
         assert "owner-456" in dc["dm"]["allowFrom"]
-        assert dc["accounts"]["agent2"]["botToken"] == "dc-2"
+        assert dc["accounts"]["agent2"]["token"] == "dc-2"
