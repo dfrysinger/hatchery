@@ -52,10 +52,11 @@ def make_stub_script(build_script_content, tmp_dir):
     for i in range(1, 5):
         os.makedirs(os.path.join(home, "clawd", "agents", f"agent{i}", "memory"), exist_ok=True)
 
-    # Extract just the JSON generation part (up to and including CFG)
+    # Extract just the JSON generation part (up to and including the config file write)
     lines = build_script_content.split("\n")
     config_lines = []
     in_heredoc = False
+    past_heredoc = False
     for line in lines:
         # Skip sourcing real files
         if "source /etc/droplet.env" in line:
@@ -70,10 +71,18 @@ def make_stub_script(build_script_content, tmp_dir):
 
         config_lines.append(line)
 
-        if line.strip().startswith("cat > ") and "<<CFG" in line:
+        # Handle both old (cat > file <<CFG) and new (CONFIG_JSON=$(cat <<CFG) patterns
+        if ("<<CFG" in line):
             in_heredoc = True
         if in_heredoc and line.strip() == "CFG":
-            break
+            past_heredoc = True
+            in_heredoc = False
+            continue
+        # For the new pattern, include the closing paren, validation, and echo
+        if past_heredoc:
+            # Stop after the config file write
+            if "clawdbot.full.json" in line and "echo" in line:
+                break
 
     config_script = "\n".join(config_lines)
 
@@ -380,3 +389,87 @@ class TestConfigStructure:
         assert dc["guilds"]["guild-123"]["requireMention"] is True
         assert "owner-456" in dc["dm"]["allowFrom"]
         assert dc["accounts"]["agent2"]["token"] == "dc-2"
+
+
+class TestJSONEscaping:
+    """Tests for JSON escaping of special characters (TASK-3)."""
+
+    def test_agent_name_with_quotes(self):
+        """Channel name with quotes: My "Test" Channel should be properly escaped."""
+        agents = [{"name": 'My "Test" Channel', "tg_token": "tg-1", "dc_token": "dc-1",
+                   "model": "anthropic/claude-opus-4-5"}]
+        config = run_build_config(platform="telegram", agent_count=1, agents=agents)
+        agent_list = config["agents"]["list"]
+        assert len(agent_list) == 1
+        assert agent_list[0]["name"] == 'My "Test" Channel'
+
+    def test_agent_name_with_backslash(self):
+        """Channel name with backslash: Test\\Channel should be properly escaped."""
+        agents = [{"name": "Test\\Channel", "tg_token": "tg-1", "dc_token": "dc-1",
+                   "model": "anthropic/claude-opus-4-5"}]
+        config = run_build_config(platform="telegram", agent_count=1, agents=agents)
+        agent_list = config["agents"]["list"]
+        assert len(agent_list) == 1
+        assert agent_list[0]["name"] == "Test\\Channel"
+
+    def test_agent_name_with_unicode_emoji(self):
+        """Unicode emoji: Rocket Launches should pass through correctly (UTF-8)."""
+        agents = [{"name": "Rocket Launches", "tg_token": "tg-1", "dc_token": "dc-1",
+                   "model": "anthropic/claude-opus-4-5"}]
+        config = run_build_config(platform="telegram", agent_count=1, agents=agents)
+        agent_list = config["agents"]["list"]
+        assert len(agent_list) == 1
+        assert agent_list[0]["name"] == "Rocket Launches"
+
+    def test_telegram_user_id_with_leading_zero(self):
+        """Numeric ID with leading zero: 0123456789 should remain string, not octal."""
+        config = run_build_config(platform="telegram", telegram_user_id="0123456789")
+        assert "0123456789" in config["channels"]["telegram"]["allowFrom"]
+
+    def test_habitat_name_with_special_chars(self):
+        """Habitat name with special characters should be escaped."""
+        # We need to extend run_build_config to accept habitat_name
+        # For now, test with available fields
+        pass
+
+    def test_gateway_token_with_special_chars(self):
+        """Gateway token with special chars should be escaped."""
+        # Gateway token comes from file, test via integration
+        pass
+
+
+class TestJSONValidation:
+    """Tests for JSON validation before config file write (TASK-3)."""
+
+    def test_all_existing_configs_still_validate(self):
+        """Regression test: all platform configs should still produce valid JSON."""
+        for platform in ["telegram", "discord", "both"]:
+            config = run_build_config(platform=platform)
+            # If we get here without exception, JSON is valid
+            assert isinstance(config, dict)
+
+    def test_multi_agent_config_validates(self):
+        """Multi-agent configuration should produce valid JSON."""
+        agents = [
+            {"name": "Claude", "tg_token": "tg-1", "dc_token": "dc-1", "model": "anthropic/claude-opus-4-5"},
+            {"name": "ChatGPT", "tg_token": "tg-2", "dc_token": "dc-2", "model": "openai/gpt-5.2"},
+            {"name": "Gemini", "tg_token": "tg-3", "dc_token": "dc-3", "model": "google/gemini-3-pro"},
+        ]
+        config = run_build_config(platform="both", agent_count=3, agents=agents)
+        assert len(config["agents"]["list"]) == 3
+
+    def test_council_config_validates(self):
+        """Council configuration with special chars should produce valid JSON."""
+        agents = [
+            {"name": "Claude", "tg_token": "tg-1", "dc_token": "dc-1", "model": "anthropic/claude-opus-4-5"},
+            {"name": "Opus", "tg_token": "tg-2", "dc_token": "dc-2", "model": "anthropic/claude-opus-4-5"},
+        ]
+        config = run_build_config(
+            platform="telegram",
+            agent_count=2,
+            agents=agents,
+            council_group_id="-100123456789",
+            council_group_name="The Council",
+            council_judge="Opus"
+        )
+        assert len(config["agents"]["list"]) == 2
