@@ -92,7 +92,7 @@ User=$USERNAME
 Environment=DISPLAY=:10
 Environment=HOME=$H
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
-ExecStartPre=/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
+ExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
 Restart=on-failure
