@@ -109,7 +109,8 @@ User=$USERNAME
 Environment=DISPLAY=:10
 ExecStartPre=/bin/sleep 3
 ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
-Restart=on-failure
+Restart=always
+RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SVC
