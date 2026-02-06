@@ -344,7 +344,7 @@ class TestPlatformFailFast:
 
     def test_empty_platform_fails(self):
         """Empty PLATFORM should fail with non-zero exit."""
-        from tests.test_build_config import extract_build_script, make_stub_script, b64
+        # Functions are defined at module level
         import tempfile
         import subprocess
         
@@ -390,7 +390,7 @@ class TestPlatformFailFast:
 
     def test_invalid_platform_fails(self):
         """Invalid PLATFORM value (e.g., 'slack') should fail with non-zero exit."""
-        from tests.test_build_config import extract_build_script, make_stub_script, b64
+        # Functions are defined at module level
         import tempfile
         import subprocess
         
@@ -438,7 +438,7 @@ class TestPlatformFailFast:
 
     def test_wrong_case_platform_fails(self):
         """Wrong case PLATFORM (e.g., 'TELEGRAM') should fail with non-zero exit."""
-        from tests.test_build_config import extract_build_script, make_stub_script, b64
+        # Functions are defined at module level
         import tempfile
         import subprocess
         
