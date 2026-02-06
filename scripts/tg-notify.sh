@@ -40,8 +40,8 @@ send_discord() {
   [ -z "$DBT" ] || [ -z "$DOI" ] && return 1
 
   local CHANNEL_ID=""
-  local CACHE_FILE="/tmp/discord-dm-cache-${DOI}"
-  local CACHE_MAX_AGE=86400  # 24 hours in seconds
+  local CACHE_FILE="${DISCORD_DM_CACHE_FILE:-/tmp/discord-dm-cache-${DOI}}"
+  local CACHE_MAX_AGE="${DISCORD_DM_CACHE_TTL:-86400}"  # default 24 hours
 
   # Check cache first
   if [ -f "$CACHE_FILE" ]; then
@@ -50,6 +50,32 @@ send_discord() {
       CHANNEL_ID=$(cat "$CACHE_FILE" 2>/dev/null)
     fi
   fi
+
+  atomic_write_cache() {
+    local path="$1"
+    local value="$2"
+
+    python3 - "$path" "$value" <<'PY'
+import os, sys, tempfile
+path = sys.argv[1]
+value = sys.argv[2]
+base_dir = os.path.dirname(os.path.abspath(path)) or "."
+os.makedirs(base_dir, exist_ok=True)
+fd, tmppath = tempfile.mkstemp(prefix=".tmp-", dir=base_dir)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(value)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmppath, path)
+except Exception:
+    try:
+        os.unlink(tmppath)
+    except Exception:
+        pass
+    raise
+PY
+  }
 
   # If no cached channel ID, fetch from API
   if [ -z "$CHANNEL_ID" ]; then
@@ -64,8 +90,8 @@ send_discord() {
     CHANNEL_ID=$(echo "$DM_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
     [ -z "$CHANNEL_ID" ] && return 1
 
-    # Cache the channel ID for future use
-    echo "$CHANNEL_ID" > "$CACHE_FILE" 2>/dev/null
+    # Cache the channel ID for future use (atomic)
+    atomic_write_cache "$CACHE_FILE" "$CHANNEL_ID" 2>/dev/null || true
   fi
 
   # Send message to DM channel
