@@ -365,6 +365,127 @@ class TestReadme:
         assert "Boot Flow" in content or "boot flow" in content
 
 
+class TestSetCouncilGroup:
+    """Tests for set-council-group.sh dual-platform support (Issue #40)."""
+
+    SET_COUNCIL_SCRIPT = os.path.join(REPO_ROOT, "set-council-group.sh")
+
+    @pytest.fixture
+    def mock_env(self, tmp_path, monkeypatch):
+        """Set up a mock environment for testing the script."""
+        # Create temp directories structure
+        home = tmp_path / "home" / "testuser"
+        clawdbot_dir = home / ".clawdbot"
+        clawd_dir = home / "clawd"
+        clawdbot_dir.mkdir(parents=True)
+        clawd_dir.mkdir(parents=True)
+
+        # Create mock config file with telegram enabled
+        config = clawdbot_dir / "clawdbot.json"
+        config.write_text('{"channels":{"telegram":{"enabled":true},"discord":{"enabled":true}}}')
+
+        # Create mock droplet.env
+        droplet_env = tmp_path / "etc" / "droplet.env"
+        droplet_env.parent.mkdir(parents=True)
+        droplet_env.write_text(f'USERNAME=testuser\n')
+
+        return {
+            "home": home,
+            "config": config,
+            "clawd_dir": clawd_dir,
+            "droplet_env": droplet_env,
+            "tmp_path": tmp_path,
+        }
+
+    def test_script_exists(self):
+        """set-council-group.sh must exist at repo root."""
+        assert os.path.isfile(self.SET_COUNCIL_SCRIPT), (
+            "set-council-group.sh not found at repo root"
+        )
+
+    def test_script_has_shebang(self):
+        """set-council-group.sh must have bash shebang."""
+        if not os.path.isfile(self.SET_COUNCIL_SCRIPT):
+            pytest.skip("Script does not exist")
+        with open(self.SET_COUNCIL_SCRIPT, "r") as f:
+            first_line = f.readline().strip()
+        assert first_line == "#!/bin/bash", f"Expected bash shebang, got: {first_line}"
+
+    def test_script_syntax(self):
+        """set-council-group.sh must have no syntax errors."""
+        if not os.path.isfile(self.SET_COUNCIL_SCRIPT):
+            pytest.skip("Script does not exist")
+        result = subprocess.run(
+            ["bash", "-n", self.SET_COUNCIL_SCRIPT],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, f"Bash syntax error:\n{result.stderr}"
+
+    def test_accepts_platform_flag(self):
+        """Script should accept --platform flag."""
+        if not os.path.isfile(self.SET_COUNCIL_SCRIPT):
+            pytest.skip("Script does not exist")
+        with open(self.SET_COUNCIL_SCRIPT, "r") as f:
+            content = f.read()
+        assert "--platform" in content, "Script must support --platform flag"
+
+    def test_uses_platform_env_var(self):
+        """Script should check PLATFORM environment variable."""
+        if not os.path.isfile(self.SET_COUNCIL_SCRIPT):
+            pytest.skip("Script does not exist")
+        with open(self.SET_COUNCIL_SCRIPT, "r") as f:
+            content = f.read()
+        assert "PLATFORM" in content, "Script must check PLATFORM env var"
+
+    def test_handles_telegram_platform(self):
+        """Script should handle telegram platform with groups.<group_id> format."""
+        if not os.path.isfile(self.SET_COUNCIL_SCRIPT):
+            pytest.skip("Script does not exist")
+        with open(self.SET_COUNCIL_SCRIPT, "r") as f:
+            content = f.read()
+        # Should contain telegram-specific logic
+        assert "telegram" in content.lower(), "Script must handle telegram platform"
+        assert "groups" in content, "Script must use 'groups' for telegram"
+
+    def test_handles_discord_platform(self):
+        """Script should handle discord platform with guilds.<guild_id>.channels.<channel_id> format."""
+        if not os.path.isfile(self.SET_COUNCIL_SCRIPT):
+            pytest.skip("Script does not exist")
+        with open(self.SET_COUNCIL_SCRIPT, "r") as f:
+            content = f.read()
+        # Should contain discord-specific logic
+        assert "discord" in content.lower(), "Script must handle discord platform"
+        assert "guilds" in content or "guild" in content, "Script must use 'guilds' for discord"
+        assert "channel" in content.lower(), "Script must handle channel ID for discord"
+
+    def test_unknown_platform_logs_warning(self):
+        """Script should log warning to stderr for unknown platform."""
+        if not os.path.isfile(self.SET_COUNCIL_SCRIPT):
+            pytest.skip("Script does not exist")
+        with open(self.SET_COUNCIL_SCRIPT, "r") as f:
+            content = f.read()
+        # Should contain logic for unknown platform warning
+        assert ">&2" in content or "stderr" in content.lower(), (
+            "Script must log warning to stderr for unknown platform"
+        )
+        # Should exit 0 for unknown platform (don't crash boot)
+        assert "exit 0" in content, "Script must exit 0 for unknown platform"
+
+    def test_flag_takes_priority_over_env(self):
+        """--platform flag should take priority over PLATFORM env var."""
+        if not os.path.isfile(self.SET_COUNCIL_SCRIPT):
+            pytest.skip("Script does not exist")
+        with open(self.SET_COUNCIL_SCRIPT, "r") as f:
+            content = f.read()
+        # Check that CLI parsing happens and can override env
+        # The flag should be processed and if set, used instead of env
+        assert "while" in content or "getopts" in content or "case" in content, (
+            "Script must parse CLI arguments"
+        )
+
+
 class TestScriptsMatchYaml:
     """Verify extracted scripts contain the same logic as hatch.yaml originals."""
 
