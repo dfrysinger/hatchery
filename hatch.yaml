@@ -1225,7 +1225,11 @@ write_files:
   - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
     defer: true
     content: |
-      <?xml version="1.0"?><channel name="xsettings" version="1.0"><property name="Net" type="empty"><property name="ThemeName" type="string" value="Adwaita-dark"/><property name="IconThemeName" type="string" value="Yaru-blue-dark"/></property></channel>
+      <?xml version="1.0"?><channel name="xsettings" version="1.0"><property name="Net" type="empty"><property name="ThemeName" type="string" value="Yaru-blue-dark"/><property name="IconThemeName" type="string" value="Yaru-blue-dark"/></property></channel>
+  - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+    defer: true
+    content: |
+      <?xml version="1.0"?><channel name="xfwm4" version="1.0"><property name="general" type="empty"><property name="theme" type="string" value="Yaru-blue-dark"/></property></channel>
   - path: /home/bot/clawd/TOOLS.md
     defer: true
     content: |
