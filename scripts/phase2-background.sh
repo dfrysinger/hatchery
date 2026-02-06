@@ -78,7 +78,7 @@ User=$USERNAME
 ExecStart=/usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac
 Restart=always
 [Install]
-WantedBy=multi-user.target
+# WantedBy removed - started explicitly after phase2 completes
 SVC
 cat > /etc/systemd/system/desktop.service <<SVC
 [Unit]
@@ -111,17 +111,17 @@ ExecStartPre=/bin/sleep 3
 ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
 Restart=on-failure
 [Install]
-WantedBy=multi-user.target
+# WantedBy removed - started explicitly after phase2 completes
 SVC
 mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
 chown -R $USERNAME:$USERNAME $H/.config
 systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc
-systemctl start xvfb
-sleep 2
-systemctl start desktop
-sleep 3
-systemctl start x11vnc
+# Moved to end: systemctl start xvfb
+# sleep 2
+# Moved to end: systemctl start desktop
+# sleep 3
+# Moved to end: systemctl start x11vnc
 mkdir -p $H/Desktop
 cat > $H/Desktop/google-chrome.desktop <<'DESK'
 [Desktop Entry]
@@ -241,6 +241,15 @@ $S 10 "finalizing"
 systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 systemctl enable clawdbot-sync.timer 2>/dev/null || true
 systemctl start clawdbot-sync.timer 2>/dev/null || true
+# Start desktop services now that everything is installed
+$S 9 "starting-desktop"
+systemctl start xvfb
+sleep 2
+systemctl start desktop
+sleep 3
+systemctl start x11vnc
+systemctl restart xrdp
+
 touch /var/lib/init-status/phase2-complete
 touch /var/lib/init-status/needs-post-boot-check
 GT=$(cat /home/bot/.clawdbot/gateway-token.txt 2>/dev/null)
