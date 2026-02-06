@@ -94,7 +94,8 @@ Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
 ExecStartPre=/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
-Restart=on-failure
+Restart=always
+RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SVC
@@ -109,7 +110,8 @@ User=$USERNAME
 Environment=DISPLAY=:10
 ExecStartPre=/bin/sleep 3
 ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
-Restart=on-failure
+Restart=always
+RestartSec=5
 [Install]
 # WantedBy removed - started explicitly after phase2 completes
 SVC
