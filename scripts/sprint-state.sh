@@ -2,7 +2,7 @@
 # =============================================================================
 # sprint-state.sh -- Manage sprint-state.json for EL crash recovery
 # =============================================================================
-# Requires: bash, jq, python3
+# Requires: bash, jq, python3, flock
 #
 # Commands:
 #   init <SPRINT>
@@ -13,6 +13,7 @@
 #
 # Env:
 #   SPRINT_STATE_FILE (default: sprint-state.json)
+#   SPRINT_STATE_LOCK_FILE (default: ${SPRINT_STATE_FILE}.lock)
 # =============================================================================
 set -euo pipefail
 
@@ -26,6 +27,7 @@ need() {
 }
 need jq
 need python3
+need flock
 
 now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
@@ -66,6 +68,22 @@ finally:
 PY
 }
 
+LOCK_FILE="${SPRINT_STATE_LOCK_FILE:-${STATE_FILE}.lock}"
+
+with_lock() {
+  local lock_dir
+  lock_dir=$(dirname "$LOCK_FILE")
+  mkdir -p "$lock_dir" 2>/dev/null || true
+
+  exec 9>"$LOCK_FILE"
+  flock -x 9
+  "$@"
+  local rc=$?
+  flock -u 9 || true
+  exec 9>&-
+  return $rc
+}
+
 read_state_or_init_empty() {
   if [ -f "$STATE_FILE" ]; then
     if ! jq -e . "$STATE_FILE" >/dev/null 2>&1; then
@@ -83,7 +101,6 @@ read_state_or_init_empty() {
 
 write_state_json() {
   local json="$1"
-  # Validate before writing
   echo "$json" | jq -e . >/dev/null
   atomic_write "$STATE_FILE" "$json"
 }
@@ -101,13 +118,35 @@ EOF
 }
 
 cmd="${1:-}"
+
+op_init() {
+  local sprint="$1"
+  local json
+  json=$(read_state_or_init_empty | jq --arg sprint "$sprint" --arg started "$(now_iso)" '
+    .sprint=$sprint | .started=$started | (.tasks //= {})
+  ')
+  write_state_json "$json"
+}
+
+op_update() {
+  local task="$1" status="$2" worker="$3" pr="$4"
+  local json
+  json=$(read_state_or_init_empty | jq --arg task "$task" --arg status "$status" \
+    --arg worker "$worker" --arg pr "$pr" '
+    .tasks //= {} |
+    .tasks[$task] = {
+      status: $status,
+      worker: (if $worker=="" then null else $worker end),
+      pr: (if $pr=="" then null else $pr end)
+    }
+  ')
+  write_state_json "$json"
+}
+
 case "$cmd" in
   init)
     sprint="${2:-}"; [ -z "$sprint" ] && usage
-    json=$(read_state_or_init_empty | jq --arg sprint "$sprint" --arg started "$(now_iso)" '
-      .sprint=$sprint | .started=$started | (.tasks //= {})
-    ')
-    write_state_json "$json"
+    with_lock op_init "$sprint"
     ;;
 
   update)
@@ -115,25 +154,13 @@ case "$cmd" in
     [ -z "$task" ] || [ -z "$status" ] && usage
     case "$status" in
       pending|assigned|in_progress|blocked|done|failed) ;;
-      *)
-        echo "[sprint-state] ERROR: invalid status '$status'" >&2
-        exit 1
-        ;;
+      *) echo "[sprint-state] ERROR: invalid status '$status'" >&2; exit 1 ;;
     esac
-
-    json=$(read_state_or_init_empty | jq --arg task "$task" --arg status "$status" \
-      --arg worker "$worker" --arg pr "$pr" '
-      .tasks //= {} |
-      .tasks[$task] = {
-        status: $status,
-        worker: (if $worker=="" then null else $worker end),
-        pr: (if $pr=="" then null else $pr end)
-      }
-    ')
-    write_state_json "$json"
+    with_lock op_update "$task" "$status" "$worker" "$pr"
     ;;
 
   get)
+    # reads can be unlocked; but if you want strict consistency, wrap in lock.
     read_state_or_init_empty | jq .
     ;;
 
@@ -144,12 +171,8 @@ case "$cmd" in
 
   list-tasks)
     status="${2:-}"; [ -z "$status" ] && usage
-    read_state_or_init_empty | jq -r --arg status "$status" '
-      (.tasks // {}) | to_entries[] | select(.value.status==$status) | .key
-    '
+    read_state_or_init_empty | jq -r --arg status "$status" '(.tasks // {}) | to_entries[] | select(.value.status==$status) | .key'
     ;;
 
-  *)
-    usage
-    ;;
+  *) usage ;;
 esac
