@@ -592,10 +592,16 @@ write_files:
       systemctl daemon-reload
       systemctl enable xvfb desktop x11vnc
       systemctl start xvfb
-      # Wait for Xvfb PID file and verify process is running (avoids cross-shell $! race)
+      # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
       for i in {1..30}; do
-        if [ -f /tmp/xvfb.pid ] && kill -0 "$(cat /tmp/xvfb.pid 2>/dev/null)" 2>/dev/null; then
-          break
+        if [ -f /tmp/xvfb.pid ]; then
+          XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+          # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+          if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+            if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+              break
+            fi
+          fi
         fi
         sleep 0.5
       done
