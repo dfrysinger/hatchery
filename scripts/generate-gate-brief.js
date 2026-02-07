@@ -1,5 +1,47 @@
 #!/usr/bin/env node
 
+/**
+ * generate-gate-brief.js -- Generate executive code review briefs from council reports
+ * 
+ * Usage:
+ *   ./generate-gate-brief.js [--reports-dir DIR] [--pr NUMBER] [--output FILE] [--format md|json]
+ * 
+ * Error Handling:
+ * 
+ *   Missing Report Files:
+ *     - If --reports-dir doesn't exist, logs error and exits with code 1
+ *     - If no report files found in directory, logs warning and generates brief with PR context only
+ *     - Individual file read errors logged to stderr but don't halt execution
+ * 
+ *   GitHub API Failures:
+ *     - If GITHUB_TOKEN missing, logs error and exits with code 1
+ *     - If PR fetch fails (404, auth, network), logs error and continues without PR context
+ *     - Rate limit errors logged with helpful message (suggests waiting or using different token)
+ * 
+ *   Malformed Reports:
+ *     - Invalid markdown/formatting logged as warnings but included in output
+ *     - Missing required sections (title, findings) logged but report still processed
+ *     - Encoding issues handled gracefully with replacement characters
+ * 
+ *   Word Count Enforcement:
+ *     - Briefs exceeding 500 words are truncated at last complete sentence before limit
+ *     - Warning logged to stderr when truncation occurs
+ *     - Truncation indicator (…) added to output
+ * 
+ *   Output Failures:
+ *     - If --output file cannot be written (permissions, disk full), logs error and exits with code 2
+ *     - Stdout output failures not caught (rely on shell redirection)
+ * 
+ *   Unexpected Errors:
+ *     - Unhandled exceptions caught at top level, logged with stack trace, exit code 2
+ *     - Includes: JSON parse errors, regex failures, module load errors
+ * 
+ * Exit Codes:
+ *   0 - Success
+ *   1 - Expected error (missing files, invalid config, API auth failure)
+ *   2 - Unexpected error (I/O failures, system errors, crashes)
+ */
+
 const fs = require('fs');
 const path = require('path');
 const { Octokit } = require('@octokit/rest');
