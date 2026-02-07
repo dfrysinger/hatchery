@@ -1083,7 +1083,8 @@ write_files:
       If this is your first message since the system started, announce yourself:
       "[ONLINE] Ready and operational."
 
-      If you see a file called SAFE_MODE.md in your workspace, read and follow it.
+      If you see a file called SAFE_MODE.md in your workspace, read and follow it immediately.
+      If you see a file called BOOTSTRAP.md in your workspace, execute it once and delete it when done.
 
       Check these services silently. Only alert user if something is broken after 2 fix attempts:
       - systemctl is-active clawdbot
@@ -1352,9 +1353,11 @@ write_files:
     defer: true
     permissions: "0644"
     content: |
-      - If BOOTSTRAP.md exists, execute it first and delete when done.
-      - If BOOT.md exists, execute it on every heartbeat (do NOT delete).
-      - If SAFE_MODE.md exists, follow its instructions to repair the system.
+      # Keep this file empty (or with only comments) to skip heartbeat API calls.
+      # Add tasks below when you want the agent to check something periodically.
+      
+      # --- Hatchery checks ---
+      - If SAFE_MODE.md exists, follow its instructions immediately (backup check in case boot failed).
 
   - path: /etc/systemd/system/openclaw-restore.service
     permissions: "0644"

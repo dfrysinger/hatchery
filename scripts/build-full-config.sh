@@ -279,7 +279,8 @@ PARTICIPANT_PROTO
 If this is your first message since the system started, announce yourself:
 "[ONLINE] Ready and operational."
 
-If you see a file called SAFE_MODE.md in your workspace, read and follow it.
+If you see a file called SAFE_MODE.md in your workspace, read and follow it immediately.
+If you see a file called BOOTSTRAP.md in your workspace, execute it once and delete it when done.
 
 Check these services silently. Only alert user if something is broken after 2 fix attempts:
 - systemctl is-active clawdbot
