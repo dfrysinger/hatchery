@@ -1,0 +1,14 @@
+{
+  "name": "hatchery",
+  "version": "1.0.0",
+  "description": "OpenClaw agent provisioning and tooling",
+  "scripts": {
+    "test": "node --test tests/gate-brief.test.js",
+    "gate-brief": "node scripts/generate-gate-brief.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.0.2",
+    "glob": "^10.3.10",
+    "yargs": "^17.7.2"
+  }
+}
