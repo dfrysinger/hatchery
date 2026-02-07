@@ -10,10 +10,10 @@
 #   GET  /status  -- Full status JSON (phase, stage, services, safe_mode)
 #   GET  /health  -- Health check (200 if bot online, 503 if not)
 #   GET  /stages  -- Raw init-stages.log text
-#   POST /sync    -- Trigger clawdbot state sync to Dropbox
-#   POST /prepare-shutdown -- Sync state and stop clawdbot for shutdown
+#   POST /sync    -- Trigger openclaw state sync to Dropbox
+#   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown
 #
-# Dependencies: systemctl, /usr/local/bin/sync-clawdbot-state.sh
+# Dependencies: systemctl, /usr/local/bin/sync-openclaw-state.sh
 #
 # Original: /usr/local/bin/api-server.py (in hatch.yaml write_files)
 # =============================================================================
@@ -63,11 +63,11 @@ class H(http.server.BaseHTTPRequestHandler):
   def do_POST(self):
     if self.path=='/sync':
       self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-      try:r=subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
+      try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
       except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
     elif self.path=='/prepare-shutdown':
       self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-      try:subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
+      try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
       except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
     else:self.send_response(404);self.end_headers()
 class R(socketserver.TCPServer):allow_reuse_address=True
