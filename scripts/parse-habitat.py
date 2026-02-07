@@ -77,6 +77,7 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     f.write('GLOBAL_SOUL_B64="{}"\n'.format(b64(hab.get("globalSoul", ""))))
     f.write('GLOBAL_AGENTS_B64="{}"\n'.format(b64(hab.get("globalAgents", ""))))
     f.write('GLOBAL_USER_B64="{}"\n'.format(b64(hab.get("globalUser", ""))))
+    f.write('GLOBAL_TOOLS_B64="{}"\n'.format(b64(hab.get("globalTools", ""))))
     agents = hab.get("agents", [])
     f.write('AGENT_COUNT={}\n'.format(len(agents)))
     for i, agent_ref in enumerate(agents):
