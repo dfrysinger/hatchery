@@ -75,18 +75,47 @@ def parse_sprint_state(state: Dict[str, Any]) -> Dict[str, Any]:
     in_progress = []
     blocked = []
     up_next = []
+    unrecognized_statuses = set()
+    
+    # Standardized status mapping
+    STATUS_MAP = {
+        'done': 'completed',
+        'completed': 'completed',
+        'merged': 'completed',
+        'in-progress': 'in_progress',
+        'in_progress': 'in_progress',
+        'assigned': 'in_progress',
+        'blocked': 'blocked',
+        'not-started': 'not_started',
+        'not_started': 'not_started',
+        'pending': 'not_started'
+    }
     
     for task in tasks:
         status = task.get('status', '').lower()
         
-        if status in ['done', 'completed', 'merged']:
+        normalized_status = STATUS_MAP.get(status)
+        
+        if normalized_status == 'completed':
             completed.append(task)
-        elif status in ['in-progress', 'in_progress', 'assigned']:
+        elif normalized_status == 'in_progress':
             in_progress.append(task)
-        elif status == 'blocked':
+        elif normalized_status == 'blocked':
             blocked.append(task)
-        elif status in ['not-started', 'not_started', 'pending']:
+        elif normalized_status == 'not_started':
             up_next.append(task)
+        else:
+            # Track unrecognized statuses
+            if status:
+                unrecognized_statuses.add(status)
+                # Default to up_next for unrecognized statuses
+                up_next.append(task)
+    
+    # Warn about unrecognized statuses
+    if unrecognized_statuses:
+        import sys
+        print(f"Warning: Unrecognized task statuses: {', '.join(unrecognized_statuses)}", file=sys.stderr)
+        print(f"Valid statuses: {', '.join(sorted(set(STATUS_MAP.keys())))}", file=sys.stderr)
     
     return {
         'release': sprint.get('release', 'Unknown'),
@@ -132,9 +161,49 @@ def format_task(task: Dict[str, Any], show_details: bool = True) -> str:
         if notes and len(notes) > 0:
             line += f" — {notes[0]}"
         elif blockers and len(blockers) > 0:
-            line += f" — {blockers[0]}"
+            # Handle blockers that may be objects with 'description' field
+            blocker = blockers[0]
+            if isinstance(blocker, dict):
+                blocker_text = blocker.get('description', str(blocker))
+            else:
+                blocker_text = str(blocker)
+            line += f" — {blocker_text}"
     
     return line
+
+
+def truncate_at_boundary(text: str, max_len: int = 1000) -> str:
+    """
+    Truncate text at section or sentence boundary to avoid broken markdown.
+    
+    Args:
+        text: Text to truncate
+        max_len: Maximum length (default: 1000 for Discord)
+        
+    Returns:
+        Truncated text with indicator
+    """
+    if len(text) <= max_len:
+        return text
+    
+    # Try to find last section boundary (## heading)
+    truncated = text[:max_len - 100]  # Leave room for ellipsis
+    section_pos = truncated.rfind('\n## ')
+    if section_pos > max_len * 0.5:  # At least 50% of content
+        return text[:section_pos] + "\n\n... (truncated)"
+    
+    # Fall back to sentence boundary
+    sentence_pos = max(truncated.rfind('. '), truncated.rfind('.\n'))
+    if sentence_pos > max_len * 0.5:
+        return text[:sentence_pos + 1] + "\n\n... (truncated)"
+    
+    # Last resort: word boundary
+    word_pos = truncated.rfind(' ')
+    if word_pos > 0:
+        return text[:word_pos] + "... (truncated)"
+    
+    # Emergency fallback
+    return text[:max_len - 15] + "... (truncated)"
 
 
 def format_standup(data: Dict[str, Any], date: str = None) -> str:
@@ -211,10 +280,8 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     
     output = "\n".join(lines)
     
-    # Enforce length limit (1000 chars for Discord)
-    if len(output) > 1000:
-        # Truncate and add indicator
-        output = output[:997] + "..."
+    # Enforce length limit (1000 chars for Discord) with smart boundary detection
+    output = truncate_at_boundary(output, max_len=1000)
     
     return output
 
@@ -244,9 +311,83 @@ def format_json(data: Dict[str, Any], date: str = None) -> str:
 
 def format_slack(data: Dict[str, Any], date: str = None) -> str:
     """Format standup report for Slack (mrkdwn)"""
-    # Slack uses mrkdwn, similar to markdown but with slight differences
-    # For now, use same format as markdown
-    return format_standup(data, date)
+    if date is None:
+        date = datetime.utcnow().strftime('%Y-%m-%d')
+    
+    release = data['release']
+    release_name = data['release_name']
+    completed = data['completed']
+    in_progress = data['in_progress']
+    blocked = data['blocked']
+    up_next = data['up_next']
+    
+    # Slack mrkdwn format (bold with asterisks, headers with bold)
+    lines = [
+        f"*Daily Standup — {date}*",
+        f"*Release:* {release} — {release_name}",
+        "",
+    ]
+    
+    # Completed
+    lines.append("*✅ Completed Yesterday*")
+    if completed:
+        for task in completed[:5]:
+            task_id = task.get('id', 'UNKNOWN')
+            title = task.get('title', 'No title')[:50]
+            assignee = task.get('assignee', '')
+            assignee_text = f" ({assignee})" if assignee else ""
+            lines.append(f"• {task_id}: {title}{assignee_text}")
+    else:
+        lines.append("• None")
+    lines.append("")
+    
+    # In Progress
+    lines.append("*🏗️ In Progress*")
+    if in_progress:
+        for task in in_progress[:5]:
+            task_id = task.get('id', 'UNKNOWN')
+            title = task.get('title', 'No title')[:50]
+            assignee = task.get('assignee', '')
+            assignee_text = f" ({assignee})" if assignee else ""
+            notes = task.get('notes', [])
+            note_text = f" — {notes[0]}" if notes else ""
+            lines.append(f"• {task_id}: {title}{assignee_text}{note_text}")
+    else:
+        lines.append("• None")
+    lines.append("")
+    
+    # Blocked
+    lines.append("*⏸️ Blocked*")
+    if blocked:
+        for task in blocked[:3]:
+            task_id = task.get('id', 'UNKNOWN')
+            title = task.get('title', 'No title')[:50]
+            assignee = task.get('assignee', '')
+            assignee_text = f" ({assignee})" if assignee else ""
+            blockers = task.get('blockers', [])
+            blocker_text = ""
+            if blockers:
+                blocker = blockers[0]
+                if isinstance(blocker, dict):
+                    blocker_text = f" — {blocker.get('description', '')}"
+                else:
+                    blocker_text = f" — {blocker}"
+            lines.append(f"• {task_id}: {title}{assignee_text}{blocker_text}")
+    else:
+        lines.append("• None")
+    lines.append("")
+    
+    # Up Next
+    lines.append("*📋 Up Next*")
+    if up_next:
+        for task in up_next[:3]:
+            task_id = task.get('id', 'UNKNOWN')
+            title = task.get('title', 'No title')[:50]
+            lines.append(f"• {task_id}: {title}")
+    else:
+        lines.append("• None")
+    
+    return "\n".join(lines)
 
 
 def parse_args(args=None):

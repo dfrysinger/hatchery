@@ -98,6 +98,45 @@ class TestSprintStateParser:
 class TestStandupFormatter:
     """Test standup report formatting"""
     
+    def test_format_task_with_blocker_dict(self):
+        """BUG-003: Handle blocker objects (not just strings)"""
+        task = {
+            "id": "TASK-99",
+            "title": "Test task",
+            "status": "blocked",
+            "assignee": "worker-1",
+            "blockers": [
+                {
+                    "description": "Tech stack mismatch",
+                    "resolution": "Updated task spec",
+                    "resolvedAt": "2026-02-07T21:24:00Z"
+                }
+            ]
+        }
+        
+        output = gs.format_task(task, show_details=True)
+        
+        # Should extract description from blocker object
+        assert "Tech stack mismatch" in output
+        assert "TASK-99" in output
+        assert "worker-1" in output
+    
+    def test_format_task_with_blocker_string(self):
+        """BUG-003: Still handle simple string blockers"""
+        task = {
+            "id": "TASK-98",
+            "title": "Test task",
+            "status": "blocked",
+            "assignee": "worker-2",
+            "blockers": ["Waiting for API keys"]
+        }
+        
+        output = gs.format_task(task, show_details=True)
+        
+        # Should handle string blocker
+        assert "Waiting for API keys" in output
+        assert "TASK-98" in output
+    
     def test_format_standup_basic(self):
         """AC2: Generate formatted standup with all sections"""
         data = {
