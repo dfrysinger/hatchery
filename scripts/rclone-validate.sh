@@ -71,7 +71,7 @@ _validate_one_path() {
     fi
   else
     # Expected local layout for this repo.
-    if ! echo "$p" | grep -Eq '^/home/[^/]+/(clawd|\.clawdbot)(/.*)?$'; then
+    if ! echo "$p" | grep -Eq '^/home/[^/]+/(clawd|\.openclaw)(/.*)?$'; then
       echo "ERROR: refusing rclone copy: ${role} local path is unexpected: '$p'" >&2
       return 1
     fi
