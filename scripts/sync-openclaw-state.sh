@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# sync-clawdbot-state.sh -- Sync bot memory and transcripts to Dropbox
+# sync-openclaw-state.sh -- Sync bot memory and transcripts to Dropbox
 # =============================================================================
 # Purpose:  Uploads MEMORY.md, USER.md, agent memory dirs, and session
 #           transcripts (*.jsonl) to Dropbox cloud storage for persistence.
@@ -13,7 +13,7 @@
 #
 # Dependencies: rclone, rclone-validate.sh
 #
-# Original: /usr/local/bin/sync-clawdbot-state.sh (in hatch.yaml write_files)
+# Original: /usr/local/bin/sync-openclaw-state.sh (in hatch.yaml write_files)
 # =============================================================================
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
@@ -60,7 +60,7 @@ done
 # Sync session transcripts
 for i in $(seq 1 $AC); do
     a="agent${i}"
-    SRC="$H/.clawdbot/agents/$a/sessions"
+    SRC="$H/.openclaw/agents/$a/sessions"
     DST="$R/agents/${a}/sessions/"
     if [ -d "$SRC" ]; then
         safe_rclone_su_copy "$USERNAME" "$SRC/" "$DST" --include '*.jsonl' 2>/dev/null || true

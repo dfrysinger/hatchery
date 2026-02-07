@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# restore-clawdbot-state.sh -- Restore bot memory and transcripts from Dropbox
+# restore-openclaw-state.sh -- Restore bot memory and transcripts from Dropbox
 # =============================================================================
 # Purpose:  Restores MEMORY.md, USER.md, agent memory dirs, and session
 #           transcripts (*.jsonl) from Dropbox cloud storage on boot.
@@ -12,13 +12,13 @@
 #
 # Outputs:  $HOME/clawd/MEMORY.md, USER.md -- shared memory files
 #           $HOME/clawd/agents/*/memory/ -- per-agent memory
-#           $HOME/.clawdbot/agents/*/sessions/*.jsonl -- chat transcripts
+#           $HOME/.openclaw/agents/*/sessions/*.jsonl -- chat transcripts
 #
 # Dependencies: rclone, tg-notify.sh, parse-habitat.py, rclone-validate.sh
 #
-# Original: /usr/local/bin/restore-clawdbot-state.sh (in hatch.yaml write_files)
+# Original: /usr/local/bin/restore-openclaw-state.sh (in hatch.yaml write_files)
 # =============================================================================
-LOG="/var/log/clawdbot-restore.log"
+LOG="/var/log/openclaw-restore.log"
 exec > >(tee -a "$LOG") 2>&1
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
@@ -77,7 +77,7 @@ done
 # Restore session transcripts
 for i in $(seq 1 $AC); do
     a="agent${i}"
-    TD="$H/.clawdbot/agents/$a/sessions"
+    TD="$H/.openclaw/agents/$a/sessions"
     mkdir -p "$TD"
     SRC="$R/agents/${a}/sessions/"
     DST="$TD/"
@@ -85,8 +85,8 @@ for i in $(seq 1 $AC); do
     safe_rclone_su_copy "$USERNAME" "$SRC" "$DST" --include '*.jsonl' -v || { echo "  WARN: $a sessions failed"; FAIL=$((FAIL+1)); }
 done
 
-chown -R "$USERNAME:$USERNAME" "$H/clawd" "$H/.clawdbot"
-TC=$(find "$H/.clawdbot" -name '*.jsonl' 2>/dev/null | wc -l)
+chown -R "$USERNAME:$USERNAME" "$H/clawd" "$H/.openclaw"
+TC=$(find "$H/.openclaw" -name '*.jsonl' 2>/dev/null | wc -l)
 echo "Restored $TC transcript files ($FAIL warnings)"
 MC=$(find "$H/clawd" -name 'MEMORY.md' -o -name 'USER.md' 2>/dev/null | xargs -I{} sh -c '[ -s "{}" ] && echo 1' | wc -l)
 
@@ -96,14 +96,14 @@ if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
     sleep 5
     for i in $(seq 1 $AC); do
         a="agent${i}"
-        TD="$H/.clawdbot/agents/$a/sessions"
+        TD="$H/.openclaw/agents/$a/sessions"
         mkdir -p "$TD"
         SRC="$R/agents/${a}/sessions/"
         DST="$TD/"
         safe_rclone_su_copy "$USERNAME" "$SRC" "$DST" --include '*.jsonl' -v || true
     done
-    chown -R "$USERNAME:$USERNAME" "$H/.clawdbot"
-    TC2=$(find "$H/.clawdbot" -name '*.jsonl' 2>/dev/null | wc -l)
+    chown -R "$USERNAME:$USERNAME" "$H/.openclaw"
+    TC2=$(find "$H/.openclaw" -name '*.jsonl' 2>/dev/null | wc -l)
     echo "After retry: $TC2 transcript files"
     TC=$TC2
 fi

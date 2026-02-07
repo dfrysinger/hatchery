@@ -6,7 +6,7 @@
 #           phase1 gets the bot online. Installs desktop environment (XFCE),
 #           developer tools, Chrome, configures VNC/XRDP remote access,
 #           installs skills, sets up email/calendar/Dropbox, builds full
-#           clawdbot config, and reboots.
+#           openclaw config, and reboots.
 #
 # Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
 #           /etc/habitat-parsed.env -- parsed habitat config
@@ -16,7 +16,7 @@
 #           /var/lib/init-status/phase2-complete -- completion marker
 #
 # Dependencies: apt-get, npm, set-stage.sh, build-full-config.sh,
-#               restore-clawdbot-state.sh, tg-notify.sh
+#               restore-openclaw-state.sh, tg-notify.sh
 #
 # Original: /usr/local/sbin/phase2-background.sh (in hatch.yaml write_files)
 # =============================================================================
@@ -260,7 +260,7 @@ systemctl restart xrdp
 ufw allow 3389/tcp
 #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
 $S 10 "finalizing"
-/usr/local/bin/restore-clawdbot-state.sh
+/usr/local/bin/restore-openclaw-state.sh
 /usr/local/sbin/build-full-config.sh
 systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 systemctl enable clawdbot-sync.timer 2>/dev/null || true
@@ -288,7 +288,7 @@ systemctl restart xrdp
 
 touch /var/lib/init-status/phase2-complete
 touch /var/lib/init-status/needs-post-boot-check
-GT=$(cat /home/bot/.clawdbot/gateway-token.txt 2>/dev/null)
+GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
 [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
   -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
   -d '{"mode":"now"}' >> "$LOG" 2>&1 || true

@@ -21,7 +21,7 @@ A complete operating manual for running an autonomous AI product organization in
 8. [Cost Governance](#8-cost-governance)
 9. [CI/CD Standards](#9-cicd-standards)
 10. [Security Policy](#10-security-policy)
-11. [Clawdbot Configuration](#11-clawdbot-configuration)
+11. [OpenClaw Configuration](#11-openclaw-configuration)
 12. [Failure Recovery](#12-failure-recovery)
 13. [Artifact Templates](#13-artifact-templates)
 14. [Implementation Roadmap](#14-implementation-roadmap)
@@ -697,7 +697,7 @@ When any agent flags a 🛑 security blocker:
 
 ---
 
-## 11. Clawdbot Configuration
+## 11. OpenClaw Configuration
 
 ### 11.1 Agent Architecture
 

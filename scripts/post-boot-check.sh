@@ -8,7 +8,7 @@
 #
 # Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
 #           /etc/habitat-parsed.env -- parsed habitat config
-#           $HOME/.clawdbot/clawdbot.full.json -- full config to apply
+#           $HOME/.openclaw/openclaw.full.json -- full config to apply
 #           /var/lib/init-status/needs-post-boot-check -- trigger file
 #
 # Outputs:  /var/lib/init-status/setup-complete -- on success
@@ -30,13 +30,13 @@ LOG="/var/log/post-boot-check.log"
   exit 0
 }
 sleep 15
-if [ ! -f "$H/.clawdbot/clawdbot.full.json" ]; then
+if [ ! -f "$H/.openclaw/openclaw.full.json" ]; then
   rm -f /var/lib/init-status/needs-post-boot-check
   exit 0
 fi
-cp "$H/.clawdbot/clawdbot.full.json" "$H/.clawdbot/clawdbot.json"
-chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
-chmod 600 "$H/.clawdbot/clawdbot.json"
+cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+chmod 600 "$H/.openclaw/openclaw.json"
 systemctl restart clawdbot
 HEALTHY=false
 for i in $(seq 1 12); do
@@ -61,17 +61,17 @@ if [ "$HEALTHY" = "true" ]; then
   HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
   $TG "[OK] ${HN}${HDOM} fully operational. Full config applied. All systems ready." || true
 else
-  cp "$H/.clawdbot/clawdbot.minimal.json" "$H/.clawdbot/clawdbot.json"
-  chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
-  chmod 600 "$H/.clawdbot/clawdbot.json"
+  cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+  chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+  chmod 600 "$H/.openclaw/openclaw.json"
   touch /var/lib/init-status/safe-mode
   for si in $(seq 1 $AC); do
   cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<'SAFEMD'
 # SAFE MODE - Full config failed health checks
-The full clawdbot config failed to start. You are running minimal config.
+The full openclaw config failed to start. You are running minimal config.
 Try: sudo /usr/local/bin/try-full-config.sh
 Check: journalctl -u clawdbot -n 100
-If that fails, check clawdbot.full.json for errors.
+If that fails, check openclaw.full.json for errors.
 SAFEMD
   chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
 done

@@ -2,7 +2,7 @@
 # =============================================================================
 # set-council-group.sh - Configure council group/channel for Telegram or Discord
 # =============================================================================
-# Purpose: Sets the council communication channel in clawdbot configuration.
+# Purpose: Sets the council communication channel in openclaw configuration.
 #          Supports both Telegram (groups) and Discord (guilds/channels).
 #
 # Usage:
@@ -77,7 +77,7 @@ set +a
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 
 H="/home/$USERNAME"
-CFG="$H/.clawdbot/clawdbot.json"
+CFG="$H/.openclaw/openclaw.json"
 
 # Validate config exists
 [ ! -f "$CFG" ] && { echo "Config not found: $CFG" >&2; exit 1; }
@@ -149,7 +149,7 @@ case "$PLATFORM" in
     ;;
 esac
 
-# Restart clawdbot service
+# Restart openclaw service
 systemctl restart clawdbot
 sleep 3
 

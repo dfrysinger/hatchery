@@ -41,11 +41,11 @@ def make_stub_script(build_script_content, tmp_dir):
     and stub out filesystem operations.
     """
     home = os.path.join(tmp_dir, "home", "bot")
-    clawdbot_dir = os.path.join(home, ".clawdbot")
-    os.makedirs(clawdbot_dir, exist_ok=True)
+    openclaw_dir = os.path.join(home, ".openclaw")
+    os.makedirs(openclaw_dir, exist_ok=True)
 
     # Create gateway token file
-    with open(os.path.join(clawdbot_dir, "gateway-token.txt"), "w") as f:
+    with open(os.path.join(openclaw_dir, "gateway-token.txt"), "w") as f:
         f.write("test-gateway-token-abc123")
 
     # Create agent dirs
@@ -81,7 +81,7 @@ def make_stub_script(build_script_content, tmp_dir):
         # For the new pattern, include the closing paren, validation, and echo
         if past_heredoc:
             # Stop after the config file write
-            if "clawdbot.full.json" in line and "echo" in line:
+            if "openclaw.full.json" in line and "echo" in line:
                 break
 
     config_script = "\n".join(config_lines)
@@ -95,8 +95,8 @@ def make_stub_script(build_script_content, tmp_dir):
 
     # Replace cat reading gateway token to handle missing file gracefully
     config_script = config_script.replace(
-        "GT=$(cat $H/.clawdbot/gateway-token.txt)",
-        "GT=$(cat $H/.clawdbot/gateway-token.txt 2>/dev/null || echo 'test-token')",
+        "GT=$(cat $H/.openclaw/gateway-token.txt)",
+        "GT=$(cat $H/.openclaw/gateway-token.txt 2>/dev/null || echo 'test-token')",
     )
 
     return config_script, home
@@ -172,7 +172,7 @@ def run_build_config(platform="telegram", agent_count=1, agents=None,
             pytest.fail(f"Script failed (rc={result.returncode}):\nstdout: {result.stdout}\nstderr: {result.stderr}")
 
         # Read the generated config
-        config_path = os.path.join(home, ".clawdbot", "clawdbot.full.json")
+        config_path = os.path.join(home, ".openclaw", "openclaw.full.json")
         if not os.path.exists(config_path):
             pytest.fail(f"Config file not created at {config_path}\nstdout: {result.stdout}\nstderr: {result.stderr}")
 

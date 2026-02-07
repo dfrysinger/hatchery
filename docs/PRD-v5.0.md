@@ -51,7 +51,7 @@ v5.0 is a structural overhaul that addresses all 13 findings from the council co
 
 - **Custom DO image (Packer)** — Deferred to v6.0. Worth pursuing but adds pipeline complexity.
 - **Multi-droplet coordination** — Identified as a blind spot; deferred to future version.
-- **Upstream clawdbot changes** — v5.0 must work with clawdbot as-is. No dependency on new upstream features.
+- **Upstream openclaw changes** — v5.0 must work with openclaw as-is. No dependency on new upstream features.
 - **Migration tooling for v4.4 → v5.0** — Users create fresh droplets; migration is not required.
 
 ### Model Fallbacks
@@ -60,7 +60,7 @@ Clawdbot natively supports model fallback chains via `agents.defaults.model.fall
 
 **Requirements:**
 - R2.1: Habitat JSON SHOULD support an optional `modelFallbacks` array per agent (e.g., `["anthropic/claude-sonnet-4", "google/gemini-3-pro-preview"]`).
-- R2.2: build-config.py MUST generate `model: { primary: "...", fallbacks: [...] }` in clawdbot.json when fallbacks are specified.
+- R2.2: build-config.py MUST generate `model: { primary: "...", fallbacks: [...] }` in openclaw.json when fallbacks are specified.
 - R2.3: If no fallbacks are specified per-agent, the global `agents.defaults.model.fallbacks` from the habitat config applies.
 - R2.4: This ensures that when a model hits rate limits, the agent automatically falls to the next model in the chain — maintaining availability for troubleshooting and conversation continuity.
 
@@ -70,7 +70,7 @@ Clawdbot natively supports model fallback chains via `agents.defaults.model.fall
 |------|--------|------------|
 | GitHub unavailable during bootstrap | Droplet stuck — no scripts fetched | Emergency inline fallback in YAML (§10.2), retry with backoff |
 | Telegram unavailable during setup | User has zero visibility | /status API always available; iOS Shortcut polls /status as backup |
-| npm registry down | clawdbot can't install | Retry loop (R5.1.1); emergency mode installs from cached .tgz in release tarball |
+| npm registry down | openclaw can't install | Retry loop (R5.1.1); emergency mode installs from cached .tgz in release tarball |
 | Dropbox token expired/invalid | No memory restore, sync fails silently | Explicit token validation in Phase 1; clear error to user (R9.2.1) |
 | Phase 1 interrupted mid-run | Partial state, broken droplet | All scripts must be idempotent (new R4.7.1) |
 | apt/dpkg lock contention | Phase 2 apt-get stalls or fails | Robust lock acquisition with timeout (new R4.7.2) |
@@ -172,12 +172,12 @@ cloud-init runcmd
        ├─ Extract to /opt/hatchery/
        └─ Exec /opt/hatchery/scripts/phase1.sh
             ├─ Install Node.js (from tarball, sequential, no race)
-            ├─ Install clawdbot (pinned version, with retry)
+            ├─ Install openclaw (pinned version, with retry)
             ├─ Create user, set up workspace
             ├─ Install rclone (static binary)
             ├─ Restore memory from Dropbox (MEMORY.md + latest transcripts)
             ├─ Generate minimal config (via build-config.py)
-            ├─ Start clawdbot → BOT ONLINE WITH CONTEXT
+            ├─ Start openclaw → BOT ONLINE WITH CONTEXT
             ├─ Schedule self-destruct (timer starts NOW, not at boot)
             └─ Launch phase2.sh in background
                  ├─ Desktop environment
@@ -200,7 +200,7 @@ hatchery/
 ├── docs/
 │   └── PRD-v5.0.md            # This document
 ├── scripts/
-│   ├── phase1.sh              # Critical path: Node → clawdbot → memory → bot online
+│   ├── phase1.sh              # Critical path: Node → openclaw → memory → bot online
 │   ├── phase2.sh              # Background: desktop, tools, VNC, full config
 │   ├── build-config.py        # Python config generator (replaces build-full-config.sh)
 │   ├── api-server.py          # Status/health API
@@ -296,7 +296,7 @@ hatchery/
 **Requirements:**
 - R4.4.1: No script SHALL use `set -e` without a corresponding ERR trap. `set -euo pipefail` combined with an ERR trap is acceptable and preferred over bare `set -e`.
 - R4.4.2: All scripts MUST define a trap handler: `trap 'error_handler $LINENO "$BASH_COMMAND"' ERR`
-- R4.4.3: The error handler MUST: log the failed command + line number, send Telegram notification, continue for non-critical failures, abort only for fatal failures (Node install, clawdbot install).
+- R4.4.3: The error handler MUST: log the failed command + line number, send Telegram notification, continue for non-critical failures, abort only for fatal failures (Node install, openclaw install).
 - R4.4.4: Each script MUST define which commands are fatal vs. non-fatal.
 - R4.4.5: On fatal failure, the handler MUST write a diagnostic SAFE_MODE.md with the specific error before exiting.
 
@@ -346,12 +346,12 @@ hatchery/
 2. parse-habitat.py (~1s)
 3. bootstrap.sh fetches + extracts release tarball (~5s)
 4. Node.js download + extract (~15s)
-5. `npm install -g clawdbot@<pinned>` with retry (~30s)
+5. `npm install -g openclaw@<pinned>` with retry (~30s)
 6. User creation + workspace setup (~2s)
 7. rclone binary download (~5s)
 8. Memory restore from Dropbox — MEMORY.md + 2 newest transcripts (~10s)
 9. build-config.py minimal config (~1s)
-10. Start clawdbot + verify health (~10s)
+10. Start openclaw + verify health (~10s)
 
 **Estimated total: ~80s**
 
@@ -368,7 +368,7 @@ hatchery/
 - R5.2.1: Phase 2 MUST NOT block or interfere with the running bot.
 - R5.2.2: Phase 2 MUST report progress via set-stage.sh (visible in /status API).
 - R5.2.3: Full transcript restore MUST happen in Phase 2.
-- R5.2.4: Phase 2 completion MUST trigger a clawdbot wake event to notify the bot.
+- R5.2.4: Phase 2 completion MUST trigger an openclaw wake event to notify the bot.
 
 ---
 
@@ -378,13 +378,13 @@ hatchery/
 
 **Problem:** In v4.4, the bot starts in Phase 1 but memory isn't restored until Phase 2. The bot's first interactions lack any prior context.
 
-**Solution:** Lightweight memory restore in Phase 1, before clawdbot starts.
+**Solution:** Lightweight memory restore in Phase 1, before openclaw starts.
 
 **Requirements:**
-- R6.1.1: Phase 1 MUST restore MEMORY.md and USER.md for all agents before starting clawdbot.
+- R6.1.1: Phase 1 MUST restore MEMORY.md and USER.md for all agents before starting openclaw.
 - R6.1.2: Phase 1 MUST restore the 2 most recent transcript files (.jsonl) per agent.
 - R6.1.3: Remaining transcripts MUST be restored in Phase 2 (background).
-- R6.1.4: BOOTSTRAP.md MUST be written before clawdbot starts, instructing the bot to read restored transcripts for context.
+- R6.1.4: BOOTSTRAP.md MUST be written before openclaw starts, instructing the bot to read restored transcripts for context.
 - R6.1.5: If Dropbox is unreachable, Phase 1 MUST continue without blocking. Log the failure and retry in Phase 2.
 
 ### 6.2 Sync Reliability
@@ -427,37 +427,37 @@ hatchery/
 - R7.2.1: GET endpoints (`/status`, `/health`, `/stages`) MUST remain public (no secrets exposed).
 - R7.2.2: POST endpoints (`/sync`, `/prepare-shutdown`) MUST require `Authorization: Bearer <gateway-token>`.
 - R7.2.3: Unauthorized POST requests MUST return 401 with no information leakage.
-- R7.2.4: api-server.py MUST read the gateway token from `/home/bot/.clawdbot/gateway-token.txt` (same token used by clawdbot gateway control UI). Token file is 0600, owned by bot user.
-- R7.2.5: GET `/status` MUST include: Hatchery version, Node version, clawdbot version, timestamps per stage, `last_error` field (last error message if any), and a human-readable `message` field.
+- R7.2.4: api-server.py MUST read the gateway token from `/home/bot/.openclaw/gateway-token.txt` (same token used by openclaw gateway control UI). Token file is 0600, owned by bot user.
+- R7.2.5: GET `/status` MUST include: Hatchery version, Node version, openclaw version, timestamps per stage, `last_error` field (last error message if any), and a human-readable `message` field.
 
 ### 7.3 Secrets Management (Finding #12)
 
 **Problem:** API keys in systemd `Environment=` lines are readable by any local user.
 
 **Requirements:**
-- R7.3.1: All secrets MUST be stored in `/home/bot/.clawdbot/.env` (existing file, 0600).
-- R7.3.2: Systemd service files MUST use `EnvironmentFile=/home/bot/.clawdbot/.env` instead of inline `Environment=` for secrets.
+- R7.3.1: All secrets MUST be stored in `/home/bot/.openclaw/.env` (existing file, 0600).
+- R7.3.2: Systemd service files MUST use `EnvironmentFile=/home/bot/.openclaw/.env` instead of inline `Environment=` for secrets.
 - R7.3.3: Non-secret environment variables (NODE_ENV, DISPLAY, PATH) MAY remain as inline `Environment=`.
-- R7.3.4: No secret values SHALL appear in systemd unit files, clawdbot.json, or any file readable by other users.
+- R7.3.4: No secret values SHALL appear in systemd unit files, openclaw.json, or any file readable by other users.
 
 ### 7.4 Firewall Hardening
 
 **Requirements:**
 - R7.4.1: Phase 1 MUST run `ufw default deny incoming` and `ufw --force enable` before opening any ports.
-- R7.4.2: Allowed ports: 22 (SSH), 80 (ACME challenges, only when HABITAT_DOMAIN set), 5900 (VNC), 6080 (noVNC), 8080 (status API). Port 18789 (clawdbot gateway) MUST bind to localhost by default; expose via ufw only if habitat config explicitly sets `exposeGateway: true`.
+- R7.4.2: Allowed ports: 22 (SSH), 80 (ACME challenges, only when HABITAT_DOMAIN set), 5900 (VNC), 6080 (noVNC), 8080 (status API). Port 18789 (openclaw gateway) MUST bind to localhost by default; expose via ufw only if habitat config explicitly sets `exposeGateway: true`.
 - R7.4.3: Port 3389 (RDP) is NOT opened by default. xrdp is retained in Phase 2 but port is only opened if habitat config sets `enableRDP: true`. VNC is the sole default remote access method.
 - R7.4.4: Install fail2ban with default SSH jail + custom jail for VNC auth failures (5 attempts → 10 min ban).
 
 ### 7.5 Supply Chain (Findings #4, #5)
 
 **Requirements:**
-- R7.5.1: clawdbot version MUST be pinned in `version.json`. Full schema:
+- R7.5.1: openclaw version MUST be pinned in `version.json`. Full schema:
   ```json
   {
     "version": "5.0.0",
     "file": "hatch.yaml",
     "deps": {
-      "clawdbot": {"version": "x.y.z"},
+      "openclaw": {"version": "x.y.z"},
       "node": {"version": "22.12.0", "sha256": "..."},
       "himalaya": {"version": "x.y.z", "sha256": "..."},
       "rclone": {"version": "x.y.z", "sha256": "..."},
@@ -495,7 +495,7 @@ hatchery/
 |------|--------|---------|
 | 1 | Create DO droplet (s-1vcpu-2gb) with test credentials | 60s |
 | 2 | Poll `/status` endpoint until `phase1_complete` | 3min |
-| 3 | Verify: clawdbot responds to API health check | 30s |
+| 3 | Verify: openclaw responds to API health check | 30s |
 | 4 | Poll `/status` until `setup_complete` | 10min |
 | 5 | Verify: VNC port responds (nmap check, not full auth test) | 30s |
 | 6 | Verify: all expected systemd services active (SSH command) | 30s |
@@ -520,7 +520,7 @@ hatchery/
 
 **Workflow 3: Dependency Updates** (`dependency-update.yml`) — Weekly cron.
 
-- Check npm registry for new clawdbot version
+- Check npm registry for new openclaw version
 - Check GitHub releases for new himalaya version
 - Check Node.js release schedule for LTS updates
 - Auto-create PR with updated `version.json` (new pins + SHA256 hashes)
@@ -772,7 +772,7 @@ Add systemd-level crash detection that automatically triggers a safe mode when r
 |---|------------|----------|
 | R12.1 | **Crash detection:** The `clawdbot.service` systemd unit MUST be configured with `StartLimitBurst=3` and `StartLimitIntervalSec=60`. An `OnFailure=clawdbot-safe-mode.service` handler MUST be defined that runs a safe-mode script when the start limit is hit. | MUST |
 | R12.2 | **Notification:** The safe-mode script MUST send a notification to the user via the last working channel (Discord, Telegram, or /status API) with: what happened, what was rolled back, and what to do next. The notification MUST follow the user-friendly messaging requirements in R9.2.1–R9.2.2. | MUST |
-| R12.3 | **Config backup/restore:** `build-config.py` MUST snapshot the current working config to `/var/lib/clawdbot/last-known-good/` after every successful gateway health check (healthy for ≥30 seconds after config apply). The safe-mode script MUST restore from this snapshot when triggered. If no snapshot exists, fall back to minimal safe-mode config (R4.6.5–R4.6.6). | MUST |
+| R12.3 | **Config backup/restore:** `build-config.py` MUST snapshot the current working config to `/var/lib/openclaw/last-known-good/` after every successful gateway health check (healthy for ≥30 seconds after config apply). The safe-mode script MUST restore from this snapshot when triggered. If no snapshot exists, fall back to minimal safe-mode config (R4.6.5–R4.6.6). | MUST |
 | R12.4 | **Agent self-heal:** `SAFE_MODE.md` MUST contain actionable diagnostic information: the last 50 lines of `journalctl -u clawdbot`, the last config change (diff between current and last-known-good), and step-by-step rollback instructions the agent can execute. The agent SHOULD be able to recover by following these instructions without user intervention. | SHOULD |
 | R12.5 | **Manual recovery:** The safe-mode script MUST write a `/var/lib/init-status/safe-mode-triggered` marker file. Documentation (in SAFE_MODE.md and repo README) MUST describe manual recovery steps for cases where the agent cannot self-heal: SSH in, check logs, restore config, restart service. The `try-full-config.sh` script (R4.6.3) MUST check for and clear this marker on successful recovery. | MUST |
 
@@ -781,8 +781,8 @@ Add systemd-level crash detection that automatically triggers a safe mode when r
 - The `OnFailure=` handler runs as a separate oneshot service (`clawdbot-safe-mode.service`) so it has full systemd context.
 - The safe-mode script lives at `/opt/hatchery/scripts/safe-mode.sh` and is included in the release tarball (§3.5).
 - `SAFE_MODE.md` is generated dynamically (not from a static template) because it must include live diagnostic data.
-- The last-known-good snapshot includes `clawdbot.json`, all agent workspace files, and the `.env` file.
-- After restoring the last-known-good config, the safe-mode script restarts `clawdbot.service` with `systemctl reset-failed clawdbot && systemctl start clawdbot`.
+- The last-known-good snapshot includes `openclaw.json`, all agent workspace files, and the `.env` file.
+- After restoring the last-known-good config, the safe-mode script restarts `clawdbot.service` with `systemctl reset-failed clawdbot && systemctl start openclaw`.
 - User outreach retries follow R4.6.9 (3 attempts at 30-minute intervals).
 
 ---
@@ -802,7 +802,7 @@ Add systemd-level crash detection that automatically triggers a safe mode when r
 
 | # | Question | Impact | Owner |
 |---|----------|--------|-------|
-| Q7 | Should we bundle a clawdbot .tgz in the release tarball as npm-down fallback? | Reliability | Implementation |
+| Q7 | Should we bundle an openclaw .tgz in the release tarball as npm-down fallback? | Reliability | Implementation |
 | Q8 | How do we handle the YAML template itself being out of date? (User has old Shortcut with old YAML cached) | Accessibility | User |
 | Q9 | Should Phase 2 reboot be eliminated? (Currently reboots to trigger post-boot-check; could use systemd instead) | Speed | Implementation |
 

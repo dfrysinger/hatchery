@@ -3,14 +3,14 @@
 # phase1-critical.sh -- Early boot: get bot online ASAP
 # =============================================================================
 # Purpose:  Critical first phase of droplet provisioning. Installs Node.js,
-#           clawdbot, creates user account, generates minimal clawdbot.json
-#           config, starts the clawdbot gateway service, and notifies owner.
+#           openclaw, creates user account, generates minimal openclaw.json
+#           config, starts the openclaw gateway service, and notifies owner.
 #           Launches phase2-background.sh when complete.
 #
 # Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
 #           /etc/habitat-parsed.env -- parsed habitat config (generated here)
 #
-# Outputs:  /home/$USERNAME/.clawdbot/clawdbot.json -- minimal bot config
+# Outputs:  /home/$USERNAME/.openclaw/openclaw.json -- minimal bot config
 #           /etc/systemd/system/clawdbot.service -- systemd unit
 #           /var/lib/init-status/phase1-complete -- completion marker
 #
@@ -43,7 +43,7 @@ else
   apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
 fi
 $S 2 "installing-bot"
-npm install -g clawdbot@latest >> "$LOG" 2>&1
+npm install -g openclaw@latest >> "$LOG" 2>&1
 PW=$(d "$PASSWORD_B64")
 id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
 echo "$USERNAME:$PW" | chpasswd
@@ -61,8 +61,8 @@ A1N="$AGENT1_NAME"
 # PLATFORM must be explicitly set - no silent defaults
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 GT=$(openssl rand -hex 24)
-mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
-echo "$GT" > $H/.clawdbot/gateway-token.txt
+mkdir -p $H/.openclaw $H/clawd/agents/agent1/memory
+echo "$GT" > $H/.openclaw/gateway-token.txt
 ln -sf "$H/clawd/HEARTBEAT.md" "$H/clawd/agents/agent1/HEARTBEAT.md"
 # Determine platform flags
 TG_ENABLED="false"; DC_ENABLED="false"
@@ -97,7 +97,7 @@ if [ "$DC_ENABLED" = "true" ]; then
 else
   DC_CHANNEL="\"discord\":{\"enabled\":false}"
 fi
-cat > $H/.clawdbot/clawdbot.json <<CFG
+cat > $H/.openclaw/openclaw.json <<CFG
 {
   "env": {
     "ANTHROPIC_API_KEY": "${AK}"
@@ -136,19 +136,19 @@ cat > $H/.clawdbot/clawdbot.json <<CFG
   }
 }
 CFG
-cp $H/.clawdbot/clawdbot.json $H/.clawdbot/clawdbot.minimal.json
-echo "ANTHROPIC_API_KEY=${AK}" > $H/.clawdbot/.env
-[ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.clawdbot/.env
+cp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.minimal.json
+echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
+[ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
 GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
-[ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.clawdbot/.env
+[ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.openclaw/.env
 echo -e "# Agent: ${A1N}\nModel: Claude Sonnet\nBe helpful. Desktop setup in progress..." > $H/clawd/agents/agent1/AGENTS.md
 cat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'
 Desktop setup in progress. RDP will be ready soon.
 If nothing needs attention, reply with ONLY: NO_REPLY.
 BOOTMD
-chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
-chmod 700 $H/.clawdbot
-chmod 600 $H/.clawdbot/clawdbot.json
+chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+chmod 700 $H/.openclaw
+chmod 600 $H/.openclaw/openclaw.json
 cat > /etc/systemd/system/clawdbot.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
@@ -157,7 +157,7 @@ After=network.target
 Type=simple
 User=$USERNAME
 WorkingDirectory=$H
-ExecStart=/usr/local/bin/clawdbot gateway --bind lan --port 18789
+ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
