@@ -219,6 +219,50 @@ class TestStandupFormatter:
         # Should truncate or summarize to stay under limit
         assert len(output) <= 1000
     
+    def test_truncation_respects_boundaries(self):
+        """BUG-003: Truncation should respect section/sentence boundaries"""
+        # Create very long output that will definitely exceed 1000 chars
+        data = {
+            "release": "R99",
+            "release_name": "Test Release With A Very Long Name That Takes Up Space",
+            "completed": [
+                {"id": f"TASK-{i}", "title": f"Task {i} with an extremely long description that goes on and on and on and on to make the output very long and force truncation to happen so we can test it properly", 
+                 "assignee": f"worker-{i%3+1}"}
+                for i in range(25)  # More tasks to force truncation
+            ],
+            "in_progress": [
+                {"id": f"TASK-{i+100}", "title": f"In progress task {i} with another very long description that continues and continues", 
+                 "assignee": f"worker-{i%3+1}",
+                 "notes": [f"This is a very long note about the progress of this task {i}"]}
+                for i in range(10)
+            ],
+            "blocked": [],
+            "up_next": [],
+            "sprint_notes": []
+        }
+        
+        output = gs.format_standup(data)
+        
+        # Should be truncated
+        assert len(output) <= 1000
+        
+        # Should have truncation indicator
+        assert "truncated" in output.lower()
+        
+        # Should NOT end mid-word (unless emergency)
+        # Check that it either ends with newline, period, or truncation marker
+        last_chars = output[-20:]
+        assert any(marker in last_chars for marker in ['\n', '.', '...', 'truncated'])
+        
+        # Should not have incomplete markdown (e.g., "- TASK-" at the end without completion)
+        lines = output.split('\n')
+        last_line = lines[-1] if lines else ""
+        # Last line should be empty, a complete line, or truncation marker
+        if last_line.strip() and 'truncated' not in last_line.lower():
+            # If it's a list item, it should be complete (have at least a colon)
+            if last_line.strip().startswith('-'):
+                assert ':' in last_line, f"Incomplete list item: {last_line}"
+    
     def test_format_empty_sections(self):
         """AC2: Handle empty sections gracefully"""
         data = {
@@ -332,7 +376,13 @@ class TestIntegration:
                     "priority": "medium",
                     "status": "blocked",
                     "assignee": "worker-4",
-                    "blockers": ["Waiting for standup generator"]
+                    "blockers": [
+                        {
+                            "description": "Waiting for standup generator",
+                            "resolution": None,
+                            "resolvedAt": None
+                        }
+                    ]
                 },
                 {
                     "id": "TASK-12",
