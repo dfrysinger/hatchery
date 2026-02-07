@@ -49,6 +49,7 @@ esac
 HN="${HABITAT_NAME:-default}"
 GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
 GSO=$(d "$GLOBAL_SOUL_B64"); GAG=$(d "$GLOBAL_AGENTS_B64"); GU=$(d "$GLOBAL_USER_B64")
+GTO=$(d "$GLOBAL_TOOLS_B64")
 CGI="$COUNCIL_GROUP_ID"
 CGN="$COUNCIL_GROUP_NAME"
 CJ="$COUNCIL_JUDGE"
@@ -337,6 +338,11 @@ if [ -n "$CGI" ]; then
 SHMD
   done
   chown -R $USERNAME:$USERNAME "$H/clawd/shared"
+fi
+# Create global TOOLS.md if provided
+if [ -n "$GTO" ]; then
+  printf '%s\n' "$GTO" > "$H/clawd/TOOLS.md"
+  chown $USERNAME:$USERNAME "$H/clawd/TOOLS.md"
 fi
 mkdir -p $H/.openclaw/agents/main/agent
 cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ

@@ -78,6 +78,7 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
     lines.append('GLOBAL_SOUL_B64="{}"\n'.format(_b64(hab.get("globalSoul", ""))))
     lines.append('GLOBAL_AGENTS_B64="{}"\n'.format(_b64(hab.get("globalAgents", ""))))
     lines.append('GLOBAL_USER_B64="{}"\n'.format(_b64(hab.get("globalUser", ""))))
+    lines.append('GLOBAL_TOOLS_B64="{}"\n'.format(_b64(hab.get("globalTools", ""))))
 
     agents = hab.get("agents", [])
     lines.append('AGENT_COUNT={}\n'.format(len(agents)))
@@ -492,6 +493,72 @@ class TestMissingOptionalFields:
         assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "tg_tok"
         assert env["AGENT1_DISCORD_BOT_TOKEN"] == ""
         assert env["AGENT1_BOT_TOKEN"] == "tg_tok"  # compat
+
+
+# ---------------------------------------------------------------------------
+# Tests: globalTools field
+# ---------------------------------------------------------------------------
+
+class TestGlobalTools:
+    """Tests for globalTools → GLOBAL_TOOLS_B64 parsing."""
+
+    def test_global_tools_parsed(self):
+        """globalTools content should be base64-encoded into GLOBAL_TOOLS_B64."""
+        tools_content = "Cloud VM (Ubuntu), display :10\n\ngmail-api.py for email"
+        hab = {
+            "name": "WithTools",
+            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "globalTools": tools_content,
+        }
+        env = run_parse_habitat(hab)
+        assert env["GLOBAL_TOOLS_B64"] == b64e(tools_content)
+        assert b64d(env["GLOBAL_TOOLS_B64"]) == tools_content
+
+    def test_global_tools_empty_when_missing(self):
+        """Missing globalTools should result in empty base64."""
+        hab = {
+            "name": "NoTools",
+            "agents": [{"agent": "Claude", "botToken": "tok"}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["GLOBAL_TOOLS_B64"] == b64e("")
+
+    def test_global_tools_with_special_chars(self):
+        """globalTools with special characters should be properly encoded."""
+        tools_content = "Use `gmail-api.py` with $EMAIL_ADDR\n# Comment line\nQuotes: \"test\" and 'test'"
+        hab = {
+            "name": "SpecialTools",
+            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "globalTools": tools_content,
+        }
+        env = run_parse_habitat(hab)
+        decoded = b64d(env["GLOBAL_TOOLS_B64"])
+        assert decoded == tools_content
+        assert "`" in decoded
+        assert "$" in decoded
+        assert '"' in decoded
+
+    def test_global_tools_multiline(self):
+        """globalTools with multiple lines should preserve formatting."""
+        tools_content = """## Available Tools
+
+### Email
+- gmail-api.py: Send and read emails
+
+### Calendar  
+- khal: Terminal calendar
+
+### Browser
+- Chrome on display :10"""
+        hab = {
+            "name": "MultilineTools",
+            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "globalTools": tools_content,
+        }
+        env = run_parse_habitat(hab)
+        decoded = b64d(env["GLOBAL_TOOLS_B64"])
+        assert decoded == tools_content
+        assert decoded.count("\n") == tools_content.count("\n")
 
 
 # ---------------------------------------------------------------------------
