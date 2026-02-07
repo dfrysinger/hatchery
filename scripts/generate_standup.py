@@ -9,6 +9,47 @@ Examples:
     ./generate-standup.py
     ./generate-standup.py --date 2026-02-08
     ./generate-standup.py --format json --output standup.json
+
+Error Handling:
+    
+    Missing Files:
+        - If sprint-state.json is not found at the specified path, raises
+          FileNotFoundError with descriptive message and exits with code 1
+        - Default path: ~/clawd/shared/sprint-state.json
+        - Override with --state-file or SPRINT_STATE_FILE environment variable
+    
+    Malformed JSON:
+        - If sprint-state.json contains invalid JSON, raises ValueError with
+          parse error details and exits with code 1
+        - Corrupt files are detected during load; no partial parsing occurs
+    
+    Missing Required Fields:
+        - If 'sprint' field is missing, raises ValueError and exits with code 1
+        - If 'tasks' field is missing, raises ValueError and exits with code 1
+        - Optional fields (release name, notes) default to empty values
+    
+    Invalid Task Statuses:
+        - Non-canonical statuses (e.g., 'in_progress') trigger warnings but
+          are mapped to canonical forms (e.g., 'in-progress')
+        - Unknown statuses trigger errors but processing continues; tasks
+          default to 'up_next' category
+        - Warnings/errors are logged to stderr; valid statuses documented in
+          CANONICAL_STATUSES and STATUS_ALIASES constants
+    
+    Output Failures:
+        - If --output file cannot be written (permissions, disk full), raises
+          IOError with system error message and exits with code 2
+        - Stdout output failures are not caught (rely on shell redirection)
+    
+    Unexpected Errors:
+        - All other exceptions are caught in main(), logged to stderr with
+          "Unexpected error" prefix, and exit with code 2
+        - Includes: permission errors, encoding issues, system failures
+    
+Exit Codes:
+    0 - Success
+    1 - Expected error (missing file, invalid JSON, missing fields)
+    2 - Unexpected error (system failures, I/O errors)
 """
 import argparse
 import json
