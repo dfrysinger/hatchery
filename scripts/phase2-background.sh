@@ -260,7 +260,9 @@ systemctl restart xrdp
 ufw allow 3389/tcp
 #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
 $S 10 "finalizing"
-/usr/local/bin/restore-openclaw-state.sh
+# Enable and run the restore service (runs before clawdbot restarts)
+systemctl enable openclaw-restore.service 2>/dev/null || true
+systemctl start openclaw-restore.service 2>/dev/null || true
 /usr/local/sbin/build-full-config.sh
 systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 systemctl enable clawdbot-sync.timer 2>/dev/null || true

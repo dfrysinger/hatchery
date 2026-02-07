@@ -349,8 +349,8 @@ done
 cat > /etc/systemd/system/clawdbot.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
-After=network.target desktop.service
-Wants=desktop.service
+After=network.target desktop.service openclaw-restore.service
+Wants=desktop.service openclaw-restore.service
 [Service]
 Type=simple
 User=$USERNAME
