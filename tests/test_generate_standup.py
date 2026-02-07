@@ -465,3 +465,168 @@ class TestIntegration:
         
         # Verify length constraint
         assert len(output) <= 1000
+
+
+class TestFileLocking:
+    """Test concurrent access to sprint-state.json (BUG-001)"""
+    
+    def test_concurrent_read_access(self, tmp_path):
+        """
+        BUG-001: Verify graceful handling when file is locked during read.
+        
+        This test simulates concurrent access to sprint-state.json to ensure
+        the standup generator handles file locking gracefully without crashing.
+        """
+        import threading
+        import time
+        import fcntl
+        
+        # Create a valid sprint-state.json
+        state = {
+            "sprint": {
+                "release": "R3",
+                "name": "Test Sprint",
+                "startDate": "2026-02-07T20:00:00Z",
+                "status": "in-progress"
+            },
+            "tasks": [
+                {
+                    "id": "TASK-1",
+                    "title": "Test task",
+                    "status": "in-progress",
+                    "assignee": "worker-1"
+                }
+            ]
+        }
+        
+        state_file = tmp_path / "sprint-state.json"
+        state_file.write_text(json.dumps(state, indent=2))
+        
+        # Track results from both threads
+        results = {"writer": None, "reader": None}
+        errors = {"writer": None, "reader": None}
+        
+        def lock_and_write():
+            """Simulate a process holding an exclusive lock on the file"""
+            try:
+                with open(state_file, 'r+') as f:
+                    # Acquire exclusive lock
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    
+                    # Hold lock for a short time to simulate concurrent access
+                    time.sleep(0.5)
+                    
+                    # Release lock happens automatically on close
+                    results["writer"] = "success"
+            except Exception as e:
+                errors["writer"] = str(e)
+        
+        def try_read():
+            """Try to read the file while it might be locked"""
+            try:
+                # Give writer thread time to acquire lock first
+                time.sleep(0.1)
+                
+                # Attempt to load sprint state
+                # This should either:
+                # 1. Wait for lock to be released (graceful)
+                # 2. Fail with a clear error message (graceful)
+                # 3. Not crash the application (graceful)
+                loaded = gs.load_sprint_state(str(state_file))
+                
+                # If we successfully loaded, verify it's valid
+                assert "sprint" in loaded
+                results["reader"] = "success"
+                
+            except (IOError, OSError) as e:
+                # File locked - this is acceptable graceful handling
+                if "Resource temporarily unavailable" in str(e) or "locked" in str(e).lower():
+                    results["reader"] = "locked_graceful"
+                else:
+                    errors["reader"] = str(e)
+            except Exception as e:
+                errors["reader"] = str(e)
+        
+        # Start both threads
+        writer_thread = threading.Thread(target=lock_and_write)
+        reader_thread = threading.Thread(target=try_read)
+        
+        writer_thread.start()
+        reader_thread.start()
+        
+        # Wait for both to complete
+        writer_thread.join(timeout=2.0)
+        reader_thread.join(timeout=2.0)
+        
+        # Verify graceful handling
+        # Either the reader succeeded (waited for lock), or it failed gracefully
+        assert errors["writer"] is None, f"Writer thread failed: {errors['writer']}"
+        assert errors["reader"] is None, f"Reader thread failed unexpectedly: {errors['reader']}"
+        assert results["reader"] in ["success", "locked_graceful"], \
+            "Reader must either succeed or handle lock gracefully"
+    
+    def test_load_state_while_writing(self, tmp_path):
+        """
+        Test that load_sprint_state() doesn't crash if file is being written.
+        
+        This verifies the implementation can handle the file being modified
+        during read operations without raising unhandled exceptions.
+        """
+        import threading
+        import time
+        
+        state = {
+            "sprint": {"release": "R1", "name": "Test", "status": "in-progress"},
+            "tasks": []
+        }
+        
+        state_file = tmp_path / "sprint-state-concurrent.json"
+        state_file.write_text(json.dumps(state, indent=2))
+        
+        read_error = None
+        
+        def continuous_writer():
+            """Continuously update the file"""
+            for i in range(5):
+                try:
+                    state["sprint"]["release"] = f"R{i}"
+                    with open(state_file, 'w') as f:
+                        json.dump(state, f, indent=2)
+                    time.sleep(0.05)
+                except Exception:
+                    pass  # Writer errors are not critical for this test
+        
+        def concurrent_reader():
+            """Try to read while file is being updated"""
+            nonlocal read_error
+            try:
+                time.sleep(0.02)  # Let writer start
+                
+                # Multiple read attempts during concurrent writes
+                for _ in range(3):
+                    try:
+                        loaded = gs.load_sprint_state(str(state_file))
+                        # If successful, verify it's valid JSON
+                        assert isinstance(loaded, dict)
+                        assert "sprint" in loaded
+                    except (json.JSONDecodeError, ValueError):
+                        # Acceptable - caught mid-write, invalid JSON
+                        pass
+                    time.sleep(0.05)
+                    
+            except Exception as e:
+                # Unexpected exceptions are the real issue
+                if not isinstance(e, (json.JSONDecodeError, ValueError)):
+                    read_error = str(e)
+        
+        writer_thread = threading.Thread(target=continuous_writer)
+        reader_thread = threading.Thread(target=concurrent_reader)
+        
+        writer_thread.start()
+        reader_thread.start()
+        
+        writer_thread.join(timeout=1.0)
+        reader_thread.join(timeout=1.0)
+        
+        # The key is that we didn't crash with unexpected errors
+        assert read_error is None, f"Unexpected error during concurrent access: {read_error}"
