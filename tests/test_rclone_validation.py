@@ -77,10 +77,10 @@ class TestValidateFunction:
         )
         assert result.returncode == 0, f"Unexpected failure: {result.stderr}"
 
-    def test_valid_clawdbot_path_succeeds(self, run_validation):
-        """Valid .clawdbot paths should succeed."""
+    def test_valid_openclaw_path_succeeds(self, run_validation):
+        """Valid .openclaw paths should succeed."""
         result = run_validation(
-            "/home/user/.clawdbot/sessions/",
+            "/home/user/.openclaw/sessions/",
             "dropbox:clawdbot-memory/habitat1/sessions/"
         )
         assert result.returncode == 0, f"Unexpected failure: {result.stderr}"
@@ -126,7 +126,7 @@ class TestValidateFunction:
         assert result.returncode != 0
 
     def test_unexpected_local_source_rejected(self, run_validation):
-        """Local paths outside /home/<user>/clawd or .clawdbot should be rejected."""
+        """Local paths outside /home/<user>/clawd or .openclaw should be rejected."""
         result = run_validation(
             "/etc/passwd",
             "dropbox:clawdbot-memory/test/"
@@ -259,24 +259,24 @@ class TestSafeSuCopyFunction:
 
 
 class TestSyncScriptValidation:
-    """Test that sync-clawdbot-state.sh uses path validation."""
+    """Test that sync-openclaw-state.sh uses path validation."""
 
-    SYNC_SCRIPT = os.path.join(SCRIPTS_DIR, "sync-clawdbot-state.sh")
+    SYNC_SCRIPT = os.path.join(SCRIPTS_DIR, "sync-openclaw-state.sh")
 
     def test_script_sources_validate_lib(self):
-        """sync-clawdbot-state.sh should source rclone-validate.sh."""
+        """sync-openclaw-state.sh should source rclone-validate.sh."""
         with open(self.SYNC_SCRIPT, "r") as f:
             content = f.read()
         assert "rclone-validate.sh" in content, "sync script must source rclone-validate.sh"
 
     def test_script_uses_safe_copy(self):
-        """sync-clawdbot-state.sh should use safe_rclone_su_copy."""
+        """sync-openclaw-state.sh should use safe_rclone_su_copy."""
         with open(self.SYNC_SCRIPT, "r") as f:
             content = f.read()
         assert "safe_rclone" in content
 
     def test_script_refuses_on_empty_username(self):
-        """sync-clawdbot-state.sh should refuse if USERNAME is empty."""
+        """sync-openclaw-state.sh should refuse if USERNAME is empty."""
         with open(self.SYNC_SCRIPT, "r") as f:
             content = f.read()
         assert (
@@ -286,24 +286,24 @@ class TestSyncScriptValidation:
 
 
 class TestRestoreScriptValidation:
-    """Test that restore-clawdbot-state.sh uses path validation."""
+    """Test that restore-openclaw-state.sh uses path validation."""
 
-    RESTORE_SCRIPT = os.path.join(SCRIPTS_DIR, "restore-clawdbot-state.sh")
+    RESTORE_SCRIPT = os.path.join(SCRIPTS_DIR, "restore-openclaw-state.sh")
 
     def test_script_sources_validate_lib(self):
-        """restore-clawdbot-state.sh should source rclone-validate.sh."""
+        """restore-openclaw-state.sh should source rclone-validate.sh."""
         with open(self.RESTORE_SCRIPT, "r") as f:
             content = f.read()
         assert "rclone-validate.sh" in content, "restore script must source rclone-validate.sh"
 
     def test_script_uses_safe_copy(self):
-        """restore-clawdbot-state.sh should use safe_rclone_su_copy."""
+        """restore-openclaw-state.sh should use safe_rclone_su_copy."""
         with open(self.RESTORE_SCRIPT, "r") as f:
             content = f.read()
         assert "safe_rclone" in content
 
     def test_script_checks_habitat_name(self):
-        """restore-clawdbot-state.sh should validate HABITAT_NAME."""
+        """restore-openclaw-state.sh should validate HABITAT_NAME."""
         with open(self.RESTORE_SCRIPT, "r") as f:
             content = f.read()
         assert "HABITAT_NAME" in content
@@ -385,8 +385,8 @@ class TestScriptHeaders:
     """Verify scripts have proper documentation headers."""
 
     @pytest.mark.parametrize("script_name", [
-        "sync-clawdbot-state.sh",
-        "restore-clawdbot-state.sh",
+        "sync-openclaw-state.sh",
+        "restore-openclaw-state.sh",
         "rclone-validate.sh",
     ])
     def test_script_has_header_or_comment(self, script_name):
@@ -402,8 +402,8 @@ class TestScriptHeaders:
         assert has_header or has_comment, f"{script_name}: missing header/comments"
 
     @pytest.mark.parametrize("script_name", [
-        "sync-clawdbot-state.sh",
-        "restore-clawdbot-state.sh",
+        "sync-openclaw-state.sh",
+        "restore-openclaw-state.sh",
     ])
     def test_script_mentions_validation(self, script_name):
         """Scripts using rclone should reference rclone-validate.sh."""
