@@ -623,6 +623,7 @@ write_files:
       Description=x11vnc
       After=desktop.service
       Requires=desktop.service
+      ConditionPathExists=/var/lib/init-status/phase2-complete
       [Service]
       Type=simple
       User=$USERNAME
@@ -632,7 +633,7 @@ write_files:
       Restart=always
       RestartSec=5
       [Install]
-      # WantedBy removed - started explicitly after phase2 completes
+      WantedBy=desktop.service
       SVC
       mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
       # Write desktop background config BEFORE starting desktop service (fixes race condition)
