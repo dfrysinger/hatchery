@@ -92,7 +92,7 @@ User=$USERNAME
 Environment=DISPLAY=:10
 Environment=HOME=$H
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
-ExecStartPre=/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
+ExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
 Restart=always
@@ -117,14 +117,35 @@ RestartSec=5
 # WantedBy removed - started explicitly after phase2 completes
 SVC
 mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
+# Write desktop background config BEFORE starting desktop service (fixes race condition)
+if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
+  R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
+  G=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc))
+  B=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc))
+  cat > "$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<BGXML
+<?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="${R}"/><value type="double" value="${G}"/><value type="double" value="${B}"/><value type="double" value="1"/></property></property></property></property></property></channel>
+BGXML
+fi
 chown -R $USERNAME:$USERNAME $H/.config
 systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc
-# Moved to end: systemctl start xvfb
-# PID wait loop moved to end
-# Moved to end: systemctl start desktop
-# sleep 3
-# Moved to end: systemctl start x11vnc
+# MOVED TO END: systemctl start xvfb
+# MOVED TO END: # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+# MOVED TO END: for i in {1..30}; do
+# MOVED TO END:   if [ -f /tmp/xvfb.pid ]; then
+# MOVED TO END:     XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+# MOVED TO END:     # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+# MOVED TO END:     if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+# MOVED TO END:       if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+# MOVED TO END:         break
+# MOVED TO END:       fi
+# MOVED TO END:     fi
+# MOVED TO END:   fi
+# MOVED TO END:   sleep 0.5
+# MOVED TO END: done
+# MOVED TO END: systemctl start desktop
+# MOVED TO END: sleep 3
+# MOVED TO END: systemctl start x11vnc
 mkdir -p $H/Desktop
 cat > $H/Desktop/google-chrome.desktop <<'DESK'
 [Desktop Entry]
@@ -247,10 +268,16 @@ systemctl start clawdbot-sync.timer 2>/dev/null || true
 # Start desktop services now that everything is installed
 $S 9 "starting-desktop"
 systemctl start xvfb
-# Wait for Xvfb PID file and verify process is running (avoids cross-shell $! race)
+# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
 for i in {1..30}; do
-  if [ -f /tmp/xvfb.pid ] && kill -0 "$(cat /tmp/xvfb.pid 2>/dev/null)" 2>/dev/null; then
-    break
+  if [ -f /tmp/xvfb.pid ]; then
+    XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+    # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+    if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+      if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+        break
+      fi
+    fi
   fi
   sleep 0.5
 done
