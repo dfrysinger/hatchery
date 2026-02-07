@@ -1,13 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# try-full-config.sh -- Manually attempt switch to full clawdbot config
+# try-full-config.sh -- Manually attempt switch to full openclaw config
 # =============================================================================
 # Purpose:  Interactive tool to switch from minimal/safe-mode config to full
 #           config. Validates health and rolls back on failure.
 #
 # Inputs:   /etc/droplet.env -- secrets and config
 #           /etc/habitat-parsed.env -- parsed habitat config
-#           $HOME/.clawdbot/clawdbot.full.json -- full config to try
+#           $HOME/.openclaw/openclaw.full.json -- full config to try
 #
 # Outputs:  Removes SAFE_MODE.md and safe-mode marker on success
 #           Restores minimal config on failure
@@ -21,9 +21,9 @@ set -a; source /etc/droplet.env; set +a
 AC=${AGENT_COUNT:-1}
 H="/home/$USERNAME"
 echo "Attempting full config at $(date)"
-cp "$H/.clawdbot/clawdbot.full.json" "$H/.clawdbot/clawdbot.json"
-chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
-chmod 600 "$H/.clawdbot/clawdbot.json"
+cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+chmod 600 "$H/.openclaw/openclaw.json"
 systemctl restart clawdbot
 HEALTHY=false
 for i in $(seq 1 12); do
@@ -41,9 +41,9 @@ if [ "$HEALTHY" = "true" ]; then
   echo "SUCCESS: Full config now active"
   exit 0
 else
-  cp "$H/.clawdbot/clawdbot.minimal.json" "$H/.clawdbot/clawdbot.json"
-  chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
-  chmod 600 "$H/.clawdbot/clawdbot.json"
+  cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+  chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+  chmod 600 "$H/.openclaw/openclaw.json"
   systemctl restart clawdbot
   echo "FAILED: Restored minimal config. Check logs: journalctl -u clawdbot"
   exit 1
