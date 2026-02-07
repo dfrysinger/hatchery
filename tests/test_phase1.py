@@ -42,9 +42,9 @@ def make_phase1_stub(script_content, tmp_dir):
     out external dependencies.
     """
     home = os.path.join(tmp_dir, "home", "bot")
-    clawdbot_dir = os.path.join(home, ".clawdbot")
+    openclaw_dir = os.path.join(home, ".openclaw")
     clawd_dir = os.path.join(home, "clawd", "agents", "agent1", "memory")
-    os.makedirs(clawdbot_dir, exist_ok=True)
+    os.makedirs(openclaw_dir, exist_ok=True)
     os.makedirs(clawd_dir, exist_ok=True)
 
     lines = script_content.split("\n")
@@ -111,7 +111,7 @@ def make_phase1_stub(script_content, tmp_dir):
             'nohup', 'disown',
             'echo "$START"',
         ]):
-            if "cat > $H/.clawdbot/clawdbot.json" in stripped:
+            if "cat > $H/.openclaw/openclaw.json" in stripped:
                 # This IS the heredoc we want
                 pass
             else:
@@ -120,7 +120,7 @@ def make_phase1_stub(script_content, tmp_dir):
         result_lines.append(line)
 
         # Track heredoc
-        if "cat > $H/.clawdbot/clawdbot.json <<CFG" in stripped:
+        if "cat > $H/.openclaw/openclaw.json <<CFG" in stripped:
             in_heredoc = True
         if in_heredoc and stripped == "CFG":
             break
@@ -182,7 +182,7 @@ def run_phase1_config(platform="telegram", tg_token="tg-bot-token-1",
                 f"Script:\n{stub_script}"
             )
 
-        config_path = os.path.join(home, ".clawdbot", "clawdbot.json")
+        config_path = os.path.join(home, ".openclaw", "openclaw.json")
         if not os.path.exists(config_path):
             pytest.fail(
                 f"Config not created at {config_path}\n"
@@ -303,7 +303,7 @@ class TestTokenKeyNames:
     """Validate correct token key names per platform.
     
     Discord uses 'token', Telegram uses 'botToken'. These are different
-    and must not be confused - clawdbot will reject unrecognized keys.
+    and must not be confused - openclaw will reject unrecognized keys.
     """
 
     def test_telegram_uses_botToken_key(self):
