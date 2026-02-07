@@ -12,7 +12,7 @@ except ImportError:
 def get_creds():
   cid,csc,rtk=os.environ.get('GMAIL_CLIENT_ID'),os.environ.get('GMAIL_CLIENT_SECRET'),os.environ.get('GMAIL_REFRESH_TOKEN')
   if not all([cid,csc,rtk]):
-    for envf in [os.path.expanduser('~/.clawdbot/.env'),'/etc/droplet.env']:
+    for envf in [os.path.expanduser('~/.openclaw/.env'),'/etc/droplet.env']:
       try:
         with open(envf,'r') as f:
           for l in f:

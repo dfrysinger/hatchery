@@ -1,18 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# build-full-config.sh -- Generate full clawdbot.json with all features
+# build-full-config.sh -- Generate full openclaw.json with all features
 # =============================================================================
-# Purpose:  Builds the complete clawdbot configuration with multi-agent
+# Purpose:  Builds the complete openclaw configuration with multi-agent
 #           support, browser config, auth profiles, skills, council setup,
 #           desktop integration, and all per-agent workspace files
 #           (IDENTITY.md, SOUL.md, AGENTS.md, BOOT.md, BOOTSTRAP.md, USER.md).
 #
 # Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
 #           /etc/habitat-parsed.env -- parsed habitat config
-#           $HOME/.clawdbot/gateway-token.txt -- gateway auth token
+#           $HOME/.openclaw/gateway-token.txt -- gateway auth token
 #
-# Outputs:  $HOME/.clawdbot/clawdbot.full.json -- full config
-#           $HOME/.clawdbot/agents/*/agent/auth-profiles.json -- auth creds
+# Outputs:  $HOME/.openclaw/openclaw.full.json -- full config
+#           $HOME/.openclaw/agents/*/agent/auth-profiles.json -- auth creds
 #           $HOME/clawd/agents/*/IDENTITY.md, SOUL.md, AGENTS.md, etc.
 #           /etc/systemd/system/clawdbot.service -- updated systemd unit
 #
@@ -53,14 +53,14 @@ GTO=$(d "$GLOBAL_TOOLS_B64")
 CGI="$COUNCIL_GROUP_ID"
 CGN="$COUNCIL_GROUP_NAME"
 CJ="$COUNCIL_JUDGE"
-GT=$(cat $H/.clawdbot/gateway-token.txt)
+GT=$(cat $H/.openclaw/gateway-token.txt)
 AC=${AGENT_COUNT:-1}
 # Escape user-provided values for JSON safety
 TUI_ESC=$(json_escape "$TUI"); DGI_ESC=$(json_escape "$DGI"); DOI_ESC=$(json_escape "$DOI")
 CGI_ESC=$(json_escape "$CGI"); CGN_ESC=$(json_escape "$CGN"); GT_ESC=$(json_escape "$GT")
 AK_ESC=$(json_escape "$AK"); GK_ESC=$(json_escape "$GK"); BK_ESC=$(json_escape "$BK")
 OA_ESC=$(json_escape "$OA"); OR_ESC=$(json_escape "$OR"); OI_ESC=$(json_escape "$OI")
-mkdir -p $H/.clawdbot/credentials
+mkdir -p $H/.openclaw/credentials
 for i in $(seq 1 $AC); do
   mkdir -p "$H/clawd/agents/agent${i}/memory"
 done
@@ -199,7 +199,7 @@ if ! echo "$CONFIG_JSON" | jq . >/dev/null 2>&1; then
   echo "Validation error: $ERROR_MSG" >&2
   exit 1
 fi
-echo "$CONFIG_JSON" > $H/.clawdbot/clawdbot.full.json
+echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
 for i in $(seq 1 $AC); do
   AD="$H/clawd/agents/agent${i}"
   NV="AGENT${i}_NAME"; ANAME="${!NV}"
@@ -344,26 +344,26 @@ if [ -n "$GTO" ]; then
   printf '%s\n' "$GTO" > "$H/clawd/TOOLS.md"
   chown $USERNAME:$USERNAME "$H/clawd/TOOLS.md"
 fi
-mkdir -p $H/.clawdbot/agents/main/agent
-cat > $H/.clawdbot/agents/main/agent/auth-profiles.json <<APJ
+mkdir -p $H/.openclaw/agents/main/agent
+cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
 {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
 APJ
 for i in $(seq 1 $AC); do
-  mkdir -p "$H/.clawdbot/agents/agent${i}/agent"
-  ln -sf "$H/.clawdbot/agents/main/agent/auth-profiles.json" "$H/.clawdbot/agents/agent${i}/agent/auth-profiles.json"
+  mkdir -p "$H/.openclaw/agents/agent${i}/agent"
+  ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/agent${i}/agent/auth-profiles.json"
 done
 cat > /etc/systemd/system/clawdbot.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
-After=network.target desktop.service
-Wants=desktop.service
+After=network.target desktop.service openclaw-restore.service
+Wants=desktop.service openclaw-restore.service
 [Service]
 Type=simple
 User=$USERNAME
 WorkingDirectory=$H
 ExecStartPre=/bin/sleep 2
-ExecStart=/usr/local/bin/clawdbot gateway --bind lan --port 18789
-ExecStop=+/usr/local/bin/sync-clawdbot-state.sh
+ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+ExecStop=+/usr/local/bin/sync-openclaw-state.sh
 TimeoutStopSec=30
 Restart=always
 RestartSec=3
@@ -393,6 +393,6 @@ BGXML
     DISPLAY=:10 su - $USERNAME -c "xfdesktop --reload" 2>/dev/null || true
   fi
 fi
-chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
-chmod 700 $H/.clawdbot
-chmod 600 $H/.clawdbot/clawdbot.json $H/.clawdbot/clawdbot.full.json $H/.clawdbot/clawdbot.minimal.json 2>/dev/null || true
+chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+chmod 700 $H/.openclaw
+chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json 2>/dev/null || true

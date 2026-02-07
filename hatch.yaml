@@ -347,11 +347,11 @@ write_files:
         def do_POST(self):
           if self.path=='/sync':
             self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-            try:r=subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
+            try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
             except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
           elif self.path=='/prepare-shutdown':
             self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-            try:subprocess.run("/usr/local/bin/sync-clawdbot-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
+            try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
             except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
           else:self.send_response(404);self.end_headers()
       class R(socketserver.TCPServer):allow_reuse_address=True
@@ -385,7 +385,7 @@ write_files:
         apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
       fi
       $S 2 "installing-bot"
-      npm install -g clawdbot@latest >> "$LOG" 2>&1
+      npm install -g openclaw@latest >> "$LOG" 2>&1
       PW=$(d "$PASSWORD_B64")
       id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
       echo "$USERNAME:$PW" | chpasswd
@@ -403,8 +403,8 @@ write_files:
       # PLATFORM must be explicitly set - no silent defaults
       PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
       GT=$(openssl rand -hex 24)
-      mkdir -p $H/.clawdbot $H/clawd/agents/agent1/memory
-      echo "$GT" > $H/.clawdbot/gateway-token.txt
+      mkdir -p $H/.openclaw $H/clawd/agents/agent1/memory
+      echo "$GT" > $H/.openclaw/gateway-token.txt
       ln -sf "$H/clawd/HEARTBEAT.md" "$H/clawd/agents/agent1/HEARTBEAT.md"
       # Determine platform flags
       TG_ENABLED="false"; DC_ENABLED="false"
@@ -439,7 +439,7 @@ write_files:
       else
         DC_CHANNEL="\"discord\":{\"enabled\":false}"
       fi
-      cat > $H/.clawdbot/clawdbot.json <<CFG
+      cat > $H/.openclaw/openclaw.json <<CFG
       {
         "env": {
           "ANTHROPIC_API_KEY": "${AK}"
@@ -478,19 +478,19 @@ write_files:
         }
       }
       CFG
-      cp $H/.clawdbot/clawdbot.json $H/.clawdbot/clawdbot.minimal.json
-      echo "ANTHROPIC_API_KEY=${AK}" > $H/.clawdbot/.env
-      [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.clawdbot/.env
+      cp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.minimal.json
+      echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
+      [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
       GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
-      [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.clawdbot/.env
+      [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.openclaw/.env
       echo -e "# Agent: ${A1N}\nModel: Claude Sonnet\nBe helpful. Desktop setup in progress..." > $H/clawd/agents/agent1/AGENTS.md
       cat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'
       Desktop setup in progress. RDP will be ready soon.
       If nothing needs attention, reply with ONLY: NO_REPLY.
       BOOTMD
-      chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
-      chmod 700 $H/.clawdbot
-      chmod 600 $H/.clawdbot/clawdbot.json
+      chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+      chmod 700 $H/.openclaw
+      chmod 600 $H/.openclaw/openclaw.json
       cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
@@ -499,7 +499,7 @@ write_files:
       Type=simple
       User=$USERNAME
       WorkingDirectory=$H
-      ExecStart=/usr/local/bin/clawdbot gateway --bind lan --port 18789
+      ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
       Restart=always
       RestartSec=3
       Environment=NODE_ENV=production
@@ -598,7 +598,7 @@ write_files:
       ExecStopPost=/bin/rm -f /tmp/xvfb.pid
       Restart=always
       [Install]
-      WantedBy=multi-user.target
+      # WantedBy removed - started explicitly after phase2 completes
       SVC
       cat > /etc/systemd/system/desktop.service <<SVC
       [Unit]
@@ -614,7 +614,8 @@ write_files:
       ExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
       ExecStartPre=/bin/sleep 2
       ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
-      Restart=on-failure
+      Restart=always
+      RestartSec=5
       [Install]
       WantedBy=multi-user.target
       SVC
@@ -623,15 +624,17 @@ write_files:
       Description=x11vnc
       After=desktop.service
       Requires=desktop.service
+      ConditionPathExists=/var/lib/init-status/phase2-complete
       [Service]
       Type=simple
       User=$USERNAME
       Environment=DISPLAY=:10
       ExecStartPre=/bin/sleep 3
       ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
-      Restart=on-failure
+      Restart=always
+      RestartSec=5
       [Install]
-      WantedBy=multi-user.target
+      WantedBy=desktop.service
       SVC
       mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
       # Write desktop background config BEFORE starting desktop service (fixes race condition)
@@ -646,23 +649,23 @@ write_files:
       chown -R $USERNAME:$USERNAME $H/.config
       systemctl daemon-reload
       systemctl enable xvfb desktop x11vnc
-      systemctl start xvfb
+      # MOVED TO END: systemctl start xvfb
       # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
-      for i in {1..30}; do
-        if [ -f /tmp/xvfb.pid ]; then
-          XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+      # MOVED TO END: for i in {1..30}; do
+        # MOVED TO END: if [ -f /tmp/xvfb.pid ]; then
+          # MOVED TO END: XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
           # Verify PID exists AND process is actually Xvfb (not a recycled PID)
-          if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
-            if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
-              break
-            fi
-          fi
-        fi
-        sleep 0.5
-      done
-      systemctl start desktop
-      sleep 3
-      systemctl start x11vnc
+          # MOVED TO END: if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+            # MOVED TO END: if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+              # MOVED TO END: break
+            # MOVED TO END: fi
+          # MOVED TO END: fi
+        # MOVED TO END: fi
+        # MOVED TO END: sleep 0.5
+      # MOVED TO END: done
+      # MOVED TO END: systemctl start desktop
+      # MOVED TO END: sleep 3
+      # MOVED TO END: systemctl start x11vnc
       mkdir -p $H/Desktop
       cat > $H/Desktop/google-chrome.desktop <<'DESK'
       [Desktop Entry]
@@ -777,14 +780,36 @@ write_files:
       ufw allow 3389/tcp
       #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
       $S 10 "finalizing"
-      /usr/local/bin/restore-clawdbot-state.sh
+      # Enable and run the restore service (runs before clawdbot restarts)
+      systemctl enable openclaw-restore.service 2>/dev/null || true
+      systemctl start openclaw-restore.service 2>/dev/null || true
       /usr/local/sbin/build-full-config.sh
       systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
       systemctl enable clawdbot-sync.timer 2>/dev/null || true
       systemctl start clawdbot-sync.timer 2>/dev/null || true
+      # Start desktop services now that everything is installed
+      $S 9 "starting-desktop"
+      systemctl start xvfb
+      # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+      for i in {1..30}; do
+        if [ -f /tmp/xvfb.pid ]; then
+          XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+          # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+          if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+            if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+              break
+            fi
+          fi
+        fi
+        sleep 0.5
+      done
+      systemctl start desktop
+      sleep 3
+      systemctl start x11vnc
+      systemctl restart xrdp
       touch /var/lib/init-status/phase2-complete
       touch /var/lib/init-status/needs-post-boot-check
-      GT=$(cat /home/bot/.clawdbot/gateway-token.txt 2>/dev/null)
+      GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
       [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
         -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
         -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
@@ -832,14 +857,14 @@ write_files:
       CGI="$COUNCIL_GROUP_ID"
       CGN="$COUNCIL_GROUP_NAME"
       CJ="$COUNCIL_JUDGE"
-      GT=$(cat $H/.clawdbot/gateway-token.txt)
+      GT=$(cat $H/.openclaw/gateway-token.txt)
       AC=${AGENT_COUNT:-1}
       # Escape user-provided values for JSON safety
       TUI_ESC=$(json_escape "$TUI"); DGI_ESC=$(json_escape "$DGI"); DOI_ESC=$(json_escape "$DOI")
       CGI_ESC=$(json_escape "$CGI"); CGN_ESC=$(json_escape "$CGN"); GT_ESC=$(json_escape "$GT")
       AK_ESC=$(json_escape "$AK"); GK_ESC=$(json_escape "$GK"); BK_ESC=$(json_escape "$BK")
       OA_ESC=$(json_escape "$OA"); OR_ESC=$(json_escape "$OR"); OI_ESC=$(json_escape "$OI")
-      mkdir -p $H/.clawdbot/credentials
+      mkdir -p $H/.openclaw/credentials
       for i in $(seq 1 $AC); do
         mkdir -p "$H/clawd/agents/agent${i}/memory"
       done
@@ -978,7 +1003,7 @@ write_files:
         echo "Validation error: $ERROR_MSG" >&2
         exit 1
       fi
-      echo "$CONFIG_JSON" > $H/.clawdbot/clawdbot.full.json
+      echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
       for i in $(seq 1 $AC); do
         AD="$H/clawd/agents/agent${i}"
         NV="AGENT${i}_NAME"; ANAME="${!NV}"
@@ -1123,26 +1148,26 @@ write_files:
         printf '%s\n' "$GTO" > "$H/clawd/TOOLS.md"
         chown $USERNAME:$USERNAME "$H/clawd/TOOLS.md"
       fi
-      mkdir -p $H/.clawdbot/agents/main/agent
-      cat > $H/.clawdbot/agents/main/agent/auth-profiles.json <<APJ
+      mkdir -p $H/.openclaw/agents/main/agent
+      cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
       {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
       APJ
       for i in $(seq 1 $AC); do
-        mkdir -p "$H/.clawdbot/agents/agent${i}/agent"
-        ln -sf "$H/.clawdbot/agents/main/agent/auth-profiles.json" "$H/.clawdbot/agents/agent${i}/agent/auth-profiles.json"
+        mkdir -p "$H/.openclaw/agents/agent${i}/agent"
+        ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/agent${i}/agent/auth-profiles.json"
       done
       cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
-      After=network.target desktop.service
-      Wants=desktop.service
+      After=network.target desktop.service openclaw-restore.service
+      Wants=desktop.service openclaw-restore.service
       [Service]
       Type=simple
       User=$USERNAME
       WorkingDirectory=$H
       ExecStartPre=/bin/sleep 2
-      ExecStart=/usr/local/bin/clawdbot gateway --bind lan --port 18789
-      ExecStop=+/usr/local/bin/sync-clawdbot-state.sh
+      ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+      ExecStop=+/usr/local/bin/sync-openclaw-state.sh
       TimeoutStopSec=30
       Restart=always
       RestartSec=3
@@ -1172,9 +1197,9 @@ write_files:
           DISPLAY=:10 su - $USERNAME -c "xfdesktop --reload" 2>/dev/null || true
         fi
       fi
-      chown -R $USERNAME:$USERNAME $H/.clawdbot $H/clawd
-      chmod 700 $H/.clawdbot
-      chmod 600 $H/.clawdbot/clawdbot.json $H/.clawdbot/clawdbot.full.json $H/.clawdbot/clawdbot.minimal.json 2>/dev/null || true
+      chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+      chmod 700 $H/.openclaw
+      chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json 2>/dev/null || true
   - path: /etc/systemd/system/post-boot-check.service
     permissions: "0644"
     content: |
@@ -1203,13 +1228,13 @@ write_files:
         exit 0
       }
       sleep 15
-      if [ ! -f "$H/.clawdbot/clawdbot.full.json" ]; then
+      if [ ! -f "$H/.openclaw/openclaw.full.json" ]; then
         rm -f /var/lib/init-status/needs-post-boot-check
         exit 0
       fi
-      cp "$H/.clawdbot/clawdbot.full.json" "$H/.clawdbot/clawdbot.json"
-      chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
-      chmod 600 "$H/.clawdbot/clawdbot.json"
+      cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+      chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+      chmod 600 "$H/.openclaw/openclaw.json"
       systemctl restart clawdbot
       HEALTHY=false
       for i in $(seq 1 12); do
@@ -1234,17 +1259,17 @@ write_files:
         HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
         $TG "[OK] ${HN}${HDOM} fully operational. Full config applied. All systems ready." || true
       else
-        cp "$H/.clawdbot/clawdbot.minimal.json" "$H/.clawdbot/clawdbot.json"
-        chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
-        chmod 600 "$H/.clawdbot/clawdbot.json"
+        cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+        chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+        chmod 600 "$H/.openclaw/openclaw.json"
         touch /var/lib/init-status/safe-mode
         for si in $(seq 1 $AC); do
         cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<'SAFEMD'
       # SAFE MODE - Full config failed health checks
-      The full clawdbot config failed to start. You are running minimal config.
+      The full openclaw config failed to start. You are running minimal config.
       Try: sudo /usr/local/bin/try-full-config.sh
       Check: journalctl -u clawdbot -n 100
-      If that fails, check clawdbot.full.json for errors.
+      If that fails, check openclaw.full.json for errors.
       SAFEMD
         chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
       done
@@ -1262,9 +1287,9 @@ write_files:
       AC=${AGENT_COUNT:-1}
       H="/home/$USERNAME"
       echo "Attempting full config at $(date)"
-      cp "$H/.clawdbot/clawdbot.full.json" "$H/.clawdbot/clawdbot.json"
-      chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
-      chmod 600 "$H/.clawdbot/clawdbot.json"
+      cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+      chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+      chmod 600 "$H/.openclaw/openclaw.json"
       systemctl restart clawdbot
       HEALTHY=false
       for i in $(seq 1 12); do
@@ -1282,9 +1307,9 @@ write_files:
         echo "SUCCESS: Full config now active"
         exit 0
       else
-        cp "$H/.clawdbot/clawdbot.minimal.json" "$H/.clawdbot/clawdbot.json"
-        chown $USERNAME:$USERNAME "$H/.clawdbot/clawdbot.json"
-        chmod 600 "$H/.clawdbot/clawdbot.json"
+        cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+        chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+        chmod 600 "$H/.openclaw/openclaw.json"
         systemctl restart clawdbot
         echo "FAILED: Restored minimal config. Check logs: journalctl -u clawdbot"
         exit 1
@@ -1331,6 +1356,21 @@ write_files:
       - If BOOT.md exists, execute it on every heartbeat (do NOT delete).
       - If SAFE_MODE.md exists, follow its instructions to repair the system.
 
+  - path: /etc/systemd/system/openclaw-restore.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Restore openclaw state from Dropbox
+      After=network-online.target
+      Wants=network-online.target
+      Before=clawdbot.service
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/restore-openclaw-state.sh
+      TimeoutStartSec=60
+      RemainAfterExit=yes
+      [Install]
+      WantedBy=multi-user.target
   - path: /etc/systemd/system/clawdbot-sync.service
     permissions: "0644"
     content: |
@@ -1338,7 +1378,7 @@ write_files:
       Description=Sync Clawdbot memory to Dropbox
       [Service]
       Type=oneshot
-      ExecStart=/usr/local/bin/sync-clawdbot-state.sh
+      ExecStart=/usr/local/bin/sync-openclaw-state.sh
       User=root
   - path: /etc/systemd/system/clawdbot-sync.timer
     permissions: "0644"
@@ -1374,7 +1414,7 @@ write_files:
           case "$p" in *:|*:/*|*:/\*) echo "ERROR: refusing rclone: ${role} remote path unsafe: '$p'" >&2; return 1;; esac
           echo "$p" | grep -Eq '^dropbox:clawdbot-memory/[^/]+(/.*)?$' || { echo "ERROR: refusing rclone: ${role} remote path unexpected: '$p'" >&2; return 1; }
         else
-          echo "$p" | grep -Eq '^/home/[^/]+/(clawd|\.clawdbot)(/.*)?$' || { echo "ERROR: refusing rclone: ${role} local path unexpected: '$p'" >&2; return 1; }
+          echo "$p" | grep -Eq '^/home/[^/]+/(clawd|\.openclaw)(/.*)?$' || { echo "ERROR: refusing rclone: ${role} local path unexpected: '$p'" >&2; return 1; }
         fi
         return 0
       }
@@ -1387,11 +1427,11 @@ write_files:
         local cmd arg; cmd="rclone copy $(printf %q "$src") $(printf %q "$dst")"; for arg in "$@"; do cmd+=" $(printf %q "$arg")"; done
         su - "$user" -c "$cmd"
       }
-  - path: /usr/local/bin/restore-clawdbot-state.sh
+  - path: /usr/local/bin/restore-openclaw-state.sh
     permissions: "0755"
     content: |
       #!/bin/bash
-      LOG="/var/log/clawdbot-restore.log"
+      LOG="/var/log/openclaw-restore.log"
       exec > >(tee -a "$LOG") 2>&1
       set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
@@ -1427,12 +1467,12 @@ write_files:
       done
       for i in $(seq 1 $AC); do
         a="agent${i}"
-        TD="$H/.clawdbot/agents/$a/sessions"; mkdir -p "$TD"
+        TD="$H/.openclaw/agents/$a/sessions"; mkdir -p "$TD"
         echo "  sessions: $a"
         safe_rclone_su_copy $USERNAME "$R/agents/${a}/sessions/" "$TD/" --include '*.jsonl' -v || { echo "  WARN: $a sessions failed"; FAIL=$((FAIL+1)); }
       done
-      chown -R $USERNAME:$USERNAME $H/clawd $H/.clawdbot
-      TC=$(find $H/.clawdbot -name '*.jsonl' 2>/dev/null | wc -l)
+      chown -R $USERNAME:$USERNAME $H/clawd $H/.openclaw
+      TC=$(find $H/.openclaw -name '*.jsonl' 2>/dev/null | wc -l)
       echo "Restored $TC transcript files ($FAIL warnings)"
       MC=$(find $H/clawd -name 'MEMORY.md' -o -name 'USER.md' 2>/dev/null | xargs -I{} sh -c '[ -s "{}" ] && echo 1' | wc -l)
       if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
@@ -1440,11 +1480,11 @@ write_files:
         sleep 5
         for i in $(seq 1 $AC); do
           a="agent${i}"
-          TD="$H/.clawdbot/agents/$a/sessions"; mkdir -p "$TD"
+          TD="$H/.openclaw/agents/$a/sessions"; mkdir -p "$TD"
           safe_rclone_su_copy $USERNAME "$R/agents/${a}/sessions/" "$TD/" --include '*.jsonl' -v || true
         done
-        chown -R $USERNAME:$USERNAME $H/.clawdbot
-        TC2=$(find $H/.clawdbot -name '*.jsonl' 2>/dev/null | wc -l)
+        chown -R $USERNAME:$USERNAME $H/.openclaw
+        TC2=$(find $H/.openclaw -name '*.jsonl' 2>/dev/null | wc -l)
         echo "After retry: $TC2 transcript files"
         TC=$TC2
       fi
@@ -1452,7 +1492,7 @@ write_files:
         echo "WARNING: Nothing restored - possible Dropbox token issue"
         $TG "[WARN] Memory restore got 0 files. Dropbox token may be invalid. Bot starting with empty memory." || true
       fi
-  - path: /usr/local/bin/sync-clawdbot-state.sh
+  - path: /usr/local/bin/sync-openclaw-state.sh
     permissions: "0755"
     content: |
       #!/bin/bash
@@ -1476,7 +1516,7 @@ write_files:
         safe_rclone_su_copy $USERNAME "$AD/memory" "$R/agents/${a}/memory" 2>/dev/null || true
       done
       for i in $(seq 1 $AC); do
-        a="agent${i}"; TD="$H/.clawdbot/agents/$a/sessions"
+        a="agent${i}"; TD="$H/.openclaw/agents/$a/sessions"
         [ -d "$TD" ] && safe_rclone_su_copy $USERNAME "$TD/" "$R/agents/${a}/sessions/" --include '*.jsonl' 2>/dev/null || true
       done
   - path: /usr/local/bin/schedule-destruct.sh
@@ -1496,7 +1536,7 @@ write_files:
       set -a; source /etc/droplet.env; set +a
       d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
       [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-      /usr/local/bin/sync-clawdbot-state.sh
+      /usr/local/bin/sync-openclaw-state.sh
       curl -X DELETE -H "Authorization: Bearer $(d "$DO_TOKEN_B64")" "https://api.digitalocean.com/v2/droplets?tag_name=${HABITAT_NAME}"
   - path: /usr/local/bin/rename-bots.sh
     permissions: "0755"

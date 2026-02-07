@@ -6,7 +6,7 @@
 #           phase1 gets the bot online. Installs desktop environment (XFCE),
 #           developer tools, Chrome, configures VNC/XRDP remote access,
 #           installs skills, sets up email/calendar/Dropbox, builds full
-#           clawdbot config, and reboots.
+#           openclaw config, and reboots.
 #
 # Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
 #           /etc/habitat-parsed.env -- parsed habitat config
@@ -16,7 +16,7 @@
 #           /var/lib/init-status/phase2-complete -- completion marker
 #
 # Dependencies: apt-get, npm, set-stage.sh, build-full-config.sh,
-#               restore-clawdbot-state.sh, tg-notify.sh
+#               restore-openclaw-state.sh, tg-notify.sh
 #
 # Original: /usr/local/sbin/phase2-background.sh (in hatch.yaml write_files)
 # =============================================================================
@@ -79,7 +79,7 @@ ExecStart=/bin/bash -c 'echo \$\$ > /tmp/xvfb.pid && exec /usr/bin/Xvfb :10 -scr
 ExecStopPost=/bin/rm -f /tmp/xvfb.pid
 Restart=always
 [Install]
-WantedBy=multi-user.target
+# WantedBy removed - started explicitly after phase2 completes
 SVC
 cat > /etc/systemd/system/desktop.service <<SVC
 [Unit]
@@ -95,7 +95,8 @@ Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
 ExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
-Restart=on-failure
+Restart=always
+RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SVC
@@ -110,9 +111,10 @@ User=$USERNAME
 Environment=DISPLAY=:10
 ExecStartPre=/bin/sleep 3
 ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
-Restart=on-failure
+Restart=always
+RestartSec=5
 [Install]
-WantedBy=multi-user.target
+# WantedBy removed - started explicitly after phase2 completes
 SVC
 mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
 # Write desktop background config BEFORE starting desktop service (fixes race condition)
@@ -127,23 +129,23 @@ fi
 chown -R $USERNAME:$USERNAME $H/.config
 systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc
-systemctl start xvfb
-# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
-for i in {1..30}; do
-  if [ -f /tmp/xvfb.pid ]; then
-    XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
-    # Verify PID exists AND process is actually Xvfb (not a recycled PID)
-    if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
-      if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
-        break
-      fi
-    fi
-  fi
-  sleep 0.5
-done
-systemctl start desktop
-sleep 3
-systemctl start x11vnc
+# MOVED TO END: systemctl start xvfb
+# MOVED TO END: # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+# MOVED TO END: for i in {1..30}; do
+# MOVED TO END:   if [ -f /tmp/xvfb.pid ]; then
+# MOVED TO END:     XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+# MOVED TO END:     # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+# MOVED TO END:     if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+# MOVED TO END:       if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+# MOVED TO END:         break
+# MOVED TO END:       fi
+# MOVED TO END:     fi
+# MOVED TO END:   fi
+# MOVED TO END:   sleep 0.5
+# MOVED TO END: done
+# MOVED TO END: systemctl start desktop
+# MOVED TO END: sleep 3
+# MOVED TO END: systemctl start x11vnc
 mkdir -p $H/Desktop
 cat > $H/Desktop/google-chrome.desktop <<'DESK'
 [Desktop Entry]
@@ -258,14 +260,37 @@ systemctl restart xrdp
 ufw allow 3389/tcp
 #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
 $S 10 "finalizing"
-/usr/local/bin/restore-clawdbot-state.sh
+# Enable and run the restore service (runs before clawdbot restarts)
+systemctl enable openclaw-restore.service 2>/dev/null || true
+systemctl start openclaw-restore.service 2>/dev/null || true
 /usr/local/sbin/build-full-config.sh
 systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 systemctl enable clawdbot-sync.timer 2>/dev/null || true
 systemctl start clawdbot-sync.timer 2>/dev/null || true
+# Start desktop services now that everything is installed
+$S 9 "starting-desktop"
+systemctl start xvfb
+# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+for i in {1..30}; do
+  if [ -f /tmp/xvfb.pid ]; then
+    XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+    # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+    if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+      if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+        break
+      fi
+    fi
+  fi
+  sleep 0.5
+done
+systemctl start desktop
+sleep 3
+systemctl start x11vnc
+systemctl restart xrdp
+
 touch /var/lib/init-status/phase2-complete
 touch /var/lib/init-status/needs-post-boot-check
-GT=$(cat /home/bot/.clawdbot/gateway-token.txt 2>/dev/null)
+GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
 [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
   -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
   -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
