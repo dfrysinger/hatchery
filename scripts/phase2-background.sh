@@ -79,7 +79,7 @@ ExecStart=/bin/bash -c 'echo \$\$ > /tmp/xvfb.pid && exec /usr/bin/Xvfb :10 -scr
 ExecStopPost=/bin/rm -f /tmp/xvfb.pid
 Restart=always
 [Install]
-WantedBy=multi-user.target
+# WantedBy removed - started explicitly after phase2 completes
 SVC
 cat > /etc/systemd/system/desktop.service <<SVC
 [Unit]
@@ -95,7 +95,8 @@ Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
 ExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
-Restart=on-failure
+Restart=always
+RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SVC
@@ -110,9 +111,10 @@ User=$USERNAME
 Environment=DISPLAY=:10
 ExecStartPre=/bin/sleep 3
 ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
-Restart=on-failure
+Restart=always
+RestartSec=5
 [Install]
-WantedBy=multi-user.target
+# WantedBy removed - started explicitly after phase2 completes
 SVC
 mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
 # Write desktop background config BEFORE starting desktop service (fixes race condition)
@@ -127,23 +129,23 @@ fi
 chown -R $USERNAME:$USERNAME $H/.config
 systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc
-systemctl start xvfb
-# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
-for i in {1..30}; do
-  if [ -f /tmp/xvfb.pid ]; then
-    XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
-    # Verify PID exists AND process is actually Xvfb (not a recycled PID)
-    if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
-      if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
-        break
-      fi
-    fi
-  fi
-  sleep 0.5
-done
-systemctl start desktop
-sleep 3
-systemctl start x11vnc
+# MOVED TO END: systemctl start xvfb
+# MOVED TO END: # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+# MOVED TO END: for i in {1..30}; do
+# MOVED TO END:   if [ -f /tmp/xvfb.pid ]; then
+# MOVED TO END:     XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+# MOVED TO END:     # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+# MOVED TO END:     if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+# MOVED TO END:       if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+# MOVED TO END:         break
+# MOVED TO END:       fi
+# MOVED TO END:     fi
+# MOVED TO END:   fi
+# MOVED TO END:   sleep 0.5
+# MOVED TO END: done
+# MOVED TO END: systemctl start desktop
+# MOVED TO END: sleep 3
+# MOVED TO END: systemctl start x11vnc
 mkdir -p $H/Desktop
 cat > $H/Desktop/google-chrome.desktop <<'DESK'
 [Desktop Entry]
@@ -263,6 +265,27 @@ $S 10 "finalizing"
 systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 systemctl enable clawdbot-sync.timer 2>/dev/null || true
 systemctl start clawdbot-sync.timer 2>/dev/null || true
+# Start desktop services now that everything is installed
+$S 9 "starting-desktop"
+systemctl start xvfb
+# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+for i in {1..30}; do
+  if [ -f /tmp/xvfb.pid ]; then
+    XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+    # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+    if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+      if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+        break
+      fi
+    fi
+  fi
+  sleep 0.5
+done
+systemctl start desktop
+sleep 3
+systemctl start x11vnc
+systemctl restart xrdp
+
 touch /var/lib/init-status/phase2-complete
 touch /var/lib/init-status/needs-post-boot-check
 GT=$(cat /home/bot/.clawdbot/gateway-token.txt 2>/dev/null)
