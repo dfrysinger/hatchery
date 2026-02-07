@@ -22,10 +22,10 @@ cloud-init
 ## Scripts
 
 ### phase1-critical.sh
-- **Purpose:** Critical early boot — installs Node.js, clawdbot, creates user, generates minimal config, starts bot gateway
+- **Purpose:** Critical early boot — installs Node.js, openclaw, creates user, generates minimal config, starts bot gateway
 - **Original path:** `/usr/local/sbin/phase1-critical.sh`
 - **Inputs:** `/etc/droplet.env` (all B64-encoded secrets)
-- **Outputs:** `~/.clawdbot/clawdbot.json` (minimal), clawdbot systemd service, `/var/lib/init-status/phase1-complete`
+- **Outputs:** `~/.openclaw/openclaw.json` (minimal), openclaw systemd service, `/var/lib/init-status/phase1-complete`
 - **Dependencies:** `parse-habitat.py`, `tg-notify.sh`, `set-stage.sh`, npm, curl, openssl
 
 ### phase2-background.sh
@@ -33,26 +33,26 @@ cloud-init
 - **Original path:** `/usr/local/sbin/phase2-background.sh`
 - **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env`
 - **Outputs:** Desktop on `:10`, XRDP (port 3389), VNC (port 5900), skills installed, `/var/lib/init-status/phase2-complete`
-- **Dependencies:** apt-get, npm (clawhub), `set-stage.sh`, `build-full-config.sh`, `restore-clawdbot-state.sh`, `tg-notify.sh`
+- **Dependencies:** apt-get, npm (clawhub), `set-stage.sh`, `build-full-config.sh`, `restore-openclaw-state.sh`, `tg-notify.sh`
 
 ### build-full-config.sh
-- **Purpose:** Generates the full `clawdbot.json` with multi-agent support, browser, auth profiles, council, per-agent workspace files
+- **Purpose:** Generates the full `openclaw.json` with multi-agent support, browser, auth profiles, council, per-agent workspace files
 - **Original path:** `/usr/local/sbin/build-full-config.sh`
-- **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `~/.clawdbot/gateway-token.txt`
-- **Outputs:** `~/.clawdbot/clawdbot.full.json`, per-agent `IDENTITY.md`/`SOUL.md`/`AGENTS.md`/`BOOT.md`/`BOOTSTRAP.md`/`USER.md`, `auth-profiles.json`, updated clawdbot.service
+- **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `~/.openclaw/gateway-token.txt`
+- **Outputs:** `~/.openclaw/openclaw.full.json`, per-agent `IDENTITY.md`/`SOUL.md`/`AGENTS.md`/`BOOT.md`/`BOOTSTRAP.md`/`USER.md`, `auth-profiles.json`, updated clawdbot.service
 - **Dependencies:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `bc` (for background color)
 
 ### post-boot-check.sh
 - **Purpose:** Post-reboot health check — switches from minimal to full config, validates, enters safe mode on failure
 - **Original path:** `/usr/local/bin/post-boot-check.sh`
-- **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `~/.clawdbot/clawdbot.full.json`, `/var/lib/init-status/needs-post-boot-check`
+- **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `~/.openclaw/openclaw.full.json`, `/var/lib/init-status/needs-post-boot-check`
 - **Outputs:** `/var/lib/init-status/setup-complete` (success) or `/var/lib/init-status/safe-mode` + `SAFE_MODE.md` (failure)
 - **Dependencies:** `tg-notify.sh`, systemctl, curl
 
 ### try-full-config.sh
 - **Purpose:** Manual tool to retry switching from safe-mode/minimal to full config
 - **Original path:** `/usr/local/bin/try-full-config.sh`
-- **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `~/.clawdbot/clawdbot.full.json`
+- **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `~/.openclaw/openclaw.full.json`
 - **Outputs:** Removes `SAFE_MODE.md` and safe-mode marker on success; restores minimal config on failure
 - **Dependencies:** systemctl, curl
 
@@ -75,13 +75,13 @@ cloud-init
 - **Original path:** `/usr/local/bin/api-server.py`
 - **Inputs:** `/var/lib/init-status/*` (stage/phase files), systemctl
 - **Outputs:** HTTP endpoints: `GET /status`, `GET /health`, `GET /stages`, `POST /sync`, `POST /prepare-shutdown`
-- **Dependencies:** Python 3 (stdlib: http.server, subprocess, json), `/usr/local/bin/sync-clawdbot-state.sh`
+- **Dependencies:** Python 3 (stdlib: http.server, subprocess, json), `/usr/local/bin/sync-openclaw-state.sh`
 
-### restore-clawdbot-state.sh
+### restore-openclaw-state.sh
 - **Purpose:** Restores bot memory (MEMORY.md, USER.md), agent memory dirs, and session transcripts from Dropbox
-- **Original path:** `/usr/local/bin/restore-clawdbot-state.sh`
+- **Original path:** `/usr/local/bin/restore-openclaw-state.sh`
 - **Inputs:** `/etc/droplet.env` (DROPBOX_TOKEN_B64), `/etc/habitat-parsed.env` (HABITAT_NAME, AGENT_COUNT)
-- **Outputs:** Restored memory files and transcripts under `~/clawd/` and `~/.clawdbot/`
+- **Outputs:** Restored memory files and transcripts under `~/clawd/` and `~/.openclaw/`
 - **Dependencies:** rclone, `tg-notify.sh`, `parse-habitat.py`
 
 ### rename-bots.sh
