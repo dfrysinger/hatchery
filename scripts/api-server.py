@@ -3,27 +3,36 @@
 # api-server.py -- Droplet Status API (HTTP server on port 8080)
 # =============================================================================
 # Purpose:  Lightweight HTTP API exposing droplet provisioning status.
-#           Provides /status, /health, /stages (GET) and /sync,
-#           /prepare-shutdown (POST) endpoints.
+#           Provides status, health, config endpoints for droplet management.
 #
 # Endpoints:
 #   GET  /status  -- Full status JSON (phase, stage, services, safe_mode)
 #   GET  /health  -- Health check (200 if bot online, 503 if not)
 #   GET  /stages  -- Raw init-stages.log text
+#   GET  /log     -- Last 8KB of bootstrap/phase logs
+#   GET  /config  -- Config file status (no sensitive data)
 #   POST /sync    -- Trigger openclaw state sync to Dropbox
 #   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown
+#   POST /config/upload -- Upload habitat and/or agents JSON
+#   POST /config/apply  -- Apply uploaded config and restart
 #
-# Dependencies: systemctl, /usr/local/bin/sync-openclaw-state.sh
+# Dependencies: systemctl, /usr/local/bin/sync-openclaw-state.sh,
+#               /usr/local/bin/apply-config.sh
 #
 # Original: /usr/local/bin/api-server.py (in hatch.yaml write_files)
 # =============================================================================
 import http.server,socketserver,subprocess,json,os,base64
 PORT=8080
+HABITAT_PATH='/etc/habitat.json'
+AGENTS_PATH='/etc/agents.json'
+APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
 P1_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
 P2_STAGES={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
+
 def check_service(name):
   try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
   except:return False
+
 def get_status():
   s,p=0,1
   try:
@@ -40,13 +49,59 @@ def get_status():
   desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
   safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
   return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online,"safe_mode":safe_mode,"services":svc if svc else None}
+
+def validate_config_upload(data):
+  """Validate config upload request data."""
+  errors=[]
+  if "habitat" in data and not isinstance(data["habitat"],dict):errors.append("habitat must be an object")
+  if "agents" in data and not isinstance(data["agents"],dict):errors.append("agents must be an object")
+  if "apply" in data and not isinstance(data["apply"],bool):errors.append("apply must be a boolean")
+  return errors
+
+def write_config_file(path,data):
+  """Write config data to file with secure permissions."""
+  try:
+    with open(path,'w') as f:json.dump(data,f,indent=2)
+    os.chmod(path,0o600)
+    return {"ok":True,"path":path}
+  except Exception as e:return {"ok":False,"error":str(e)}
+
+def get_config_status():
+  """Get current config file status without exposing sensitive data."""
+  result={"habitat_exists":os.path.exists(HABITAT_PATH),"agents_exists":os.path.exists(AGENTS_PATH)}
+  if result["habitat_exists"]:
+    stat=os.stat(HABITAT_PATH);result["habitat_modified"]=stat.st_mtime
+    try:
+      with open(HABITAT_PATH,'r') as f:h=json.load(f)
+      result["habitat_name"]=h.get("name","")
+      result["habitat_agent_count"]=len(h.get("agents",[]))
+    except:pass
+  if result["agents_exists"]:
+    stat=os.stat(AGENTS_PATH);result["agents_modified"]=stat.st_mtime
+    try:
+      with open(AGENTS_PATH,'r') as f:a=json.load(f)
+      result["agents_names"]=list(a.keys())
+    except:pass
+  return result
+
+def trigger_config_apply():
+  """Trigger config apply script asynchronously."""
+  try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
+  except Exception as e:return {"ok":False,"error":str(e)}
+
 class H(http.server.BaseHTTPRequestHandler):
   def log_message(self,*a):pass
+  
+  def send_json(self,code,data):
+    self.send_response(code);self.send_header('Content-type','application/json');self.end_headers()
+    self.wfile.write(json.dumps(data).encode())
+  
   def do_GET(self):
     if self.path=='/status':
-      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(get_status()).encode())
+      self.send_json(200,get_status())
     elif self.path=='/health':
-      s=get_status();code=200 if s.get('bot_online') else 503;self.send_response(code);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps({"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc'),"safe_mode":s.get('safe_mode',False)}).encode())
+      s=get_status();code=200 if s.get('bot_online') else 503
+      self.send_json(code,{"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc'),"safe_mode":s.get('safe_mode',False)})
     elif self.path=='/stages':
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
       try:
@@ -59,16 +114,69 @@ class H(http.server.BaseHTTPRequestHandler):
           self.wfile.write(f"\n=== {lf} ===\n".encode())
           with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
         except:self.wfile.write(f"  (not found)\n".encode())
-    else:self.send_response(404);self.end_headers()
+    elif self.path=='/config':
+      self.send_json(200,get_config_status())
+    else:
+      self.send_response(404);self.end_headers()
+  
   def do_POST(self):
+    content_length=int(self.headers.get('Content-Length',0))
+    body=self.rfile.read(content_length) if content_length else b'{}'
+    
     if self.path=='/sync':
-      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-      try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
-      except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+      try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.send_json(200,{"ok":r.returncode==0})
+      except Exception as x:self.send_json(500,{"ok":False,"error":str(x)})
+    
     elif self.path=='/prepare-shutdown':
-      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-      try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
-      except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
-    else:self.send_response(404);self.end_headers()
+      try:
+        subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60)
+        subprocess.run("systemctl stop clawdbot",shell=True,timeout=30)
+        self.send_json(200,{"ok":True,"ready_for_shutdown":True})
+      except Exception as x:self.send_json(500,{"ok":False,"error":str(x)})
+    
+    elif self.path=='/config/upload':
+      try:
+        data=json.loads(body)
+      except json.JSONDecodeError as e:
+        self.send_json(400,{"ok":False,"error":f"Invalid JSON: {e}"});return
+      
+      errors=validate_config_upload(data)
+      if errors:
+        self.send_json(400,{"ok":False,"errors":errors});return
+      
+      files_written=[]
+      
+      # Write habitat config
+      if "habitat" in data:
+        result=write_config_file(HABITAT_PATH,data["habitat"])
+        if not result["ok"]:
+          self.send_json(500,{"ok":False,"error":f"Failed to write habitat: {result.get('error')}"});return
+        files_written.append(HABITAT_PATH)
+      
+      # Write agents library
+      if "agents" in data:
+        result=write_config_file(AGENTS_PATH,data["agents"])
+        if not result["ok"]:
+          self.send_json(500,{"ok":False,"error":f"Failed to write agents: {result.get('error')}"});return
+        files_written.append(AGENTS_PATH)
+      
+      # Apply if requested
+      applied=False
+      if data.get("apply"):
+        apply_result=trigger_config_apply()
+        if not apply_result["ok"]:
+          self.send_json(500,{"ok":False,"error":f"Failed to apply: {apply_result.get('error')}","files_written":files_written});return
+        applied=True
+      
+      self.send_json(200,{"ok":True,"files_written":files_written,"applied":applied})
+    
+    elif self.path=='/config/apply':
+      result=trigger_config_apply()
+      self.send_json(200 if result["ok"] else 500,result)
+    
+    else:
+      self.send_response(404);self.end_headers()
+
 class R(socketserver.TCPServer):allow_reuse_address=True
-with R(("",PORT),H) as h:h.serve_forever()
+if __name__=='__main__':
+  with R(("",PORT),H) as h:h.serve_forever()
