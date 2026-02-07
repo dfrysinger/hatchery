@@ -81,6 +81,44 @@ GET https://raw.githubusercontent.com/dfrysinger/hatchery/main/version.json
 
 See [git log](https://github.com/dfrysinger/hatchery/commits/main) for full history. Current: **v4.3**
 
+## Security
+
+### Dependency Scanning
+
+Hatchery uses `pip-audit` to automatically scan Python dependencies for known security vulnerabilities. This runs on every PR and push to main.
+
+**Run security scan locally:**
+```bash
+pip install pip-audit
+pip-audit
+```
+
+**Handling audit failures:**
+
+If CI fails due to vulnerabilities:
+
+1. **Check severity**: High/critical vulnerabilities block merge
+2. **Upgrade affected package**: 
+   ```bash
+   pip install --upgrade <package-name>
+   pip freeze | grep <package-name> >> requirements.txt
+   ```
+3. **Test after upgrade**: Run `pytest tests/ -v` to verify compatibility
+4. **If no fix available**: Document in GitHub issue, tag maintainers
+
+**Exception process:**
+
+If a vulnerability cannot be fixed (e.g., no patch available, false positive):
+
+1. Create GitHub issue documenting:
+   - CVE/vulnerability ID
+   - Why it cannot be fixed
+   - Risk assessment
+   - Mitigation steps (if any)
+2. Temporarily allow via `pip-audit --ignore-vuln <CVE-ID>` in CI
+3. Add expiry reminder: "Re-evaluate by YYYY-MM-DD"
+4. Requires approval from EL or Judge
+
 ## Contributing Rules
 
 ### ⚠️ ASCII Only in Cloud-Init Files
