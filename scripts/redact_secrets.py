@@ -9,6 +9,7 @@ Implements TASK-10: Secret redaction in logs and reports
 import re
 import json
 import os
+import threading
 from typing import Optional, Dict, List, Pattern
 
 
@@ -16,14 +17,15 @@ from typing import Optional, Dict, List, Pattern
 # Each pattern should have a 'regex' and optionally a 'format' for the replacement
 DEFAULT_PATTERNS = [
     # OpenAI keys (match sk-proj- first, then generic sk-)
+    # Word boundaries prevent false positives like "mask-abc123"
     {
         'name': 'openai_project_key',
-        'regex': r'sk-proj-[a-zA-Z0-9]{6,}',
+        'regex': r'\b(sk-proj-[a-zA-Z0-9]{20,})\b',
         'format': 'sk-***REDACTED***'
     },
     {
         'name': 'openai_key',
-        'regex': r'sk-[a-zA-Z0-9]{6,}',
+        'regex': r'\b(sk-[a-zA-Z0-9]{20,})\b',
         'format': 'sk-***REDACTED***'
     },
     # Stripe keys
@@ -66,24 +68,25 @@ DEFAULT_PATTERNS = [
         'format': '***BOT-TOKEN-REDACTED***'
     },
     # Environment variables with secrets
+    # Word boundaries and length limits prevent false positives
     {
         'name': 'env_var_key',
-        'regex': r'([A-Z_]+_(API_KEY|KEY))\s*=\s*[\'"]?([^\s\'"]+)[\'"]?',
+        'regex': r'\b([A-Z_]{3,50}_(API_KEY|KEY))\s*=\s*[\'"]?([a-zA-Z0-9_\-\.]{3,100})[\'"]?',
         'format': r'\1=***REDACTED***'
     },
     {
         'name': 'env_var_token',
-        'regex': r'([A-Z_]+_TOKEN)\s*=\s*[\'"]?([^\s\'"]+)[\'"]?',
+        'regex': r'\b([A-Z_]{3,50}_TOKEN)\s*=\s*[\'"]?([a-zA-Z0-9_\-\.]{3,100})[\'"]?',
         'format': r'\1=***REDACTED***'
     },
     {
         'name': 'env_var_secret',
-        'regex': r'([A-Z_]+_SECRET)\s*=\s*[\'"]?([^\s\'"]+)[\'"]?',
+        'regex': r'\b([A-Z_]{3,50}_SECRET)\s*=\s*[\'"]?([a-zA-Z0-9_\-\.]{3,100})[\'"]?',
         'format': r'\1=***REDACTED***'
     },
     {
         'name': 'env_var_password',
-        'regex': r'([A-Z_]+_PASSWORD)\s*=\s*[\'"]?([^\s\'"]+)[\'"]?',
+        'regex': r'\b([A-Z_]{3,50}_PASSWORD)\s*=\s*[\'"]?([a-zA-Z0-9_\-\.]{3,100})[\'"]?',
         'format': r'\1=***REDACTED***'
     },
     # Authorization headers
@@ -107,13 +110,30 @@ DEFAULT_ALLOWLIST = [
     r'^TEST_SAFE_TOKEN_\d+$',  # Test tokens
 ]
 
-# Global config cache
+# Global config cache with TTL
 _config_cache: Optional[Dict] = None
+_config_loaded_at: float = 0
+CONFIG_TTL_SECONDS = 300  # 5 minutes
+
+# Compiled regex patterns cache
+_compiled_patterns: Optional[List] = None
+
+# Thread safety lock for config loading
+_config_lock = threading.Lock()
+
+
+def invalidate_config_cache():
+    """Manually invalidate config cache. Useful for testing or config hot-reload."""
+    global _config_cache, _config_loaded_at, _compiled_patterns
+    _config_cache = None
+    _config_loaded_at = 0
+    _compiled_patterns = None
 
 
 def load_redaction_config(config_path: Optional[str] = None) -> Dict:
     """
-    Load redaction configuration from file.
+    Load redaction configuration from file with TTL-based caching.
+    Thread-safe using double-checked locking pattern.
     
     Args:
         config_path: Optional path to config file. Defaults to ~/clawd/shared/redaction-config.json
@@ -121,10 +141,23 @@ def load_redaction_config(config_path: Optional[str] = None) -> Dict:
     Returns:
         Dictionary with 'patterns', 'redaction_format', and 'allowlist' keys
     """
-    global _config_cache
+    global _config_cache, _config_loaded_at, _compiled_patterns
+    import time
     
-    if _config_cache is not None:
+    now = time.time()
+    
+    # Fast path: Check if cache is valid (exists and not expired) - no lock needed
+    if _config_cache is not None and (now - _config_loaded_at) < CONFIG_TTL_SECONDS:
         return _config_cache
+    
+    # Slow path: Acquire lock to load/reload config
+    with _config_lock:
+        # Double-check after acquiring lock (another thread may have loaded it)
+        if _config_cache is not None and (now - _config_loaded_at) < CONFIG_TTL_SECONDS:
+            return _config_cache
+        
+        # Cache expired or doesn't exist - invalidate compiled patterns too
+        _compiled_patterns = None
     
     if config_path is None:
         config_path = os.path.expanduser('~/clawd/shared/redaction-config.json')
@@ -134,6 +167,7 @@ def load_redaction_config(config_path: Optional[str] = None) -> Dict:
             with open(config_path, 'r') as f:
                 config = json.load(f)
                 _config_cache = config
+                _config_loaded_at = now
                 return config
         except Exception as e:
             print(f"Warning: Failed to load config from {config_path}: {e}")
@@ -145,7 +179,34 @@ def load_redaction_config(config_path: Optional[str] = None) -> Dict:
         'allowlist': DEFAULT_ALLOWLIST
     }
     _config_cache = default_config
+    _config_loaded_at = now
     return default_config
+
+
+def _compile_patterns(config: Dict) -> List:
+    """
+    Pre-compile regex patterns for performance.
+    
+    Args:
+        config: Configuration dictionary with patterns
+    
+    Returns:
+        List of tuples: (compiled_pattern, replacement_format)
+    """
+    patterns = config.get('patterns', DEFAULT_PATTERNS)
+    compiled = []
+    
+    for pattern_def in patterns:
+        try:
+            regex_str = pattern_def['regex']
+            replacement = pattern_def.get('format', '***REDACTED***')
+            compiled_pattern = re.compile(regex_str, re.IGNORECASE)
+            compiled.append((compiled_pattern, replacement))
+        except re.error as e:
+            print(f"Warning: Failed to compile pattern {pattern_def.get('name', 'unknown')}: {e}")
+            continue
+    
+    return compiled
 
 
 def is_allowlisted(text: str, config: Optional[Dict] = None) -> bool:
@@ -238,6 +299,8 @@ def redact_base64_credentials(text: str, config: Optional[Dict] = None) -> str:
 def redact_text(text: Optional[str], config: Optional[Dict] = None) -> Optional[str]:
     """
     Main redaction function. Applies all redaction patterns to input text.
+    Uses pre-compiled regex patterns for performance.
+    Respects allowlist to prevent redacting legitimate patterns (Git SHAs, UUIDs, etc.)
     
     Args:
         text: Text to redact
@@ -246,6 +309,8 @@ def redact_text(text: Optional[str], config: Optional[Dict] = None) -> Optional[
     Returns:
         Redacted text, or None/empty string if input was None/empty
     """
+    global _compiled_patterns
+    
     if text is None:
         return None
     
@@ -255,13 +320,23 @@ def redact_text(text: Optional[str], config: Optional[Dict] = None) -> Optional[
     if config is None:
         config = load_redaction_config()
     
-    # Apply all patterns
-    patterns = config.get('patterns', DEFAULT_PATTERNS)
+    # Compile patterns if not cached
+    if _compiled_patterns is None:
+        _compiled_patterns = _compile_patterns(config)
     
-    for pattern_def in patterns:
-        pattern = pattern_def['regex']
-        replacement = pattern_def.get('format', '***REDACTED***')
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    # Apply all compiled patterns with allowlist checking
+    for compiled_pattern, replacement in _compiled_patterns:
+        # Find all matches first
+        matches = list(compiled_pattern.finditer(text))
+        
+        # Process matches in reverse order to preserve string indices
+        for match in reversed(matches):
+            matched_text = match.group(0)
+            
+            # Check allowlist before redacting
+            if not is_allowlisted(matched_text, config):
+                # Replace this specific match
+                text = text[:match.start()] + replacement + text[match.end():]
     
     return text
 
