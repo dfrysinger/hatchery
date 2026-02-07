@@ -300,6 +300,7 @@ def redact_text(text: Optional[str], config: Optional[Dict] = None) -> Optional[
     """
     Main redaction function. Applies all redaction patterns to input text.
     Uses pre-compiled regex patterns for performance.
+    Respects allowlist to prevent redacting legitimate patterns (Git SHAs, UUIDs, etc.)
     
     Args:
         text: Text to redact
@@ -323,9 +324,19 @@ def redact_text(text: Optional[str], config: Optional[Dict] = None) -> Optional[
     if _compiled_patterns is None:
         _compiled_patterns = _compile_patterns(config)
     
-    # Apply all compiled patterns
+    # Apply all compiled patterns with allowlist checking
     for compiled_pattern, replacement in _compiled_patterns:
-        text = compiled_pattern.sub(replacement, text)
+        # Find all matches first
+        matches = list(compiled_pattern.finditer(text))
+        
+        # Process matches in reverse order to preserve string indices
+        for match in reversed(matches):
+            matched_text = match.group(0)
+            
+            # Check allowlist before redacting
+            if not is_allowlisted(matched_text, config):
+                # Replace this specific match
+                text = text[:match.start()] + replacement + text[match.end():]
     
     return text
 

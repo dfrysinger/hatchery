@@ -175,12 +175,50 @@ class TestConfiguration:
     
     def test_allowlist_pattern(self):
         """Allowlisted patterns should not be redacted"""
-        # Assuming we allowlist certain test patterns
+        # TEST_SAFE_TOKEN_\d+ is in the allowlist
         text = "Test pattern: TEST_SAFE_TOKEN_12345"
-        # This would need to be in allowlist
-        # For now, just test the is_allowlisted function exists
         result = is_allowlisted("TEST_SAFE_TOKEN_12345")
-        assert isinstance(result, bool)
+        assert result is True
+        
+        # Verify it's not redacted even though it could match token patterns
+        result_text = redact_text(text)
+        assert "TEST_SAFE_TOKEN_12345" in result_text
+        assert "***REDACTED***" not in result_text
+    
+    def test_git_sha_allowlisted(self):
+        """Git SHAs should be allowlisted (40 hex chars)"""
+        git_sha = "a1b2c3d4e5f6789012345678901234567890abcd"
+        result = is_allowlisted(git_sha)
+        assert result is True
+        
+        # Should not be redacted in text
+        text = f"Commit: {git_sha}"
+        result_text = redact_text(text)
+        assert git_sha in result_text
+    
+    def test_uuid_allowlisted(self):
+        """UUIDs should be allowlisted"""
+        uuid = "123e4567-e89b-12d3-a456-426614174000"
+        result = is_allowlisted(uuid)
+        assert result is True
+        
+        # Should not be redacted in text
+        text = f"ID: {uuid}"
+        result_text = redact_text(text)
+        assert uuid in result_text
+    
+    def test_non_allowlisted_redacted(self):
+        """Non-allowlisted patterns should be redacted"""
+        # This is NOT in the allowlist and matches sk- pattern
+        secret = "sk-1234567890abcdefghij1234567890abcdefghij12345678"
+        result = is_allowlisted(secret)
+        assert result is False
+        
+        # Should be redacted
+        text = f"Secret: {secret}"
+        result_text = redact_text(text)
+        assert secret not in result_text
+        assert "***REDACTED***" in result_text
 
 
 class TestIntegration:
