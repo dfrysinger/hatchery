@@ -9,6 +9,7 @@ Implements TASK-10: Secret redaction in logs and reports
 import re
 import json
 import os
+import threading
 from typing import Optional, Dict, List, Pattern
 
 
@@ -16,14 +17,15 @@ from typing import Optional, Dict, List, Pattern
 # Each pattern should have a 'regex' and optionally a 'format' for the replacement
 DEFAULT_PATTERNS = [
     # OpenAI keys (match sk-proj- first, then generic sk-)
+    # Word boundaries prevent false positives like "mask-abc123"
     {
         'name': 'openai_project_key',
-        'regex': r'sk-proj-[a-zA-Z0-9]{6,}',
+        'regex': r'\b(sk-proj-[a-zA-Z0-9]{20,})\b',
         'format': 'sk-***REDACTED***'
     },
     {
         'name': 'openai_key',
-        'regex': r'sk-[a-zA-Z0-9]{6,}',
+        'regex': r'\b(sk-[a-zA-Z0-9]{20,})\b',
         'format': 'sk-***REDACTED***'
     },
     # Stripe keys
@@ -66,24 +68,25 @@ DEFAULT_PATTERNS = [
         'format': '***BOT-TOKEN-REDACTED***'
     },
     # Environment variables with secrets
+    # Word boundaries and length limits prevent false positives
     {
         'name': 'env_var_key',
-        'regex': r'([A-Z_]+_(API_KEY|KEY))\s*=\s*[\'"]?([^\s\'"]+)[\'"]?',
+        'regex': r'\b([A-Z_]{3,50}_(API_KEY|KEY))\s*=\s*[\'"]?([a-zA-Z0-9_\-\.]{3,100})[\'"]?',
         'format': r'\1=***REDACTED***'
     },
     {
         'name': 'env_var_token',
-        'regex': r'([A-Z_]+_TOKEN)\s*=\s*[\'"]?([^\s\'"]+)[\'"]?',
+        'regex': r'\b([A-Z_]{3,50}_TOKEN)\s*=\s*[\'"]?([a-zA-Z0-9_\-\.]{3,100})[\'"]?',
         'format': r'\1=***REDACTED***'
     },
     {
         'name': 'env_var_secret',
-        'regex': r'([A-Z_]+_SECRET)\s*=\s*[\'"]?([^\s\'"]+)[\'"]?',
+        'regex': r'\b([A-Z_]{3,50}_SECRET)\s*=\s*[\'"]?([a-zA-Z0-9_\-\.]{3,100})[\'"]?',
         'format': r'\1=***REDACTED***'
     },
     {
         'name': 'env_var_password',
-        'regex': r'([A-Z_]+_PASSWORD)\s*=\s*[\'"]?([^\s\'"]+)[\'"]?',
+        'regex': r'\b([A-Z_]{3,50}_PASSWORD)\s*=\s*[\'"]?([a-zA-Z0-9_\-\.]{3,100})[\'"]?',
         'format': r'\1=***REDACTED***'
     },
     # Authorization headers
@@ -115,6 +118,9 @@ CONFIG_TTL_SECONDS = 300  # 5 minutes
 # Compiled regex patterns cache
 _compiled_patterns: Optional[List] = None
 
+# Thread safety lock for config loading
+_config_lock = threading.Lock()
+
 
 def invalidate_config_cache():
     """Manually invalidate config cache. Useful for testing or config hot-reload."""
@@ -127,6 +133,7 @@ def invalidate_config_cache():
 def load_redaction_config(config_path: Optional[str] = None) -> Dict:
     """
     Load redaction configuration from file with TTL-based caching.
+    Thread-safe using double-checked locking pattern.
     
     Args:
         config_path: Optional path to config file. Defaults to ~/clawd/shared/redaction-config.json
@@ -139,12 +146,18 @@ def load_redaction_config(config_path: Optional[str] = None) -> Dict:
     
     now = time.time()
     
-    # Check if cache is valid (exists and not expired)
+    # Fast path: Check if cache is valid (exists and not expired) - no lock needed
     if _config_cache is not None and (now - _config_loaded_at) < CONFIG_TTL_SECONDS:
         return _config_cache
     
-    # Cache expired or doesn't exist - invalidate compiled patterns too
-    _compiled_patterns = None
+    # Slow path: Acquire lock to load/reload config
+    with _config_lock:
+        # Double-check after acquiring lock (another thread may have loaded it)
+        if _config_cache is not None and (now - _config_loaded_at) < CONFIG_TTL_SECONDS:
+            return _config_cache
+        
+        # Cache expired or doesn't exist - invalidate compiled patterns too
+        _compiled_patterns = None
     
     if config_path is None:
         config_path = os.path.expanduser('~/clawd/shared/redaction-config.json')

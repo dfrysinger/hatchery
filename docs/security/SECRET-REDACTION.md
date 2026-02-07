@@ -81,12 +81,20 @@ Each pattern has:
 
 ### Integration Points
 
-The redaction system hooks into:
+The redaction system provides the following integration capabilities:
 
-1. **Discord message sending**: `redact_discord_message()` pre-send hook
-2. **Report generation**: `redact_report()` file write interceptor
-3. **Console logging**: (Future) Python logging interceptor
-4. **Git commits**: (Future) Pre-commit hook
+#### ✅ Currently Implemented
+
+1. **Manual text redaction**: `redact_text()` - Apply redaction to any string
+2. **Discord message hook**: `redact_discord_message()` - Pre-send message redaction
+3. **Report content hook**: `redact_report()` - Redact before writing report files
+4. **File redaction**: `redact_file()` - Redact entire files in-place or to new file
+
+#### ⏳ Future Work (Planned)
+
+1. **Console logging interceptor**: Automatic Python `logging` module integration
+2. **Pre-commit Git hooks**: Block commits containing secrets
+3. **Automatic logging**: Transparent integration without manual `redact_text()` calls
 
 ### Performance
 
