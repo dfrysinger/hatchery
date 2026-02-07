@@ -25,7 +25,7 @@ EXPECTED_SCRIPTS = {
     "build-full-config.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 300},
     "post-boot-check.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 50},
     "try-full-config.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 30},
-    "restore-clawdbot-state.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 50},
+    "restore-openclaw-state.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 50},
     "rename-bots.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 40},
 }
 
@@ -219,13 +219,13 @@ class TestScriptContent:
         assert "build-full-config.sh" in content
 
     def test_build_config_generates_json(self):
-        """build-full-config.sh should generate clawdbot.full.json."""
+        """build-full-config.sh should generate openclaw.full.json."""
         path = os.path.join(SCRIPTS_DIR, "build-full-config.sh")
         if not os.path.isfile(path):
             pytest.skip("build-full-config.sh does not exist")
         with open(path, "r") as f:
             content = f.read()
-        assert "clawdbot.full.json" in content
+        assert "openclaw.full.json" in content
         assert "ANTHROPIC_API_KEY" in content
 
     def test_build_config_multi_agent(self):
@@ -246,7 +246,7 @@ class TestScriptContent:
         with open(path, "r") as f:
             content = f.read()
         assert "safe-mode" in content or "SAFE_MODE" in content
-        assert "clawdbot.minimal.json" in content
+        assert "openclaw.minimal.json" in content
 
     def test_rename_bots_platform_aware(self):
         """rename-bots.sh should handle telegram/discord/both platforms."""
@@ -261,10 +261,10 @@ class TestScriptContent:
         assert "setMyName" in content
 
     def test_restore_uses_rclone(self):
-        """restore-clawdbot-state.sh should use rclone for Dropbox sync."""
-        path = os.path.join(SCRIPTS_DIR, "restore-clawdbot-state.sh")
+        """restore-openclaw-state.sh should use rclone for Dropbox sync."""
+        path = os.path.join(SCRIPTS_DIR, "restore-openclaw-state.sh")
         if not os.path.isfile(path):
-            pytest.skip("restore-clawdbot-state.sh does not exist")
+            pytest.skip("restore-openclaw-state.sh does not exist")
         with open(path, "r") as f:
             content = f.read()
         # Script may use direct rclone copy or safe wrapper
@@ -376,13 +376,13 @@ class TestSetCouncilGroup:
         """Set up a mock environment for testing the script."""
         # Create temp directories structure
         home = tmp_path / "home" / "testuser"
-        clawdbot_dir = home / ".clawdbot"
+        openclaw_dir = home / ".openclaw"
         clawd_dir = home / "clawd"
-        clawdbot_dir.mkdir(parents=True)
+        openclaw_dir.mkdir(parents=True)
         clawd_dir.mkdir(parents=True)
 
         # Create mock config file with telegram enabled
-        config = clawdbot_dir / "clawdbot.json"
+        config = openclaw_dir / "openclaw.json"
         config.write_text('{"channels":{"telegram":{"enabled":true},"discord":{"enabled":true}}}')
 
         # Create mock droplet.env
@@ -507,7 +507,7 @@ class TestScriptsMatchYaml:
             scripts[path] = content
         return scripts
 
-    # NOTE: restore-clawdbot-state.sh is excluded from line-by-line comparison
+    # NOTE: restore-openclaw-state.sh is excluded from line-by-line comparison
     # because standalone uses expanded formatting while hatch.yaml uses compact.
     # Functional equivalence is verified in test_rclone_validation.py.
     YAML_PATH_MAP = {
