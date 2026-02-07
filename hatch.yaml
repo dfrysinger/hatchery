@@ -778,7 +778,9 @@ write_files:
       ufw allow 3389/tcp
       #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
       $S 10 "finalizing"
-      /usr/local/bin/restore-openclaw-state.sh
+      # Enable and run the restore service (runs before clawdbot restarts)
+      systemctl enable openclaw-restore.service 2>/dev/null || true
+      systemctl start openclaw-restore.service 2>/dev/null || true
       /usr/local/sbin/build-full-config.sh
       systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
       systemctl enable clawdbot-sync.timer 2>/dev/null || true
@@ -1149,8 +1151,8 @@ write_files:
       cat > /etc/systemd/system/clawdbot.service <<SVC
       [Unit]
       Description=Clawdbot Gateway
-      After=network.target desktop.service
-      Wants=desktop.service
+      After=network.target desktop.service openclaw-restore.service
+      Wants=desktop.service openclaw-restore.service
       [Service]
       Type=simple
       User=$USERNAME
@@ -1346,6 +1348,21 @@ write_files:
       - If BOOT.md exists, execute it on every heartbeat (do NOT delete).
       - If SAFE_MODE.md exists, follow its instructions to repair the system.
 
+  - path: /etc/systemd/system/openclaw-restore.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Restore openclaw state from Dropbox
+      After=network-online.target
+      Wants=network-online.target
+      Before=clawdbot.service
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/restore-openclaw-state.sh
+      TimeoutStartSec=60
+      RemainAfterExit=yes
+      [Install]
+      WantedBy=multi-user.target
   - path: /etc/systemd/system/clawdbot-sync.service
     permissions: "0644"
     content: |
