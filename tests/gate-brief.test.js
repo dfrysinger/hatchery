@@ -295,5 +295,156 @@ QUESTION for DevOps: CDN configuration?`;
       fs.unlinkSync(temp1);
       fs.unlinkSync(temp2);
     });
+
+    test('enforces 500-word limit with extremely long input reports', async () => {
+      // BUG-002: Validate word count enforcement with very long input
+      // Create very long, realistic reports (each ~2000+ words)
+      const longReport1 = `# Round 1 Report — Claude
+## Topic: Database Migration
+
+## Executive Summary
+- Database migration required, 127 tests passing / 130 total, Coverage: 89%
+
+## Analysis
+### Critical
+- Foreign key constraints need re-validation
+- ${Array(300).fill('Critical consideration with detailed explanation').join(' ')}
+
+### High Priority
+- Backup verification process needed
+- ${Array(200).fill('High priority technical item').join(' ')}
+
+## Considerations
+${Array(300).fill('Trade-off analysis details').join(' ')}
+
+## Recommendation
+**GO** — Migration plan is solid`;
+
+      const longReport2 = `# Round 1 Report — ChatGPT
+## Topic: Security Audit
+
+## Executive Summary
+- 3 high severity vulnerabilities found
+- DISSENT: [security-first] — Delay launch until ALL findings resolved
+
+## Analysis
+### Critical
+- SQL injection vulnerability (CVE-2024-1234)
+- ${Array(250).fill('SQL injection details').join(' ')}
+- XSS vulnerability in profile
+- ${Array(250).fill('XSS analysis').join(' ')}
+
+### High Priority
+- ${Array(200).fill('High severity issue details').join(' ')}
+
+## Open Questions
+QUESTION for Security-Team: Run another audit after fixes?`;
+
+      const longReport3 = `# Round 1 Report — Gemini
+## Topic: Performance Results
+
+## Executive Summary
+- 45 tests passing, avg response 250ms
+
+## Analysis
+### Critical
+- Database N+1 problem
+- ${Array(300).fill('Performance profiling data').join(' ')}
+
+### Recommendations
+${Array(500).fill('Performance optimization details').join(' ')}
+
+DISSENT: [performance-focused] — Need sub-200ms response times`;
+
+      const temp1 = path.join(__dirname, 'temp-verylong-1.md');
+      const temp2 = path.join(__dirname, 'temp-verylong-2.md');
+      const temp3 = path.join(__dirname, 'temp-verylong-3.md');
+      
+      fs.writeFileSync(temp1, longReport1);
+      fs.writeFileSync(temp2, longReport2);
+      fs.writeFileSync(temp3, longReport3);
+
+      const longNotes = Array(500).fill('Additional context info').join(' ');
+      const notesFile = path.join(__dirname, 'temp-longnotes.md');
+      fs.writeFileSync(notesFile, longNotes);
+
+      const brief = await generateBrief({
+        release: 'R3',
+        reports: [temp1, temp2, temp3],
+        notes: notesFile,
+        maxWords: 500
+      });
+
+      // CRITICAL: Verify strict word limit enforcement
+      const wordCount = brief.split(/\s+/).filter(w => w.length > 0).length;
+      assert.ok(wordCount <= 500, `Word count ${wordCount} exceeds limit of 500`);
+
+      // Verify structure maintained even with truncation
+      assert.ok(brief.includes('## Gate Brief'), 'Missing brief header');
+      assert.ok(brief.includes('### Summary'), 'Missing summary section');
+      
+      // Verify critical information is NOT silently lost
+      assert.ok(brief.includes('R3'), 'Release name missing');
+      assert.ok(/\d{4}-\d{2}-\d{2}/.test(brief), 'Date missing');
+      
+      // Verify test numbers are not corrupted
+      const testMatch = brief.match(/(\d+)\s+(?:tests?\s+)?passing/);
+      if (testMatch) {
+        const testCount = parseInt(testMatch[1]);
+        assert.ok(testCount > 0 && testCount < 1000, 'Test count corrupted');
+      }
+      
+      // Verify no broken markdown
+      const headerLines = brief.split('\n').filter(line => line.startsWith('#'));
+      headerLines.forEach(header => {
+        assert.ok(header.length > 2, 'Truncated header found');
+      });
+      
+      // Verify graceful truncation
+      const lastLine = brief.trim().split('\n').pop();
+      assert.ok(/[.…!?]$/.test(lastLine) || /\*\*$/.test(lastLine), 'Brief does not end gracefully');
+
+      fs.unlinkSync(temp1);
+      fs.unlinkSync(temp2);
+      fs.unlinkSync(temp3);
+      fs.unlinkSync(notesFile);
+    });
+
+    test('preserves critical information with mixed report lengths', async () => {
+      // BUG-002: Ensure short critical reports not lost when mixed with long reports
+      const shortReport = `# Report — Claude
+Tests: 42 passing
+DISSENT: [critical-issue] — Must resolve CVE-2024-9999 before launch`;
+
+      const extremelyLongReport = `# Report — ChatGPT
+${Array(2000).fill('Analysis paragraph').join(' ')}
+127 tests passing / 130 total
+${Array(2000).fill('More analysis').join(' ')}`;
+
+      const temp1 = path.join(__dirname, 'temp-mixedshort.md');
+      const temp2 = path.join(__dirname, 'temp-mixedlong.md');
+      
+      fs.writeFileSync(temp1, shortReport);
+      fs.writeFileSync(temp2, extremelyLongReport);
+
+      const brief = await generateBrief({
+        release: 'R3',
+        reports: [temp1, temp2],
+        maxWords: 500
+      });
+
+      const wordCount = brief.split(/\s+/).filter(w => w.length > 0).length;
+      assert.ok(wordCount <= 500, `Word count ${wordCount} exceeds limit`);
+
+      // CRITICAL: Ensure the important DISSENT is not silently lost
+      assert.ok(brief.includes('DISSENT') || brief.includes('CVE-2024-9999') || brief.includes('critical'), 
+        'Critical dissent silently truncated');
+      
+      // Ensure test metrics present
+      assert.ok(/\d+\s+(?:tests?\s+)?passing/.test(brief), 'Test metrics missing');
+
+      fs.unlinkSync(temp1);
+      fs.unlinkSync(temp2);
+    });
   });
 });
