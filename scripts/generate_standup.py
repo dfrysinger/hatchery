@@ -17,7 +17,31 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any
+import logging
 
+
+# Configure logging
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+
+# Constants for task limits (keep output concise for Discord/Slack)
+MAX_COMPLETED_TASKS = 5
+MAX_IN_PROGRESS_TASKS = 5
+MAX_BLOCKED_TASKS = 3
+MAX_UP_NEXT_TASKS = 3
+MAX_NOTES = 2
+
+# Canonical task statuses
+CANONICAL_STATUSES = {
+    "not-started", "assigned", "in-progress",
+    "code-review", "blocked", "done", "completed", "merged"
+}
+
+# Status aliases (non-canonical → canonical)
+STATUS_ALIASES = {
+    "in_progress": "in-progress",
+    "not_started": "not-started",
+    "code_review": "code-review"
+}
 
 DEFAULT_STATE_FILE = os.environ.get(
     'SPRINT_STATE_FILE',
@@ -51,7 +75,11 @@ def load_sprint_state(filepath: str) -> Dict[str, Any]:
 
 def parse_sprint_state(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Parse sprint state and categorize tasks
+    Parse sprint state and categorize tasks.
+    
+    Status values are normalized to lowercase. Common aliases
+    (in_progress → in-progress, not_started → not-started) are
+    mapped automatically with warnings logged for non-canonical values.
     
     Args:
         state: Sprint state dict from JSON
@@ -75,9 +103,8 @@ def parse_sprint_state(state: Dict[str, Any]) -> Dict[str, Any]:
     in_progress = []
     blocked = []
     up_next = []
-    unrecognized_statuses = set()
     
-    # Standardized status mapping
+    # Standardized status mapping to internal categories
     STATUS_MAP = {
         'done': 'completed',
         'completed': 'completed',
@@ -85,6 +112,8 @@ def parse_sprint_state(state: Dict[str, Any]) -> Dict[str, Any]:
         'in-progress': 'in_progress',
         'in_progress': 'in_progress',
         'assigned': 'in_progress',
+        'code-review': 'in_progress',
+        'code_review': 'in_progress',
         'blocked': 'blocked',
         'not-started': 'not_started',
         'not_started': 'not_started',
@@ -93,7 +122,17 @@ def parse_sprint_state(state: Dict[str, Any]) -> Dict[str, Any]:
     
     for task in tasks:
         status = task.get('status', '').lower()
+        task_id = task.get('id', 'UNKNOWN')
         
+        # Check if status uses non-canonical format (underscores instead of hyphens)
+        if status in STATUS_ALIASES:
+            canonical = STATUS_ALIASES[status]
+            logging.warning(
+                f"Task {task_id}: Non-canonical status '{status}' "
+                f"should be '{canonical}'"
+            )
+        
+        # Map to internal category
         normalized_status = STATUS_MAP.get(status)
         
         if normalized_status == 'completed':
@@ -105,17 +144,11 @@ def parse_sprint_state(state: Dict[str, Any]) -> Dict[str, Any]:
         elif normalized_status == 'not_started':
             up_next.append(task)
         else:
-            # Track unrecognized statuses
+            # Warn about unrecognized status
             if status:
-                unrecognized_statuses.add(status)
-                # Default to up_next for unrecognized statuses
-                up_next.append(task)
-    
-    # Warn about unrecognized statuses
-    if unrecognized_statuses:
-        import sys
-        print(f"Warning: Unrecognized task statuses: {', '.join(unrecognized_statuses)}", file=sys.stderr)
-        print(f"Valid statuses: {', '.join(sorted(set(STATUS_MAP.keys())))}", file=sys.stderr)
+                logging.error(f"Task {task_id}: Unknown status '{status}'")
+            # Default to up_next for unrecognized statuses
+            up_next.append(task)
     
     return {
         'release': sprint.get('release', 'Unknown'),
@@ -238,7 +271,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     # Completed
     lines.append("### ✅ Completed Yesterday")
     if completed:
-        for task in completed[:5]:  # Limit to 5 to control length
+        for task in completed[:MAX_COMPLETED_TASKS]:
             lines.append(format_task(task, show_details=False))
     else:
         lines.append("- None")
@@ -247,7 +280,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     # In Progress
     lines.append("### 🏗️ In Progress")
     if in_progress:
-        for task in in_progress[:5]:  # Limit to 5
+        for task in in_progress[:MAX_IN_PROGRESS_TASKS]:
             lines.append(format_task(task, show_details=True))
     else:
         lines.append("- None")
@@ -256,7 +289,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     # Blocked
     lines.append("### ⏸️ Blocked")
     if blocked:
-        for task in blocked[:3]:  # Limit to 3
+        for task in blocked[:MAX_BLOCKED_TASKS]:
             lines.append(format_task(task, show_details=True))
     else:
         lines.append("- None")
@@ -265,7 +298,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     # Up Next
     lines.append("### 📋 Up Next")
     if up_next:
-        for task in up_next[:3]:  # Limit to 3
+        for task in up_next[:MAX_UP_NEXT_TASKS]:
             lines.append(format_task(task, show_details=False))
     else:
         lines.append("- None")
@@ -274,7 +307,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     # Notes
     if sprint_notes:
         lines.append("### Notes")
-        for note in sprint_notes[:2]:  # Limit to 2
+        for note in sprint_notes[:MAX_NOTES]:
             lines.append(f"- {note}")
         lines.append("")
     
@@ -331,7 +364,7 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
     # Completed
     lines.append("*✅ Completed Yesterday*")
     if completed:
-        for task in completed[:5]:
+        for task in completed[:MAX_COMPLETED_TASKS]:
             task_id = task.get('id', 'UNKNOWN')
             title = task.get('title', 'No title')[:50]
             assignee = task.get('assignee', '')
@@ -344,7 +377,7 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
     # In Progress
     lines.append("*🏗️ In Progress*")
     if in_progress:
-        for task in in_progress[:5]:
+        for task in in_progress[:MAX_IN_PROGRESS_TASKS]:
             task_id = task.get('id', 'UNKNOWN')
             title = task.get('title', 'No title')[:50]
             assignee = task.get('assignee', '')
@@ -359,7 +392,7 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
     # Blocked
     lines.append("*⏸️ Blocked*")
     if blocked:
-        for task in blocked[:3]:
+        for task in blocked[:MAX_BLOCKED_TASKS]:
             task_id = task.get('id', 'UNKNOWN')
             title = task.get('title', 'No title')[:50]
             assignee = task.get('assignee', '')
@@ -380,7 +413,7 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
     # Up Next
     lines.append("*📋 Up Next*")
     if up_next:
-        for task in up_next[:3]:
+        for task in up_next[:MAX_UP_NEXT_TASKS]:
             task_id = task.get('id', 'UNKNOWN')
             title = task.get('title', 'No title')[:50]
             lines.append(f"• {task_id}: {title}")

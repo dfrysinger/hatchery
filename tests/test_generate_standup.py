@@ -280,6 +280,45 @@ class TestStandupFormatter:
         # Should still have section headers but indicate nothing to report
         assert "## Daily Standup" in output
         assert "**Release:**" in output
+    
+    def test_format_slack(self):
+        """BUG-005: Slack format should be properly implemented with mrkdwn"""
+        data = {
+            "release": "R1",
+            "release_name": "Test Sprint",
+            "completed": [
+                {"id": "TASK-1", "title": "Complete task", "assignee": "worker-1"}
+            ],
+            "in_progress": [
+                {"id": "TASK-2", "title": "In progress task", "assignee": "worker-2",
+                 "notes": ["Working on it"]}
+            ],
+            "blocked": [
+                {"id": "TASK-3", "title": "Blocked task", "assignee": "worker-3",
+                 "blockers": [{"description": "Waiting for approval"}]}
+            ],
+            "up_next": [
+                {"id": "TASK-4", "title": "Next task"}
+            ],
+            "sprint_notes": []
+        }
+        
+        output = gs.format_slack(data, date="2026-02-07")
+        
+        # Check Slack mrkdwn formatting (bold with asterisks, bullets with •)
+        assert "*Daily Standup" in output
+        assert "*Release:*" in output
+        assert "R1 — Test Sprint" in output
+        assert "*✅ Completed Yesterday*" in output
+        assert "• TASK-1" in output
+        assert "*🏗️ In Progress*" in output
+        assert "• TASK-2" in output
+        assert "Working on it" in output
+        assert "*⏸️ Blocked*" in output
+        assert "• TASK-3" in output
+        assert "Waiting for approval" in output
+        assert "*📋 Up Next*" in output
+        assert "• TASK-4" in output
 
 
 class TestCLIInterface:
