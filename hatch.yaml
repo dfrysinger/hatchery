@@ -1256,7 +1256,7 @@ write_files:
         for si in $(seq 1 $AC); do
         cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<'SAFEMD'
       # SAFE MODE - Full config failed health checks
-      The full clawdbot config failed to start. You are running minimal config.
+      The full openclaw config failed to start. You are running minimal config.
       Try: sudo /usr/local/bin/try-full-config.sh
       Check: journalctl -u clawdbot -n 100
       If that fails, check openclaw.full.json for errors.
