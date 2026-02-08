@@ -1,25 +1,4 @@
 #!/bin/bash
-# =============================================================================
-# phase2-background.sh -- Background setup: desktop, tools, remote access
-# =============================================================================
-# Purpose:  Second phase of droplet provisioning, runs in the background after
-#           phase1 gets the bot online. Installs desktop environment (XFCE),
-#           developer tools, Chrome, configures VNC/XRDP remote access,
-#           installs skills, sets up email/calendar/Dropbox, builds full
-#           openclaw config, and reboots.
-#
-# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
-#           /etc/habitat-parsed.env -- parsed habitat config
-#
-# Outputs:  Desktop environment on :10, XRDP on port 3389, VNC on 5900 (localhost only)
-#           Skills installed, full config built, state restored from Dropbox
-#           /var/lib/init-status/phase2-complete -- completion marker
-#
-# Dependencies: apt-get, npm, set-stage.sh, build-full-config.sh,
-#               restore-openclaw-state.sh, tg-notify.sh
-#
-# Original: /usr/local/sbin/phase2-background.sh (in hatch.yaml write_files)
-# =============================================================================
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
@@ -131,18 +110,18 @@ chown -R $USERNAME:$USERNAME $H/.config
 systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc
 # MOVED TO END: systemctl start xvfb
-# MOVED TO END: # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
 # MOVED TO END: for i in {1..30}; do
-# MOVED TO END:   if [ -f /tmp/xvfb.pid ]; then
-# MOVED TO END:     XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
-# MOVED TO END:     # Verify PID exists AND process is actually Xvfb (not a recycled PID)
-# MOVED TO END:     if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
-# MOVED TO END:       if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
-# MOVED TO END:         break
-# MOVED TO END:       fi
-# MOVED TO END:     fi
-# MOVED TO END:   fi
-# MOVED TO END:   sleep 0.5
+  # MOVED TO END: if [ -f /tmp/xvfb.pid ]; then
+    # MOVED TO END: XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+    # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+    # MOVED TO END: if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+      # MOVED TO END: if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+        # MOVED TO END: break
+      # MOVED TO END: fi
+    # MOVED TO END: fi
+  # MOVED TO END: fi
+  # MOVED TO END: sleep 0.5
 # MOVED TO END: done
 # MOVED TO END: systemctl start desktop
 # MOVED TO END: sleep 3
@@ -288,7 +267,6 @@ systemctl start desktop
 sleep 3
 systemctl start x11vnc
 systemctl restart xrdp
-
 touch /var/lib/init-status/phase2-complete
 touch /var/lib/init-status/needs-post-boot-check
 GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
@@ -303,3 +281,4 @@ HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
 $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
 sleep 5
 reboot
+
