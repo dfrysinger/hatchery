@@ -67,12 +67,27 @@ write_files:
     permissions: "0755"
     content: |
       #!/usr/bin/env python3
+      # Supports v2 (platforms.X, tokens.X) and v1 (top-level X, XBotToken) schemas
       import json, base64, os, sys
       def d(val):
           try: return base64.b64decode(val).decode()
           except: return ""
       def b64(s):
           return base64.b64encode((s or "").encode()).decode()
+      def get_platform_config(hab, platform_name):
+          platforms = hab.get("platforms", {})
+          if platform_name in platforms:
+              return platforms[platform_name]
+          return hab.get(platform_name, {})
+      def get_agent_token(agent_ref, platform_name):
+          tokens = agent_ref.get("tokens", {})
+          if platform_name in tokens:
+              return tokens[platform_name]
+          if platform_name == "discord":
+              return agent_ref.get("discordBotToken", "")
+          elif platform_name == "telegram":
+              return agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
+          return ""
       hab_raw = os.environ.get('HABITAT_B64', '')
       lib_raw = os.environ.get('AGENT_LIB_B64', '')
       if not hab_raw:
@@ -102,14 +117,14 @@ write_files:
           platform = hab.get("platform", "telegram")
           f.write('PLATFORM="{}"\n'.format(platform))
           f.write('PLATFORM_B64="{}"\n'.format(b64(platform)))
-          # Discord config
-          discord_cfg = hab.get("discord", {})
+          # Discord config (v2: platforms.discord, v1: discord)
+          discord_cfg = get_platform_config(hab, "discord")
           f.write('DISCORD_GUILD_ID="{}"\n'.format(discord_cfg.get("serverId", "")))
           f.write('DISCORD_GUILD_ID_B64="{}"\n'.format(b64(discord_cfg.get("serverId", ""))))
           f.write('DISCORD_OWNER_ID="{}"\n'.format(discord_cfg.get("ownerId", "")))
           f.write('DISCORD_OWNER_ID_B64="{}"\n'.format(b64(discord_cfg.get("ownerId", ""))))
-          # Telegram config
-          telegram_cfg = hab.get("telegram", {})
+          # Telegram config (v2: platforms.telegram, v1: telegram)
+          telegram_cfg = get_platform_config(hab, "telegram")
           telegram_owner_id = telegram_cfg.get("ownerId", "")
           f.write('TELEGRAM_OWNER_ID="{}"\n'.format(telegram_owner_id))
           f.write('TELEGRAM_OWNER_ID_B64="{}"\n'.format(b64(telegram_owner_id)))
@@ -145,10 +160,9 @@ write_files:
               boot = lib_entry.get("boot", "")
               bootstrap = lib_entry.get("bootstrap", "")
               user = lib_entry.get("user", "")
-              # Telegram bot token: prefer telegramBotToken, fall back to botToken for compat
-              tg_bot_token = agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
-              # Discord bot token
-              dc_bot_token = agent_ref.get("discordBotToken", "")
+              # Get tokens (v2: tokens.X, v1: XBotToken)
+              tg_bot_token = get_agent_token(agent_ref, "telegram")
+              dc_bot_token = get_agent_token(agent_ref, "discord")
               f.write('AGENT{}_NAME="{}"\n'.format(n, name))
               f.write('AGENT{}_NAME_B64="{}"\n'.format(n, b64(name)))
               # Backward compat: BOT_TOKEN = telegram bot token
