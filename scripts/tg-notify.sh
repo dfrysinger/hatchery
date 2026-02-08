@@ -1,20 +1,4 @@
 #!/bin/bash
-# =============================================================================
-# tg-notify.sh -- Send notifications via Telegram and/or Discord
-# =============================================================================
-# Purpose:  Platform-aware notification sender. Sends a message to the bot
-#           owner via Telegram API and/or Discord DM based on PLATFORM config.
-#
-# Usage:    tg-notify.sh "Your message here"
-#
-# Inputs:   /etc/droplet.env -- PLATFORM_B64, TELEGRAM_USER_ID_B64
-#           /etc/habitat-parsed.env -- AGENT1_BOT_TOKEN, AGENT1_DISCORD_BOT_TOKEN,
-#                                      DISCORD_OWNER_ID, PLATFORM
-#
-# Dependencies: curl, python3, parse-habitat.py
-#
-# Original: /usr/local/bin/tg-notify.sh (in hatch.yaml write_files)
-# =============================================================================
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null

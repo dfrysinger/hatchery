@@ -1,17 +1,4 @@
 #!/bin/bash
-# =============================================================================
-# phase2-background.sh -- Background phase 2 provisioning (desktop/tools)
-# =============================================================================
-# Purpose:  Installs desktop environment, developer tools, browser, skills,
-#           and configures all services after phase 1 (bot) is complete.
-#
-# Runs:     As background job spawned by phase1-critical.sh
-# Stages:   4 (desktop-env) through 10 (finalizing)
-# Log:      /var/log/phase2.log
-# Marker:   Creates /var/lib/init-status/phase2-complete when done
-#
-# Original: /usr/local/sbin/phase2-background.sh (in hatch.yaml write_files)
-# =============================================================================
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
@@ -65,6 +52,7 @@ cat > /etc/systemd/system/xvfb.service <<SVC
 Description=Xvfb on :10
 After=network.target
 [Service]
+EnvironmentFile=/etc/api-server.env
 Type=simple
 User=$USERNAME
 ExecStart=/bin/bash -c 'echo \$\$ > /tmp/xvfb.pid && exec /usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac'
@@ -79,6 +67,7 @@ Description=XFCE Desktop
 After=xvfb.service
 Requires=xvfb.service
 [Service]
+EnvironmentFile=/etc/api-server.env
 Type=simple
 User=$USERNAME
 Environment=DISPLAY=:10
@@ -99,6 +88,7 @@ After=desktop.service
 Requires=desktop.service
 ConditionPathExists=/var/lib/init-status/phase2-complete
 [Service]
+EnvironmentFile=/etc/api-server.env
 Type=simple
 User=$USERNAME
 Environment=DISPLAY=:10
@@ -294,4 +284,3 @@ HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
 $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
 sleep 5
 reboot
-

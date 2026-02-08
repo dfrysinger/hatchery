@@ -1,23 +1,4 @@
 #!/bin/bash
-# =============================================================================
-# phase1-critical.sh -- Early boot: get bot online ASAP
-# =============================================================================
-# Purpose:  Critical first phase of droplet provisioning. Installs Node.js,
-#           openclaw, creates user account, generates minimal openclaw.json
-#           config, starts the openclaw gateway service, and notifies owner.
-#           Launches phase2-background.sh when complete.
-#
-# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
-#           /etc/habitat-parsed.env -- parsed habitat config (generated here)
-#
-# Outputs:  /home/$USERNAME/.openclaw/openclaw.json -- minimal bot config
-#           /etc/systemd/system/clawdbot.service -- systemd unit
-#           /var/lib/init-status/phase1-complete -- completion marker
-#
-# Dependencies: parse-habitat.py, tg-notify.sh, set-stage.sh, npm, curl
-#
-# Original: /usr/local/sbin/phase1-critical.sh (in hatch.yaml write_files)
-# =============================================================================
 set -e
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
@@ -154,6 +135,7 @@ cat > /etc/systemd/system/clawdbot.service <<SVC
 Description=Clawdbot Gateway
 After=network.target
 [Service]
+EnvironmentFile=/etc/api-server.env
 Type=simple
 User=$USERNAME
 WorkingDirectory=$H

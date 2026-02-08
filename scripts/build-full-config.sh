@@ -1,28 +1,6 @@
 #!/bin/bash
-# =============================================================================
-# build-full-config.sh -- Generate full openclaw.json with all features
-# =============================================================================
-# Purpose:  Builds the complete openclaw configuration with multi-agent
-#           support, browser config, auth profiles, skills, council setup,
-#           desktop integration, and all per-agent workspace files
-#           (IDENTITY.md, SOUL.md, AGENTS.md, BOOT.md, BOOTSTRAP.md, USER.md).
-#
-# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
-#           /etc/habitat-parsed.env -- parsed habitat config
-#           $HOME/.openclaw/gateway-token.txt -- gateway auth token
-#
-# Outputs:  $HOME/.openclaw/openclaw.full.json -- full config
-#           $HOME/.openclaw/agents/*/agent/auth-profiles.json -- auth creds
-#           $HOME/clawd/agents/*/IDENTITY.md, SOUL.md, AGENTS.md, etc.
-#           /etc/systemd/system/clawdbot.service -- updated systemd unit
-#
-# Dependencies: /etc/droplet.env, /etc/habitat-parsed.env, bc (for bg color), jq
-#
-# Original: /usr/local/sbin/build-full-config.sh (in hatch.yaml write_files)
-# =============================================================================
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-
 # JSON escape function: properly escapes quotes, backslashes, newlines, control chars
 json_escape() { local e; e=$(printf '%s' "$1" | jq -Rs .); e="${e#\"}"; e="${e%\"}"; printf '%s' "$e"; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
@@ -359,6 +337,7 @@ Description=Clawdbot Gateway
 After=network.target desktop.service openclaw-restore.service
 Wants=desktop.service openclaw-restore.service
 [Service]
+EnvironmentFile=/etc/api-server.env
 Type=simple
 User=$USERNAME
 WorkingDirectory=$H

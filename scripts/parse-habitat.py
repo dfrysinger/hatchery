@@ -1,20 +1,4 @@
 #!/usr/bin/env python3
-# =============================================================================
-# parse-habitat.py -- Parse HABITAT_B64 JSON into /etc/habitat-parsed.env
-# =============================================================================
-# Purpose:  Decodes the base64-encoded habitat JSON from the environment,
-#           writes /etc/habitat.json and /etc/habitat-parsed.env with all
-#           agent configs, platform settings, council config, and global
-#           identity/soul/boot fields as shell-sourceable env vars.
-#
-# Inputs:   HABITAT_B64 (required) -- base64-encoded habitat JSON
-#           AGENT_LIB_B64 (optional) -- base64-encoded agent library JSON
-#
-# Outputs:  /etc/habitat.json -- raw habitat JSON
-#           /etc/habitat-parsed.env -- shell-sourceable env vars
-#
-# Original: /usr/local/bin/parse-habitat.py (in hatch.yaml write_files)
-# =============================================================================
 import json, base64, os, sys
 def d(val):
     try: return base64.b64decode(val).decode()

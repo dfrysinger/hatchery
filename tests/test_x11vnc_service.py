@@ -26,30 +26,12 @@ def read_hatch_yaml():
 def extract_x11vnc_service_unit(content: str) -> str:
     """Extract the x11vnc.service unit file content from hatch.yaml.
     
-    The YAML stores script content as quoted strings with escaped newlines (\\n).
-    We need to handle both raw newlines and escaped newlines.
-    
-    Looks for the heredoc pattern:
+    Looks for the heredoc pattern in phase2-background.sh:
         cat > /etc/systemd/system/x11vnc.service <<SVC
         ... unit content ...
         SVC
     """
-    # First, try to find the phase2-background.sh content field
-    # The YAML uses escaped \\n for newlines in quoted strings
-    phase2_pattern = r'path:\s*/usr/local/sbin/phase2-background\.sh.*?content:\s*"(.*?)"(?=\s*-\s*path:|$)'
-    phase2_match = re.search(phase2_pattern, content, re.DOTALL)
-    
-    if phase2_match:
-        # Decode escaped newlines in the YAML string
-        script_content = phase2_match.group(1).replace('\\n', '\n')
-        
-        # Now search for the heredoc within the decoded content
-        pattern = r'cat\s*>\s*/etc/systemd/system/x11vnc\.service\s*<<\s*SVC\s*\n(.*?)\n\s*SVC'
-        match = re.search(pattern, script_content, re.DOTALL)
-        if match:
-            return match.group(1)
-    
-    # Fallback: try the original pattern for files with literal newlines
+    # Find the heredoc in the phase2-background.sh script
     pattern = r'cat\s*>\s*/etc/systemd/system/x11vnc\.service\s*<<\s*SVC\s*\n(.*?)\n\s*SVC'
     match = re.search(pattern, content, re.DOTALL)
     if match:
