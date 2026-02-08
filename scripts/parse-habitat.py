@@ -131,8 +131,8 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     f.write('COUNCIL_JUDGE="{}"\n'.format(council.get("judge", "")))
     f.write('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
 
-    # API server bind address (default: 0.0.0.0 for iOS Shortcut remote access)
-    f.write('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "0.0.0.0")))
+    # API server bind address (default: 127.0.0.1 for security; set to 0.0.0.0 for remote access)
+    f.write('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "127.0.0.1")))
 
     f.write('GLOBAL_IDENTITY_B64="{}"\n'.format(b64(hab.get("globalIdentity", ""))))
     f.write('GLOBAL_BOOT_B64="{}"\n'.format(b64(hab.get("globalBoot", ""))))
