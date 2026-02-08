@@ -143,6 +143,25 @@ See [git log](https://github.com/dfrysinger/hatchery/commits/main) for full hist
 
 ## Security
 
+> **📖 See [docs/SECURITY.md](docs/SECURITY.md) for the full security architecture.**
+
+### Network Security Model
+
+Hatchery uses **defense-in-depth** with multiple layers:
+
+1. **DigitalOcean Cloud Firewall** — Primary protection. Only your phone's IP can reach the droplet.
+2. **HMAC Authentication** — Sensitive API endpoints require signed requests.
+3. **UFW** (optional) — Host-level backup firewall.
+
+**Why the API binds to 0.0.0.0:**
+- iOS Shortcuts need direct HTTP access (can't use localhost)
+- DO Firewall blocks all traffic except from your allowlisted IP
+- HMAC protects sensitive endpoints (`/sync`, `/prepare-shutdown`, `/config/*`)
+- Info-only endpoints (`/status`, `/health`) are safe even if exposed
+
+**Dynamic IP Handling:**
+Your phone's IP changes often. The "Repair Habitat Firewall" Shortcut updates DO Firewall rules instantly when your IP changes.
+
 ### Dependency Scanning
 
 Hatchery uses `pip-audit` to automatically scan Python dependencies for known security vulnerabilities. This runs on every PR and push to main.
