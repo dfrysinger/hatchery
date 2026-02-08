@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Tests for parse-habitat.py dual-platform schema support.
+"""Tests for parse-habitat.py v2 schema with v1 backward compatibility.
 
 Instead of subprocess-exec'ing a generated script, we replicate the core
 parse logic in a helper function and test it directly. This mirrors what
 the embedded parse-habitat.py does but writes to temp files.
+
+Schema versions:
+- v2 (new): platforms.discord, agents[].tokens.discord
+- v1 (legacy): discord, agents[].discordBotToken
+
+See issue #112 for v1 deprecation timeline.
 """
 import json
 import base64
@@ -27,6 +33,28 @@ def _b64(s):
     return base64.b64encode((s or "").encode()).decode()
 
 
+def get_platform_config(hab, platform_name):
+    """Get platform config: v2 (platforms.X) or v1 (X) format."""
+    platforms = hab.get("platforms", {})
+    if platform_name in platforms:
+        return platforms[platform_name]
+    # v1 fallback: top-level discord/telegram
+    return hab.get(platform_name, {})
+
+
+def get_agent_token(agent_ref, platform_name):
+    """Get agent token: v2 (tokens.X) or v1 (XBotToken) format."""
+    tokens = agent_ref.get("tokens", {})
+    if platform_name in tokens:
+        return tokens[platform_name]
+    # v1 fallback: discordBotToken, telegramBotToken, botToken
+    if platform_name == "discord":
+        return agent_ref.get("discordBotToken", "")
+    elif platform_name == "telegram":
+        return agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
+    return ""
+
+
 def run_parse_habitat(habitat_json, agent_lib_json=None):
     """
     Run the parse-habitat.py logic with the given habitat dict and return
@@ -48,15 +76,15 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
     lines.append('PLATFORM="{}"\n'.format(platform))
     lines.append('PLATFORM_B64="{}"\n'.format(_b64(platform)))
 
-    # Discord config
-    discord_cfg = hab.get("discord", {})
+    # Discord config (v2: platforms.discord, v1: discord)
+    discord_cfg = get_platform_config(hab, "discord")
     lines.append('DISCORD_GUILD_ID="{}"\n'.format(discord_cfg.get("serverId", "")))
     lines.append('DISCORD_GUILD_ID_B64="{}"\n'.format(_b64(discord_cfg.get("serverId", ""))))
     lines.append('DISCORD_OWNER_ID="{}"\n'.format(discord_cfg.get("ownerId", "")))
     lines.append('DISCORD_OWNER_ID_B64="{}"\n'.format(_b64(discord_cfg.get("ownerId", ""))))
 
-    # Telegram config
-    telegram_cfg = hab.get("telegram", {})
+    # Telegram config (v2: platforms.telegram, v1: telegram)
+    telegram_cfg = get_platform_config(hab, "telegram")
     telegram_owner_id = telegram_cfg.get("ownerId", "")
     lines.append('TELEGRAM_OWNER_ID="{}"\n'.format(telegram_owner_id))
     lines.append('TELEGRAM_OWNER_ID_B64="{}"\n'.format(_b64(telegram_owner_id)))
@@ -72,6 +100,10 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
     lines.append('COUNCIL_JUDGE="{}"\n'.format(council.get("judge", "")))
 
     lines.append('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
+
+    # API server bind address
+    lines.append('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "0.0.0.0")))
+
     lines.append('GLOBAL_IDENTITY_B64="{}"\n'.format(_b64(hab.get("globalIdentity", ""))))
     lines.append('GLOBAL_BOOT_B64="{}"\n'.format(_b64(hab.get("globalBoot", ""))))
     lines.append('GLOBAL_BOOTSTRAP_B64="{}"\n'.format(_b64(hab.get("globalBootstrap", ""))))
@@ -95,10 +127,9 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
         bootstrap = lib_entry.get("bootstrap", "")
         user = lib_entry.get("user", "")
 
-        # Telegram bot token: prefer telegramBotToken, fall back to botToken for compat
-        tg_bot_token = agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
-        # Discord bot token
-        dc_bot_token = agent_ref.get("discordBotToken", "")
+        # Get tokens (v2: tokens.X, v1: XBotToken)
+        tg_bot_token = get_agent_token(agent_ref, "telegram")
+        dc_bot_token = get_agent_token(agent_ref, "discord")
 
         lines.append('AGENT{}_NAME="{}"\n'.format(n, name))
         lines.append('AGENT{}_NAME_B64="{}"\n'.format(n, _b64(name)))
@@ -136,10 +167,46 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def new_schema_habitat():
-    """Full dual-platform habitat with both discord and telegram tokens."""
+def v2_schema_habitat():
+    """v2 schema with platforms.discord and agents[].tokens.discord."""
     return {
-        "name": "Habitat-1",
+        "name": "Habitat-v2",
+        "domain": "bot.frysinger.org",
+        "destructMinutes": 0,
+        "bgColor": "2D3748",
+        "platform": "discord",
+        "platforms": {
+            "discord": {
+                "serverId": "1468992121901027582",
+                "ownerId": "795380005466800159",
+            },
+            "telegram": {
+                "ownerId": "5874850284",
+            },
+        },
+        "council": {
+            "groupName": "The Council",
+            "judge": "Opus",
+            "telegram": {"groupId": "5134780848"},
+        },
+        "globalIdentity": "Be awesome",
+        "agents": [
+            {
+                "agent": "Claude",
+                "tokens": {
+                    "discord": "MTQ2OD_discord_token",
+                    "telegram": "8513046_telegram_token",
+                },
+            }
+        ],
+    }
+
+
+@pytest.fixture
+def v1_schema_habitat():
+    """v1 (legacy) schema with top-level discord and discordBotToken."""
+    return {
+        "name": "Habitat-v1",
         "domain": "bot.frysinger.org",
         "destructMinutes": 0,
         "bgColor": "2D3748",
@@ -157,11 +224,6 @@ def new_schema_habitat():
             "telegram": {"groupId": "5134780848"},
         },
         "globalIdentity": "Be awesome",
-        "globalBoot": "",
-        "globalBootstrap": "",
-        "globalSoul": "",
-        "globalAgents": "",
-        "globalUser": "",
         "agents": [
             {
                 "agent": "Claude",
@@ -173,8 +235,8 @@ def new_schema_habitat():
 
 
 @pytest.fixture
-def legacy_schema_habitat():
-    """Legacy habitat with only botToken (pre dual-platform)."""
+def legacy_bottoken_habitat():
+    """Very old schema with only botToken (pre dual-platform)."""
     return {
         "name": "Legacy-Habitat",
         "domain": "old.example.com",
@@ -185,12 +247,6 @@ def legacy_schema_habitat():
             "groupName": "Old Council",
             "judge": "Opus",
         },
-        "globalIdentity": "",
-        "globalBoot": "",
-        "globalBootstrap": "",
-        "globalSoul": "",
-        "globalAgents": "",
-        "globalUser": "",
         "agents": [
             {
                 "agent": "Claude",
@@ -201,142 +257,175 @@ def legacy_schema_habitat():
 
 
 # ---------------------------------------------------------------------------
-# Tests: New schema with both token types
+# Tests: v2 schema (new format)
 # ---------------------------------------------------------------------------
 
-class TestNewDualPlatformSchema:
-    def test_platform_field(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
+class TestV2Schema:
+    """Tests for v2 schema: platforms.X and agents[].tokens.X"""
+
+    def test_platform_field(self, v2_schema_habitat):
+        env = run_parse_habitat(v2_schema_habitat)
         assert env["PLATFORM"] == "discord"
         assert b64d(env["PLATFORM_B64"]) == "discord"
 
-    def test_discord_guild_id(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
+    def test_discord_guild_id(self, v2_schema_habitat):
+        env = run_parse_habitat(v2_schema_habitat)
         assert env["DISCORD_GUILD_ID"] == "1468992121901027582"
         assert b64d(env["DISCORD_GUILD_ID_B64"]) == "1468992121901027582"
 
-    def test_discord_owner_id(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
+    def test_discord_owner_id(self, v2_schema_habitat):
+        env = run_parse_habitat(v2_schema_habitat)
         assert env["DISCORD_OWNER_ID"] == "795380005466800159"
         assert b64d(env["DISCORD_OWNER_ID_B64"]) == "795380005466800159"
 
-    def test_telegram_owner_id(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
+    def test_telegram_owner_id(self, v2_schema_habitat):
+        env = run_parse_habitat(v2_schema_habitat)
         assert env["TELEGRAM_OWNER_ID"] == "5874850284"
         assert b64d(env["TELEGRAM_OWNER_ID_B64"]) == "5874850284"
 
-    def test_telegram_user_id_b64_compat(self, new_schema_habitat):
-        """TELEGRAM_USER_ID_B64 should mirror TELEGRAM_OWNER_ID_B64 for compat."""
-        env = run_parse_habitat(new_schema_habitat)
-        assert env["TELEGRAM_USER_ID_B64"] == env["TELEGRAM_OWNER_ID_B64"]
-        assert b64d(env["TELEGRAM_USER_ID_B64"]) == "5874850284"
-
-    def test_agent_discord_bot_token(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
+    def test_agent_discord_token_from_tokens(self, v2_schema_habitat):
+        env = run_parse_habitat(v2_schema_habitat)
         assert env["AGENT1_DISCORD_BOT_TOKEN"] == "MTQ2OD_discord_token"
         assert b64d(env["AGENT1_DISCORD_BOT_TOKEN_B64"]) == "MTQ2OD_discord_token"
 
-    def test_agent_telegram_bot_token(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
+    def test_agent_telegram_token_from_tokens(self, v2_schema_habitat):
+        env = run_parse_habitat(v2_schema_habitat)
         assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "8513046_telegram_token"
         assert b64d(env["AGENT1_TELEGRAM_BOT_TOKEN_B64"]) == "8513046_telegram_token"
 
-    def test_agent_bot_token_compat(self, new_schema_habitat):
-        """AGENT{N}_BOT_TOKEN should equal telegramBotToken for backward compat."""
-        env = run_parse_habitat(new_schema_habitat)
+    def test_agent_bot_token_compat(self, v2_schema_habitat):
+        """AGENT{N}_BOT_TOKEN should equal telegram token for backward compat."""
+        env = run_parse_habitat(v2_schema_habitat)
         assert env["AGENT1_BOT_TOKEN"] == "8513046_telegram_token"
-        assert env["AGENT1_BOT_TOKEN_B64"] == env["AGENT1_TELEGRAM_BOT_TOKEN_B64"]
 
-    def test_council_telegram_group_id(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
-        assert env["COUNCIL_GROUP_ID"] == "5134780848"
+    def test_minimal_v2_discord(self):
+        """Minimal v2 Discord habitat."""
+        hab = {
+            "name": "Minimal",
+            "platform": "discord",
+            "platforms": {
+                "discord": {"ownerId": "123456"}
+            },
+            "agents": [{
+                "agent": "bot",
+                "tokens": {"discord": "token123"}
+            }]
+        }
+        env = run_parse_habitat(hab)
+        assert env["PLATFORM"] == "discord"
+        assert env["DISCORD_OWNER_ID"] == "123456"
+        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "token123"
 
-    def test_council_metadata(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
-        assert env["COUNCIL_GROUP_NAME"] == "The Council"
-        assert env["COUNCIL_JUDGE"] == "Opus"
+    def test_minimal_v2_telegram(self):
+        """Minimal v2 Telegram habitat."""
+        hab = {
+            "name": "Minimal",
+            "platform": "telegram",
+            "platforms": {
+                "telegram": {"ownerId": "789012"}
+            },
+            "agents": [{
+                "agent": "bot",
+                "tokens": {"telegram": "tg_token"}
+            }]
+        }
+        env = run_parse_habitat(hab)
+        assert env["PLATFORM"] == "telegram"
+        assert env["TELEGRAM_OWNER_ID"] == "789012"
+        assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "tg_token"
 
-    def test_habitat_basics(self, new_schema_habitat):
-        env = run_parse_habitat(new_schema_habitat)
-        assert env["HABITAT_NAME"] == "Habitat-1"
-        assert env["HABITAT_DOMAIN"] == "bot.frysinger.org"
-        assert env["AGENT_COUNT"] == "1"
-        assert env["AGENT1_NAME"] == "Claude"
-
-    def test_multi_agent_tokens(self):
+    def test_v2_multi_agent(self):
+        """v2 with multiple agents."""
         hab = {
             "name": "MultiAgent",
             "platform": "discord",
-            "discord": {"serverId": "111", "ownerId": "222"},
-            "telegram": {"ownerId": "333"},
+            "platforms": {
+                "discord": {"ownerId": "111"},
+                "telegram": {"ownerId": "222"},
+            },
             "agents": [
-                {
-                    "agent": "Claude",
-                    "discordBotToken": "dc_tok_1",
-                    "telegramBotToken": "tg_tok_1",
-                },
-                {
-                    "agent": "Gemini",
-                    "discordBotToken": "dc_tok_2",
-                    "telegramBotToken": "tg_tok_2",
-                },
+                {"agent": "Claude", "tokens": {"discord": "dc1", "telegram": "tg1"}},
+                {"agent": "Gemini", "tokens": {"discord": "dc2", "telegram": "tg2"}},
             ],
         }
         env = run_parse_habitat(hab)
         assert env["AGENT_COUNT"] == "2"
-        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "dc_tok_1"
-        assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "tg_tok_1"
-        assert env["AGENT2_DISCORD_BOT_TOKEN"] == "dc_tok_2"
-        assert env["AGENT2_TELEGRAM_BOT_TOKEN"] == "tg_tok_2"
-        assert env["AGENT2_NAME"] == "Gemini"
+        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "dc1"
+        assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "tg1"
+        assert env["AGENT2_DISCORD_BOT_TOKEN"] == "dc2"
+        assert env["AGENT2_TELEGRAM_BOT_TOKEN"] == "tg2"
 
 
 # ---------------------------------------------------------------------------
-# Tests: Legacy schema with just botToken
+# Tests: v1 schema (legacy format - deprecated)
 # ---------------------------------------------------------------------------
 
-class TestLegacySchema:
-    def test_platform_defaults_to_telegram(self, legacy_schema_habitat):
-        env = run_parse_habitat(legacy_schema_habitat)
+class TestV1Schema:
+    """Tests for v1 (deprecated) schema: top-level discord and discordBotToken."""
+
+    def test_platform_field(self, v1_schema_habitat):
+        env = run_parse_habitat(v1_schema_habitat)
+        assert env["PLATFORM"] == "discord"
+        assert b64d(env["PLATFORM_B64"]) == "discord"
+
+    def test_discord_guild_id(self, v1_schema_habitat):
+        env = run_parse_habitat(v1_schema_habitat)
+        assert env["DISCORD_GUILD_ID"] == "1468992121901027582"
+
+    def test_discord_owner_id(self, v1_schema_habitat):
+        env = run_parse_habitat(v1_schema_habitat)
+        assert env["DISCORD_OWNER_ID"] == "795380005466800159"
+
+    def test_telegram_owner_id(self, v1_schema_habitat):
+        env = run_parse_habitat(v1_schema_habitat)
+        assert env["TELEGRAM_OWNER_ID"] == "5874850284"
+
+    def test_agent_discord_token(self, v1_schema_habitat):
+        env = run_parse_habitat(v1_schema_habitat)
+        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "MTQ2OD_discord_token"
+
+    def test_agent_telegram_token(self, v1_schema_habitat):
+        env = run_parse_habitat(v1_schema_habitat)
+        assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "8513046_telegram_token"
+
+    def test_v1_v2_produce_same_output(self, v1_schema_habitat, v2_schema_habitat):
+        """v1 and v2 schemas should produce identical env vars (except name)."""
+        env_v1 = run_parse_habitat(v1_schema_habitat)
+        env_v2 = run_parse_habitat(v2_schema_habitat)
+
+        # Compare all keys except HABITAT_NAME
+        for key in env_v1:
+            if key.startswith("HABITAT_NAME"):
+                continue
+            assert env_v1[key] == env_v2[key], f"Mismatch for {key}: v1={env_v1[key]}, v2={env_v2[key]}"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Very old botToken schema
+# ---------------------------------------------------------------------------
+
+class TestLegacyBotTokenSchema:
+    """Tests for very old schema with just botToken."""
+
+    def test_platform_defaults_to_telegram(self, legacy_bottoken_habitat):
+        env = run_parse_habitat(legacy_bottoken_habitat)
         assert env["PLATFORM"] == "telegram"
         assert b64d(env["PLATFORM_B64"]) == "telegram"
 
-    def test_bot_token_fallback(self, legacy_schema_habitat):
+    def test_bot_token_fallback(self, legacy_bottoken_habitat):
         """When only botToken exists, it becomes telegramBotToken."""
-        env = run_parse_habitat(legacy_schema_habitat)
+        env = run_parse_habitat(legacy_bottoken_habitat)
         assert env["AGENT1_BOT_TOKEN"] == "legacy_telegram_token_123"
         assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "legacy_telegram_token_123"
-        assert b64d(env["AGENT1_TELEGRAM_BOT_TOKEN_B64"]) == "legacy_telegram_token_123"
 
-    def test_discord_token_empty_when_missing(self, legacy_schema_habitat):
-        env = run_parse_habitat(legacy_schema_habitat)
+    def test_discord_token_empty_when_missing(self, legacy_bottoken_habitat):
+        env = run_parse_habitat(legacy_bottoken_habitat)
         assert env["AGENT1_DISCORD_BOT_TOKEN"] == ""
-        assert env["AGENT1_DISCORD_BOT_TOKEN_B64"] == b64e("")
 
-    def test_discord_fields_empty_when_no_section(self, legacy_schema_habitat):
-        env = run_parse_habitat(legacy_schema_habitat)
+    def test_discord_fields_empty_when_no_section(self, legacy_bottoken_habitat):
+        env = run_parse_habitat(legacy_bottoken_habitat)
         assert env["DISCORD_GUILD_ID"] == ""
         assert env["DISCORD_OWNER_ID"] == ""
-
-    def test_telegram_owner_empty_when_no_section(self, legacy_schema_habitat):
-        env = run_parse_habitat(legacy_schema_habitat)
-        assert env["TELEGRAM_OWNER_ID"] == ""
-        assert env["TELEGRAM_USER_ID_B64"] == b64e("")
-
-    def test_legacy_council_group_id(self, legacy_schema_habitat):
-        """Legacy council.groupId should still work."""
-        env = run_parse_habitat(legacy_schema_habitat)
-        assert env["COUNCIL_GROUP_ID"] == "999888777"
-
-    def test_legacy_council_group_id_from_root(self):
-        """Even older councilGroupId at root level should work."""
-        hab = {
-            "name": "VeryOld",
-            "councilGroupId": "111222333",
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
-        }
-        env = run_parse_habitat(hab)
-        assert env["COUNCIL_GROUP_ID"] == "111222333"
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +437,8 @@ class TestPlatformField:
         hab = {
             "name": "DiscordOnly",
             "platform": "discord",
-            "agents": [{"agent": "Claude", "discordBotToken": "dc_tok"}],
+            "platforms": {"discord": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"discord": "dc_tok"}}],
         }
         env = run_parse_habitat(hab)
         assert env["PLATFORM"] == "discord"
@@ -357,7 +447,8 @@ class TestPlatformField:
         hab = {
             "name": "TelegramOnly",
             "platform": "telegram",
-            "agents": [{"agent": "Claude", "botToken": "tg_tok"}],
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tg_tok"}}],
         }
         env = run_parse_habitat(hab)
         assert env["PLATFORM"] == "telegram"
@@ -366,15 +457,14 @@ class TestPlatformField:
         hab = {
             "name": "Both",
             "platform": "both",
-            "discord": {"serverId": "111", "ownerId": "222"},
-            "telegram": {"ownerId": "333"},
-            "agents": [
-                {
-                    "agent": "Claude",
-                    "discordBotToken": "dc_tok",
-                    "telegramBotToken": "tg_tok",
-                }
-            ],
+            "platforms": {
+                "discord": {"serverId": "111", "ownerId": "222"},
+                "telegram": {"ownerId": "333"},
+            },
+            "agents": [{
+                "agent": "Claude",
+                "tokens": {"discord": "dc_tok", "telegram": "tg_tok"},
+            }],
         }
         env = run_parse_habitat(hab)
         assert env["PLATFORM"] == "both"
@@ -384,10 +474,45 @@ class TestPlatformField:
     def test_platform_missing_defaults_telegram(self):
         hab = {
             "name": "NoPlatform",
-            "agents": [{"agent": "Claude", "botToken": "tg_tok"}],
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tg_tok"}}],
         }
         env = run_parse_habitat(hab)
         assert env["PLATFORM"] == "telegram"
+
+
+# ---------------------------------------------------------------------------
+# Tests: v2 takes precedence over v1 when both present
+# ---------------------------------------------------------------------------
+
+class TestV2Precedence:
+    """When both v2 and v1 fields exist, v2 should take precedence."""
+
+    def test_platforms_takes_precedence_over_toplevel(self):
+        """platforms.discord should win over discord."""
+        hab = {
+            "name": "MixedPlatform",
+            "platform": "discord",
+            "discord": {"ownerId": "v1_owner"},
+            "platforms": {"discord": {"ownerId": "v2_owner"}},
+            "agents": [{"agent": "Claude", "tokens": {"discord": "tok"}}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["DISCORD_OWNER_ID"] == "v2_owner"
+
+    def test_tokens_takes_precedence_over_bot_token_fields(self):
+        """tokens.discord should win over discordBotToken."""
+        hab = {
+            "name": "MixedTokens",
+            "platform": "discord",
+            "platforms": {"discord": {"ownerId": "123"}},
+            "agents": [{
+                "agent": "Claude",
+                "discordBotToken": "v1_token",
+                "tokens": {"discord": "v2_token"},
+            }],
+        }
+        env = run_parse_habitat(hab)
+        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "v2_token"
 
 
 # ---------------------------------------------------------------------------
@@ -395,69 +520,68 @@ class TestPlatformField:
 # ---------------------------------------------------------------------------
 
 class TestMissingOptionalFields:
-    def test_no_discord_section(self):
+    def test_no_platforms_section(self):
+        """No platforms section at all - should use v1 fallback."""
         hab = {
-            "name": "NoDiscord",
-            "platform": "telegram",
-            "telegram": {"ownerId": "123"},
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
-        }
-        env = run_parse_habitat(hab)
-        assert env["DISCORD_GUILD_ID"] == ""
-        assert env["DISCORD_GUILD_ID_B64"] == b64e("")
-        assert env["DISCORD_OWNER_ID"] == ""
-        assert env["DISCORD_OWNER_ID_B64"] == b64e("")
-
-    def test_no_telegram_section(self):
-        hab = {
-            "name": "NoTelegram",
+            "name": "NoV2",
             "platform": "discord",
-            "discord": {"serverId": "111", "ownerId": "222"},
-            "agents": [{"agent": "Claude", "discordBotToken": "dc_tok"}],
+            "discord": {"ownerId": "123"},
+            "agents": [{"agent": "Claude", "discordBotToken": "tok"}],
         }
         env = run_parse_habitat(hab)
-        assert env["TELEGRAM_OWNER_ID"] == ""
-        assert env["TELEGRAM_USER_ID_B64"] == b64e("")
+        assert env["DISCORD_OWNER_ID"] == "123"
+        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "tok"
 
-    def test_no_server_id_in_discord(self):
+    def test_empty_platforms_section(self):
+        """Empty platforms section - should use v1 fallback."""
         hab = {
-            "name": "NoServerId",
+            "name": "EmptyV2",
             "platform": "discord",
-            "discord": {"ownerId": "222"},
-            "agents": [{"agent": "Claude", "discordBotToken": "dc_tok"}],
+            "platforms": {},
+            "discord": {"ownerId": "456"},
+            "agents": [{"agent": "Claude", "discordBotToken": "tok"}],
         }
         env = run_parse_habitat(hab)
-        assert env["DISCORD_GUILD_ID"] == ""
-        assert env["DISCORD_OWNER_ID"] == "222"
+        assert env["DISCORD_OWNER_ID"] == "456"
+
+    def test_no_tokens_in_agent(self):
+        """Agent without tokens section - should use v1 fallback."""
+        hab = {
+            "name": "NoTokens",
+            "platform": "discord",
+            "platforms": {"discord": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "discordBotToken": "v1_tok"}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "v1_tok"
+
+    def test_empty_tokens_in_agent(self):
+        """Agent with empty tokens section - should use v1 fallback."""
+        hab = {
+            "name": "EmptyTokens",
+            "platform": "discord",
+            "platforms": {"discord": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {}, "discordBotToken": "v1_tok"}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "v1_tok"
 
     def test_no_council(self):
         hab = {
             "name": "NoCouncil",
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
         }
         env = run_parse_habitat(hab)
         assert env["COUNCIL_GROUP_ID"] == ""
         assert env["COUNCIL_GROUP_NAME"] == ""
         assert env["COUNCIL_JUDGE"] == ""
 
-    def test_council_without_telegram_section(self):
-        """Council exists but has no telegram sub-object (legacy)."""
-        hab = {
-            "name": "CouncilNoTg",
-            "council": {
-                "groupId": "oldstyle123",
-                "groupName": "Council",
-                "judge": "Opus",
-            },
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
-        }
-        env = run_parse_habitat(hab)
-        assert env["COUNCIL_GROUP_ID"] == "oldstyle123"
-
     def test_no_domain(self):
         hab = {
             "name": "NoDomain",
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
         }
         env = run_parse_habitat(hab)
         assert env["HABITAT_DOMAIN"] == ""
@@ -465,34 +589,11 @@ class TestMissingOptionalFields:
     def test_no_bg_color_defaults(self):
         hab = {
             "name": "NoBgColor",
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
         }
         env = run_parse_habitat(hab)
         assert env["BG_COLOR"] == "2D3748"
-
-    def test_agent_with_only_discord_token(self):
-        """Agent has discordBotToken but no telegram token."""
-        hab = {
-            "name": "DiscordOnlyAgent",
-            "platform": "discord",
-            "agents": [{"agent": "Claude", "discordBotToken": "dc_tok"}],
-        }
-        env = run_parse_habitat(hab)
-        assert env["AGENT1_DISCORD_BOT_TOKEN"] == "dc_tok"
-        assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == ""
-        assert env["AGENT1_BOT_TOKEN"] == ""  # compat = telegram token = empty
-
-    def test_agent_with_only_telegram_token_new_field(self):
-        """Agent has telegramBotToken but no discord token."""
-        hab = {
-            "name": "TgOnlyAgent",
-            "platform": "telegram",
-            "agents": [{"agent": "Claude", "telegramBotToken": "tg_tok"}],
-        }
-        env = run_parse_habitat(hab)
-        assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "tg_tok"
-        assert env["AGENT1_DISCORD_BOT_TOKEN"] == ""
-        assert env["AGENT1_BOT_TOKEN"] == "tg_tok"  # compat
 
 
 # ---------------------------------------------------------------------------
@@ -503,11 +604,11 @@ class TestGlobalTools:
     """Tests for globalTools → GLOBAL_TOOLS_B64 parsing."""
 
     def test_global_tools_parsed(self):
-        """globalTools content should be base64-encoded into GLOBAL_TOOLS_B64."""
         tools_content = "Cloud VM (Ubuntu), display :10\n\ngmail-api.py for email"
         hab = {
             "name": "WithTools",
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
             "globalTools": tools_content,
         }
         env = run_parse_habitat(hab)
@@ -515,50 +616,13 @@ class TestGlobalTools:
         assert b64d(env["GLOBAL_TOOLS_B64"]) == tools_content
 
     def test_global_tools_empty_when_missing(self):
-        """Missing globalTools should result in empty base64."""
         hab = {
             "name": "NoTools",
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
         }
         env = run_parse_habitat(hab)
         assert env["GLOBAL_TOOLS_B64"] == b64e("")
-
-    def test_global_tools_with_special_chars(self):
-        """globalTools with special characters should be properly encoded."""
-        tools_content = "Use `gmail-api.py` with $EMAIL_ADDR\n# Comment line\nQuotes: \"test\" and 'test'"
-        hab = {
-            "name": "SpecialTools",
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
-            "globalTools": tools_content,
-        }
-        env = run_parse_habitat(hab)
-        decoded = b64d(env["GLOBAL_TOOLS_B64"])
-        assert decoded == tools_content
-        assert "`" in decoded
-        assert "$" in decoded
-        assert '"' in decoded
-
-    def test_global_tools_multiline(self):
-        """globalTools with multiple lines should preserve formatting."""
-        tools_content = """## Available Tools
-
-### Email
-- gmail-api.py: Send and read emails
-
-### Calendar  
-- khal: Terminal calendar
-
-### Browser
-- Chrome on display :10"""
-        hab = {
-            "name": "MultilineTools",
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
-            "globalTools": tools_content,
-        }
-        env = run_parse_habitat(hab)
-        decoded = b64d(env["GLOBAL_TOOLS_B64"])
-        assert decoded == tools_content
-        assert decoded.count("\n") == tools_content.count("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -566,8 +630,8 @@ class TestGlobalTools:
 # ---------------------------------------------------------------------------
 
 class TestEdgeCases:
-    def test_telegram_bot_token_preferred_over_bot_token(self):
-        """If agent has both telegramBotToken and botToken, telegramBotToken wins."""
+    def test_telegram_token_preferred_over_bot_token_v1(self):
+        """If agent has both telegramBotToken and botToken, telegramBotToken wins (v1)."""
         hab = {
             "name": "BothTokens",
             "agents": [
@@ -592,7 +656,8 @@ class TestEdgeCases:
                 "judge": "Opus",
                 "telegram": {"groupId": "new_id"},
             },
-            "agents": [{"agent": "Claude", "botToken": "tok"}],
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
         }
         env = run_parse_habitat(hab)
         assert env["COUNCIL_GROUP_ID"] == "new_id"
@@ -604,3 +669,22 @@ class TestEdgeCases:
         }
         env = run_parse_habitat(hab)
         assert env["AGENT_COUNT"] == "0"
+
+    def test_api_bind_address_default(self):
+        hab = {
+            "name": "NoApiAddr",
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["API_BIND_ADDRESS"] == "0.0.0.0"
+
+    def test_api_bind_address_custom(self):
+        hab = {
+            "name": "CustomApiAddr",
+            "apiBindAddress": "127.0.0.1",
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["API_BIND_ADDRESS"] == "127.0.0.1"

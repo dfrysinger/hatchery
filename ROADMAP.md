@@ -211,6 +211,35 @@ Script.setShortcutOutput(Keychain.get(key))
 
 ---
 
+## Maintenance & Cleanup
+
+### v1 Schema Deprecation *(After v5.1)*
+
+**Issue:** [#112](https://github.com/dfrysinger/hatchery/issues/112)
+
+The v1 habitat schema with top-level `discord`/`telegram` and `discordBotToken`/`telegramBotToken` is deprecated in favor of the cleaner v2 schema:
+
+**v2 (current):**
+```json
+{
+  "platforms": { "discord": { "ownerId": "..." } },
+  "agents": [{ "tokens": { "discord": "..." } }]
+}
+```
+
+**Timeline:**
+1. v5.0: v2 schema with v1 backward compatibility (current)
+2. v5.1: Migration complete, deprecation warnings in logs
+3. v5.2: Remove v1 fallback code from `parse-habitat.py`
+
+**Migration checklist:**
+- [ ] Habitat-1 config → v2
+- [ ] JobHunt config → v2
+- [ ] All templates → v2 ✅
+- [ ] Docs → v2 ✅
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. PRs welcome!
