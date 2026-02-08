@@ -98,10 +98,9 @@ class H(http.server.BaseHTTPRequestHandler):
   
   def do_GET(self):
     if self.path=='/status':
-      self.send_json(200,get_status())
+      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(get_status()).encode())
     elif self.path=='/health':
-      s=get_status();code=200 if s.get('bot_online') else 503
-      self.send_json(code,{"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc'),"safe_mode":s.get('safe_mode',False)})
+      s=get_status();code=200 if s.get('bot_online') else 503;self.send_response(code);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps({"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc'),"safe_mode":s.get('safe_mode',False)}).encode())
     elif self.path=='/stages':
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
       try:
@@ -116,23 +115,21 @@ class H(http.server.BaseHTTPRequestHandler):
         except:self.wfile.write(f"  (not found)\n".encode())
     elif self.path=='/config':
       self.send_json(200,get_config_status())
-    else:
-      self.send_response(404);self.end_headers()
+    else:self.send_response(404);self.end_headers()
   
   def do_POST(self):
     content_length=int(self.headers.get('Content-Length',0))
     body=self.rfile.read(content_length) if content_length else b'{}'
     
     if self.path=='/sync':
-      try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.send_json(200,{"ok":r.returncode==0})
-      except Exception as x:self.send_json(500,{"ok":False,"error":str(x)})
+      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+      try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
+      except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
     
     elif self.path=='/prepare-shutdown':
-      try:
-        subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60)
-        subprocess.run("systemctl stop clawdbot",shell=True,timeout=30)
-        self.send_json(200,{"ok":True,"ready_for_shutdown":True})
-      except Exception as x:self.send_json(500,{"ok":False,"error":str(x)})
+      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+      try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
+      except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
     
     elif self.path=='/config/upload':
       try:

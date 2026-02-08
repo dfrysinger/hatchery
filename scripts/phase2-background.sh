@@ -38,7 +38,7 @@ $S 4 "desktop-environment"
 apt-get update -qq >> "$LOG" 2>&1
 DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
   xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
-  xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme \
+  xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme yaru-theme-gtk \
   >> "$LOG" 2>&1
 $S 5 "developer-tools"
 DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
@@ -105,6 +105,7 @@ cat > /etc/systemd/system/x11vnc.service <<SVC
 Description=x11vnc
 After=desktop.service
 Requires=desktop.service
+ConditionPathExists=/var/lib/init-status/phase2-complete
 [Service]
 Type=simple
 User=$USERNAME
@@ -114,7 +115,7 @@ ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -nox
 Restart=always
 RestartSec=5
 [Install]
-# WantedBy removed - started explicitly after phase2 completes
+WantedBy=desktop.service
 SVC
 mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
 # Write desktop background config BEFORE starting desktop service (fixes race condition)
