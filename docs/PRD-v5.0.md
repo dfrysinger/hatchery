@@ -442,6 +442,17 @@ hatchery/
 
 ### 7.4 Firewall Hardening
 
+> **Architecture Note:** The primary security layer is the **DigitalOcean Cloud Firewall**, 
+> managed via the "Create/Repair Habitat Firewall" iOS Shortcuts. This firewall restricts 
+> all inbound traffic to the user's current phone IP address only. The UFW rules below 
+> are defense-in-depth and serve as a backup if DO Firewall is misconfigured.
+> 
+> **Why API binds to 0.0.0.0:** iOS Shortcuts need direct HTTP access to `/status`, `/sync`, 
+> etc. Since DO Firewall blocks all non-allowlisted IPs, binding to all interfaces is safe. 
+> HMAC auth (§7.2) provides additional protection for sensitive endpoints.
+> 
+> See `docs/SECURITY.md` for the full security model.
+
 **Requirements:**
 - R7.4.1: Phase 1 MUST run `ufw default deny incoming` and `ufw --force enable` before opening any ports.
 - R7.4.2: Allowed ports: 22 (SSH), 80 (ACME challenges, only when HABITAT_DOMAIN set), 5900 (VNC), 6080 (noVNC), 8080 (status API). Port 18789 (openclaw gateway) MUST bind to localhost by default; expose via ufw only if habitat config explicitly sets `exposeGateway: true`.

@@ -3,6 +3,11 @@
 This document defines the **only** ports that should be exposed on habitat droplets.
 Both the iOS Shortcut firewall AND the hatch scripts must match this list.
 
+> **Security Context:** See [SECURITY.md](SECURITY.md) for the full security model.
+> The primary protection is the **DigitalOcean Cloud Firewall** which restricts access
+> to your phone's IP only. The API server binding to `0.0.0.0` is safe because
+> traffic is blocked at the cloud firewall level before reaching the droplet.
+
 ## Required Ports
 
 | Port | Protocol | Service | Notes |
