@@ -165,20 +165,20 @@ class TestStandupFormatter:
         assert "2026-02-07" in output
         assert "**Release:** R3" in output
         assert "Tooling & Observability" in output
-        assert "### ✅ Completed Yesterday" in output or "### ✅ Completed" in output
+        assert "### [DONE] Completed Yesterday" in output or "### [DONE] Completed" in output
         assert "TASK-10" in output
         assert "worker-2" in output
-        assert "### 🏗️ In Progress" in output
+        assert "### [WIP] In Progress" in output
         assert "TASK-11" in output
         assert "Working on CI" in output
-        assert "### ⏸️ Blocked" in output
+        assert "### [BLOCKED] Blocked" in output
         assert "TASK-12" in output
         assert "Waiting for keys" in output
-        assert "### 📋 Up Next" in output
+        assert "### [NEXT] Up Next" in output
         assert "TASK-13" in output
     
-    def test_format_uses_emoji(self):
-        """AC2: Use emoji for readability"""
+    def test_format_uses_ascii_tags(self):
+        """AC2: Use ASCII tags for cloud-init compatibility"""
         data = {
             "release": "R1",
             "release_name": "Test",
@@ -191,11 +191,11 @@ class TestStandupFormatter:
         
         output = gs.format_standup(data)
         
-        # Check for emoji in section headers
-        assert "✅" in output
-        assert "🏗️" in output
-        assert "⏸️" in output
-        assert "📋" in output
+        # Check for ASCII tags in section headers (no emojis for cloud-init)
+        assert "[DONE]" in output
+        assert "[WIP]" in output
+        assert "[BLOCKED]" in output
+        assert "[NEXT]" in output
     
     def test_format_length_limit(self):
         """AC2: Keep output ≤ 1000 chars (Discord-friendly)"""
@@ -309,16 +309,16 @@ class TestStandupFormatter:
         assert "*Daily Standup" in output
         assert "*Release:*" in output
         assert "R1 -- Test Sprint" in output
-        assert "*✅ Completed Yesterday*" in output
-        assert "• TASK-1" in output
-        assert "*🏗️ In Progress*" in output
-        assert "• TASK-2" in output
+        assert "*[DONE] Completed Yesterday*" in output
+        assert "- TASK-1" in output
+        assert "*[WIP] In Progress*" in output
+        assert "- TASK-2" in output
         assert "Working on it" in output
-        assert "*⏸️ Blocked*" in output
-        assert "• TASK-3" in output
+        assert "*[BLOCKED] Blocked*" in output
+        assert "- TASK-3" in output
         assert "Waiting for approval" in output
-        assert "*📋 Up Next*" in output
-        assert "• TASK-4" in output
+        assert "*[NEXT] Up Next*" in output
+        assert "- TASK-4" in output
 
 
 class TestCLIInterface:
