@@ -79,6 +79,10 @@ write_files:
           if platform_name in platforms:
               return platforms[platform_name]
           return hab.get(platform_name, {})
+      def normalize_agent_ref(agent_ref):
+          if isinstance(agent_ref, str):
+              return {"agent": agent_ref}
+          return agent_ref
       def get_agent_token(agent_ref, platform_name):
           tokens = agent_ref.get("tokens", {})
           if platform_name in tokens:
@@ -149,8 +153,9 @@ write_files:
           f.write('GLOBAL_TOOLS_B64="{}"\n'.format(b64(hab.get("globalTools", ""))))
           agents = hab.get("agents", [])
           f.write('AGENT_COUNT={}\n'.format(len(agents)))
-          for i, agent_ref in enumerate(agents):
+          for i, raw_agent_ref in enumerate(agents):
               n = i + 1
+              agent_ref = normalize_agent_ref(raw_agent_ref)
               name = agent_ref["agent"]
               lib_entry = lib.get(name, {})
               model = agent_ref.get("model") or lib_entry.get("model", "anthropic/claude-opus-4-5")

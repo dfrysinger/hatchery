@@ -42,6 +42,17 @@ def get_platform_config(hab, platform_name):
     return hab.get(platform_name, {})
 
 
+def normalize_agent_ref(agent_ref):
+    """Normalize agent reference to dict format.
+    
+    Converts string shorthand ("Claude") to dict format ({"agent": "Claude"}).
+    Dict refs are returned unchanged.
+    """
+    if isinstance(agent_ref, str):
+        return {"agent": agent_ref}
+    return agent_ref
+
+
 def get_agent_token(agent_ref, platform_name):
     """Get agent token: v2 (tokens.X) or v1 (XBotToken) format."""
     tokens = agent_ref.get("tokens", {})
@@ -115,8 +126,9 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
     agents = hab.get("agents", [])
     lines.append('AGENT_COUNT={}\n'.format(len(agents)))
 
-    for i, agent_ref in enumerate(agents):
+    for i, raw_agent_ref in enumerate(agents):
         n = i + 1
+        agent_ref = normalize_agent_ref(raw_agent_ref)
         name = agent_ref["agent"]
         lib_entry = lib.get(name, {})
         model = agent_ref.get("model") or lib_entry.get("model", "anthropic/claude-opus-4-5")
@@ -688,3 +700,66 @@ class TestEdgeCases:
         }
         env = run_parse_habitat(hab)
         assert env["API_BIND_ADDRESS"] == "127.0.0.1"
+
+
+class TestAgentStringShorthand:
+    """Test support for agent references as strings (shorthand for library lookups).
+    
+    Agents can be specified as:
+    - String: "Claude" (shorthand, references library entry)
+    - Dict: {"agent": "Claude", "tokens": {...}} (full form)
+    - Mixed: ["Claude", {"agent": "GPT", "tokens": {...}}]
+    
+    String shorthand is converted to {"agent": "name"} before processing.
+    See issue #117 for details.
+    """
+
+    def test_agent_string_shorthand(self):
+        """String agent refs should be normalized to dicts."""
+        hab = {
+            "name": "StringAgents",
+            "platform": "telegram",
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": ["Claude", "ChatGPT"],
+        }
+        env = run_parse_habitat(hab)
+        assert env["AGENT_COUNT"] == "2"
+        assert env["AGENT1_NAME"] == "Claude"
+        assert env["AGENT2_NAME"] == "ChatGPT"
+
+    def test_agent_mixed_string_and_dict(self):
+        """Mixed string and dict agent refs should work together."""
+        hab = {
+            "name": "MixedAgents",
+            "platform": "telegram",
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [
+                "Claude",  # string shorthand
+                {"agent": "ChatGPT", "tokens": {"telegram": "tok123"}},  # full dict
+            ],
+        }
+        env = run_parse_habitat(hab)
+        assert env["AGENT_COUNT"] == "2"
+        assert env["AGENT1_NAME"] == "Claude"
+        assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == ""  # no token for string ref
+        assert env["AGENT2_NAME"] == "ChatGPT"
+        assert env["AGENT2_TELEGRAM_BOT_TOKEN"] == "tok123"
+
+    def test_agent_string_with_library(self):
+        """String agent refs should use library for model/identity."""
+        lib = {
+            "Claude": {
+                "model": "anthropic/claude-opus-4-5",
+                "identity": "I am Claude",
+            },
+        }
+        hab = {
+            "name": "LibLookup",
+            "platform": "telegram", 
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": ["Claude"],
+        }
+        env = run_parse_habitat(hab, agent_lib_json=lib)
+        assert env["AGENT1_NAME"] == "Claude"
+        assert env["AGENT1_MODEL"] == "anthropic/claude-opus-4-5"
+        assert b64d(env["AGENT1_IDENTITY_B64"]) == "I am Claude"
