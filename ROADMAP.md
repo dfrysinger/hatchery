@@ -137,7 +137,59 @@ Saved configs combine habitat + agents in one file:
 
 ---
 
-## Phase 3: Agent Library *(Future)*
+## Phase 3: Secure Secrets via Scriptable *(Future)*
+
+**Goal:** Move sensitive API keys from Shortcut variables to iOS Keychain via Scriptable app.
+
+### Why
+- Shortcut variables are stored in iCloud-synced plists (readable if iCloud compromised)
+- iOS Keychain is hardware-encrypted (Secure Enclave)
+- Scriptable is free and provides Keychain access
+
+### Features
+
+1. **Scriptable Keychain Scripts**
+   - `save-secrets.js` — One-time setup to store all secrets
+   - `get-secret.js` — Called from Shortcuts to retrieve secrets
+
+2. **Secrets to Migrate**
+   - `DO_TOKEN` — DigitalOcean API token
+   - `ANTHROPIC_KEY` — Anthropic API key
+   - `API_SECRET` — Droplet API HMAC secret
+   - `DROPBOX_TOKEN` — Dropbox access token
+   - `GOOGLE_API_KEY` — Google/Gemini API key
+   - `BRAVE_KEY` — Brave Search API key
+
+3. **Shortcut Integration**
+   ```
+   Run Scriptable: "get-secret"
+   Parameter: "API_SECRET"
+   → Returns decrypted secret
+   ```
+
+### Technical Approach
+
+```javascript
+// save-secrets.js (run once)
+Keychain.set("DO_TOKEN", "dop_v1_...")
+Keychain.set("ANTHROPIC_KEY", "sk-ant-...")
+Keychain.set("API_SECRET", "64-char-hex...")
+Script.complete()
+```
+
+```javascript
+// get-secret.js (called from Shortcuts)
+let key = args.shortcutParameter
+Script.setShortcutOutput(Keychain.get(key))
+```
+
+### Requirements
+- Scriptable app (free)
+- Keep a-shell for TCP port checks (Scriptable can't do raw sockets)
+
+---
+
+## Phase 4: Agent Library *(Future)*
 
 **Goal:** Curated library of pre-built agents users can add to their habitats.
 

@@ -798,7 +798,51 @@ Add systemd-level crash detection that automatically triggers a safe mode when r
 
 ---
 
-## 13. Open Questions
+## 13. Secure Secrets via Scriptable *(Future)*
+
+**Goal:** Migrate sensitive API keys from Shortcut variables to iOS Keychain via the free Scriptable app.
+
+### 13.1 Problem
+
+iOS Shortcut variables are stored in iCloud-synced plists. While protected by iCloud account security, they are not hardware-encrypted. Secrets like DO_TOKEN, ANTHROPIC_KEY, and API_SECRET could be exposed if iCloud is compromised.
+
+### 13.2 Solution
+
+Use Scriptable (free iOS app) to store secrets in iOS Keychain, which is hardware-encrypted via Secure Enclave.
+
+### 13.3 Requirements
+
+- R13.3.1: Create `save-secrets.js` Scriptable script for one-time secret storage.
+- R13.3.2: Create `get-secret.js` Scriptable script callable from Shortcuts.
+- R13.3.3: Migrate all Shortcut variable secrets to Keychain:
+  - `DO_TOKEN`, `ANTHROPIC_KEY`, `API_SECRET`, `DROPBOX_TOKEN`, `GOOGLE_API_KEY`, `BRAVE_KEY`
+- R13.3.4: Update all Shortcuts to call Scriptable for secret retrieval.
+- R13.3.5: Document migration path for existing users.
+- R13.3.6: Keep a-shell for TCP port checks (Scriptable cannot do raw sockets).
+
+### 13.4 Implementation
+
+```javascript
+// save-secrets.js (run once)
+Keychain.set("DO_TOKEN", "dop_v1_...")
+Keychain.set("ANTHROPIC_KEY", "sk-ant-...")
+Keychain.set("API_SECRET", "64-char-hex...")
+Script.complete()
+```
+
+```javascript
+// get-secret.js (called from Shortcuts)
+let key = args.shortcutParameter
+Script.setShortcutOutput(Keychain.get(key))
+```
+
+### 13.5 Priority
+
+**Low** — Defense-in-depth improvement. Current security (DO Firewall + HMAC auth) is sufficient. Implement when Shortcut Wizard (Phase 2) is built.
+
+---
+
+## 14. Open Questions
 
 | # | Question | Impact | Owner | Resolution |
 |---|----------|--------|-------|------------|
@@ -819,7 +863,7 @@ Add systemd-level crash detection that automatically triggers a safe mode when r
 
 ---
 
-## 14. Appendix: Round 1 Findings Traceability
+## 15. Appendix: Round 1 Findings Traceability
 
 | # | Finding | Severity | v5.0 Section | Status |
 |---|---------|----------|-------------|--------|
