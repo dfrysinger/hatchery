@@ -2,6 +2,8 @@
 
 Ephemeral cloud habitats — self-configuring DigitalOcean droplets with AI agents, remote desktop, and browser automation. Provisioned in minutes from an iOS Shortcut.
 
+> 📋 **[See the Roadmap](ROADMAP.md)** for upcoming features including the Shortcut Configuration Wizard.
+
 ## What It Does
 
 A single tap on your phone spins up a fully configured cloud desktop with:
@@ -76,6 +78,64 @@ GET https://raw.githubusercontent.com/dfrysinger/hatchery/main/version.json
 | Get Elapsed Time | Calculate provisioning duration |
 | Get Token | Retrieve API authentication token |
 | Creating Droplet | Droplet creation sub-routine |
+
+## Droplet API
+
+Each droplet runs a lightweight HTTP API on port 8080:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/status` | GET | Full provisioning status |
+| `/health` | GET | Health check (200 if bot online) |
+| `/stages` | GET | Raw init-stages.log |
+| `/config` | GET | Config file status (no secrets) |
+| `/config/upload` | POST | Upload habitat + agents JSON |
+| `/config/apply` | POST | Apply config and restart |
+| `/sync` | POST | Trigger state sync to Dropbox |
+| `/prepare-shutdown` | POST | Sync and stop for shutdown |
+
+### Config Upload Flow
+
+For large configs that exceed DO's 64KB user_data limit:
+
+```bash
+# 1. Create droplet with slim YAML
+# 2. Wait for boot
+curl http://$DROPLET_IP:8080/health
+
+# 3. Upload config
+curl -X POST http://$DROPLET_IP:8080/config/upload \
+  -H "Content-Type: application/json" \
+  -d '{
+    "habitat": {"name": "MyHabitat", ...},
+    "agents": {"agent-name": {"identity": "..."}},
+    "apply": true
+  }'
+```
+
+## Shortcut Configuration Wizard *(Coming Soon)*
+
+Configure habitats through an interactive iOS Shortcut wizard:
+
+1. **Configure** — Step-by-step habitat setup (platform, agents, tokens)
+2. **Save** — Store config to iCloud, Dropbox, or local device
+3. **Launch** — One-tap droplet creation from saved config
+4. **Edit** — Modify saved configs anytime via the wizard
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Wizard    │ ──► │   Config    │ ──► │   Launch    │
+│   Setup     │     │   Storage   │     │   Droplet   │
+└─────────────┘     └─────────────┘     └─────────────┘
+                         │
+                    ┌────┴────┐
+                    │ iCloud  │
+                    │ Dropbox │
+                    │  Local  │
+                    └─────────┘
+```
+
+See [ROADMAP.md](ROADMAP.md) for details.
 
 ## Version History
 
