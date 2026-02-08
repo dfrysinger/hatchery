@@ -284,6 +284,95 @@ class TestApplyConfigScript(unittest.TestCase):
             os.unlink(temp_path)
 
 
+class TestApiUploadedMarker(unittest.TestCase):
+    """Test api_uploaded marker feature (issue #115).
+    
+    Tracks whether config was uploaded via API vs initial HABITAT_B64.
+    """
+
+    def setUp(self):
+        """Create a temporary directory for test files."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.habitat_path = os.path.join(self.temp_dir, "habitat.json")
+        self.agents_path = os.path.join(self.temp_dir, "agents.json")
+        self.marker_path = os.path.join(self.temp_dir, "config-api-uploaded")
+
+    def tearDown(self):
+        """Clean up temporary files."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_api_uploaded_false_when_no_marker(self):
+        """AC4, AC7: api_uploaded is false when marker file doesn't exist."""
+        result = get_config_status(
+            habitat_path=self.habitat_path,
+            agents_path=self.agents_path,
+            marker_path=self.marker_path
+        )
+        
+        self.assertFalse(result["api_uploaded"])
+        self.assertNotIn("api_uploaded_at", result)
+
+    def test_api_uploaded_true_after_marker_written(self):
+        """AC1, AC3: api_uploaded is true when marker file exists."""
+        # Write the marker
+        write_upload_marker(self.marker_path)
+        
+        result = get_config_status(
+            habitat_path=self.habitat_path,
+            agents_path=self.agents_path,
+            marker_path=self.marker_path
+        )
+        
+        self.assertTrue(result["api_uploaded"])
+
+    def test_api_uploaded_at_timestamp(self):
+        """AC2, AC5: api_uploaded_at contains the upload timestamp."""
+        import time
+        before = time.time()
+        
+        write_upload_marker(self.marker_path)
+        
+        after = time.time()
+        
+        result = get_config_status(
+            habitat_path=self.habitat_path,
+            agents_path=self.agents_path,
+            marker_path=self.marker_path
+        )
+        
+        self.assertIn("api_uploaded_at", result)
+        self.assertGreaterEqual(result["api_uploaded_at"], before)
+        self.assertLessEqual(result["api_uploaded_at"], after)
+
+    def test_marker_file_permissions(self):
+        """AC6: Marker file has secure permissions (0600)."""
+        write_upload_marker(self.marker_path)
+        
+        mode = os.stat(self.marker_path).st_mode & 0o777
+        self.assertEqual(mode, 0o600)
+
+    def test_marker_persists_across_requests(self):
+        """Marker file persists and can be read multiple times."""
+        write_upload_marker(self.marker_path)
+        
+        # Read config status twice
+        result1 = get_config_status(
+            habitat_path=self.habitat_path,
+            agents_path=self.agents_path,
+            marker_path=self.marker_path
+        )
+        result2 = get_config_status(
+            habitat_path=self.habitat_path,
+            agents_path=self.agents_path,
+            marker_path=self.marker_path
+        )
+        
+        self.assertTrue(result1["api_uploaded"])
+        self.assertTrue(result2["api_uploaded"])
+        self.assertEqual(result1["api_uploaded_at"], result2["api_uploaded_at"])
+
+
 # =============================================================================
 # Helper functions to be implemented in api-server.py
 # =============================================================================
@@ -334,7 +423,7 @@ def trigger_config_apply(script_path):
         return {"ok": False, "error": str(e)}
 
 
-def get_config_status(habitat_path, agents_path):
+def get_config_status(habitat_path, agents_path, marker_path=None):
     """Get current config file status without exposing sensitive data."""
     result = {
         "habitat_exists": os.path.exists(habitat_path),
@@ -349,7 +438,27 @@ def get_config_status(habitat_path, agents_path):
         stat = os.stat(agents_path)
         result["agents_modified"] = stat.st_mtime
     
+    # Check for API upload marker (issue #115)
+    if marker_path:
+        if os.path.exists(marker_path):
+            result["api_uploaded"] = True
+            try:
+                with open(marker_path, 'r') as f:
+                    result["api_uploaded_at"] = float(f.read().strip())
+            except (ValueError, IOError):
+                pass
+        else:
+            result["api_uploaded"] = False
+    
     return result
+
+
+def write_upload_marker(marker_path):
+    """Write API upload marker file with timestamp."""
+    import time
+    with open(marker_path, 'w') as f:
+        f.write(str(time.time()))
+    os.chmod(marker_path, 0o600)
 
 
 if __name__ == '__main__':
