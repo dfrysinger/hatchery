@@ -90,18 +90,33 @@ def trigger_config_apply():
   try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
   except Exception as e:return {"ok":False,"error":str(e)}
 
-def verify_hmac_auth(timestamp_header,signature_header,body):
-  """Verify HMAC-SHA256 signature for authenticated endpoints."""
-  if not API_SECRET:return False
-  if not timestamp_header or not signature_header:return False
+def verify_hmac_auth(timestamp_header, signature_header, method, path, body):
+  """Verify HMAC-SHA256 signature for authenticated endpoints.
+
+  Signature binds:
+  - timestamp (replay protection)
+  - HTTP method + path (prevents cross-endpoint replay/substitution)
+  - request body (integrity)
+
+  Message format:
+    "{timestamp}.{method}.{path}.{body}" where body is UTF-8 JSON string.
+  """
+  if not API_SECRET:
+    return False
+  if not timestamp_header or not signature_header:
+    return False
   try:
-    timestamp=int(timestamp_header)
-    now=int(time.time())
-    if abs(now-timestamp)>300:return False
-    message=f"{timestamp}.{body.decode('utf-8') if isinstance(body,bytes) else body}"
-    expected_sig=hmac.new(API_SECRET.encode(),message.encode(),hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature_header,expected_sig)
-  except:return False
+    timestamp = int(timestamp_header)
+    now = int(time.time())
+    if abs(now - timestamp) > 300:
+      return False
+
+    b = body.decode('utf-8') if isinstance(body, (bytes, bytearray)) else (body or '')
+    msg = f"{timestamp}.{method}.{path}.{b}"
+    expected_sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature_header, expected_sig)
+  except Exception:
+    return False
 
 class H(http.server.BaseHTTPRequestHandler):
   def log_message(self,*a):pass
@@ -116,11 +131,20 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/health':
       s=get_status();code=200 if s.get('bot_online') else 503;self.send_response(code);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps({"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc'),"safe_mode":s.get('safe_mode',False)}).encode())
     elif self.path=='/stages':
+      timestamp=self.headers.get('X-Timestamp')
+      signature=self.headers.get('X-Signature')
+      # Require auth: stages/log/config may contain sensitive info
+      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+        self.send_json(403,{"ok":False,"error":"Forbidden"});return
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
       try:
         with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
       except:self.wfile.write(b"No log")
     elif self.path=='/log':
+      timestamp=self.headers.get('X-Timestamp')
+      signature=self.headers.get('X-Signature')
+      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+        self.send_json(403,{"ok":False,"error":"Forbidden"});return
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
       for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:
         try:
@@ -128,6 +152,10 @@ class H(http.server.BaseHTTPRequestHandler):
           with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
         except:self.wfile.write(f"  (not found)\n".encode())
     elif self.path=='/config':
+      timestamp=self.headers.get('X-Timestamp')
+      signature=self.headers.get('X-Signature')
+      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+        self.send_json(403,{"ok":False,"error":"Forbidden"});return
       self.send_json(200,get_config_status())
     else:self.send_response(404);self.end_headers()
   
@@ -148,7 +176,7 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/config/upload':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp,signature,body):
+      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
         self.send_json(403,{"ok":False,"error":"Forbidden"});return
       
       try:
@@ -189,7 +217,7 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/config/apply':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp,signature,body):
+      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
         self.send_json(403,{"ok":False,"error":"Forbidden"});return
       
       result=trigger_config_apply()
