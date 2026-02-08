@@ -30,6 +30,7 @@ write_files:
       CALDAV_URL_B64="[[CALDAV_URL_B64]]"
       CALDAV_USER_B64="[[CALDAV_USER_B64]]"
       CALDAV_PASSWORD_B64="[[CALDAV_PASSWORD_B64]]"
+      API_SECRET="[[API_SECRET]]"
       GH_TOKEN_B64="[[GH_TOKEN_B64]]"
       GMAIL_CLIENT_ID_B64="[[GMAIL_CLIENT_ID_B64]]"
       GMAIL_CLIENT_SECRET_B64="[[GMAIL_CLIENT_SECRET_B64]]"
@@ -1860,9 +1861,18 @@ runcmd:
   - - bash
     - -lc
     - |
-      # Generate API_SECRET for the droplet status API if missing
+      # Set up API_SECRET for the droplet status API
+      # Uses secret from Shortcut if provided, otherwise generates random
       if [ ! -f /etc/api-server.env ]; then
-        API_SECRET=$(openssl rand -hex 32)
+        source /etc/droplet.env
+        if [ -n "$API_SECRET" ] && [ "$API_SECRET" != "[[API_SECRET]]" ]; then
+          # Use Shortcut-provided secret
+          echo "[api-server] Using provided API_SECRET"
+        else
+          # Generate random secret (fallback for older Shortcuts)
+          API_SECRET=$(openssl rand -hex 32)
+          echo "[api-server] Generated random API_SECRET"
+        fi
         umask 077
         printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env
         chmod 600 /etc/api-server.env
