@@ -21,14 +21,35 @@
 #
 # Original: /usr/local/bin/api-server.py (in hatch.yaml write_files)
 # =============================================================================
-import http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time
+import http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time,secrets
 PORT=8080
-API_SECRET=os.getenv('API_SECRET','')
+API_SECRET_PATH='/var/lib/api-server/secret'
 HABITAT_PATH='/etc/habitat.json'
 AGENTS_PATH='/etc/agents.json'
 APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
 P1_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
 P2_STAGES={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
+
+def get_or_create_secret():
+  """Get API secret from file, or generate and persist if missing."""
+  # Check environment first (for testing)
+  env_secret=os.getenv('API_SECRET','')
+  if env_secret:return env_secret
+  # Check/create persistent secret
+  try:
+    os.makedirs(os.path.dirname(API_SECRET_PATH),mode=0o700,exist_ok=True)
+    if os.path.exists(API_SECRET_PATH):
+      with open(API_SECRET_PATH,'r') as f:return f.read().strip()
+    # Generate new secret
+    new_secret=secrets.token_hex(32)
+    with open(API_SECRET_PATH,'w') as f:f.write(new_secret)
+    os.chmod(API_SECRET_PATH,0o600)
+    return new_secret
+  except Exception as e:
+    print(f"Warning: Could not manage API secret: {e}")
+    return ''
+
+API_SECRET=get_or_create_secret()
 
 def check_service(name):
   try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
@@ -90,15 +111,20 @@ def trigger_config_apply():
   try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
   except Exception as e:return {"ok":False,"error":str(e)}
 
-def verify_hmac_auth(timestamp_header,signature_header,body):
-  """Verify HMAC-SHA256 signature for authenticated endpoints."""
+def verify_hmac_auth(method,path,timestamp_header,signature_header,body):
+  """Verify HMAC-SHA256 signature for authenticated endpoints.
+  
+  Signature covers: {method}.{path}.{timestamp}.{body}
+  This prevents replay attacks across different endpoints.
+  """
   if not API_SECRET:return False
   if not timestamp_header or not signature_header:return False
   try:
     timestamp=int(timestamp_header)
     now=int(time.time())
     if abs(now-timestamp)>300:return False
-    message=f"{timestamp}.{body.decode('utf-8') if isinstance(body,bytes) else body}"
+    body_str=body.decode('utf-8') if isinstance(body,bytes) else body
+    message=f"{method}.{path}.{timestamp}.{body_str}"
     expected_sig=hmac.new(API_SECRET.encode(),message.encode(),hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature_header,expected_sig)
   except:return False
@@ -148,7 +174,7 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/config/upload':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp,signature,body):
+      if not verify_hmac_auth('POST',self.path,timestamp,signature,body):
         self.send_json(403,{"ok":False,"error":"Forbidden"});return
       
       try:
@@ -189,7 +215,7 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/config/apply':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp,signature,body):
+      if not verify_hmac_auth('POST',self.path,timestamp,signature,body):
         self.send_json(403,{"ok":False,"error":"Forbidden"});return
       
       result=trigger_config_apply()
@@ -200,4 +226,4 @@ class H(http.server.BaseHTTPRequestHandler):
 
 class R(socketserver.TCPServer):allow_reuse_address=True
 if __name__=='__main__':
-  with R(("",PORT),H) as h:h.serve_forever()
+  with R(("127.0.0.1",PORT),H) as h:h.serve_forever()
