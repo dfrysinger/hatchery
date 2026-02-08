@@ -1,22 +1,14 @@
 #!/bin/bash
 # =============================================================================
-# phase2-background.sh -- Background setup: desktop, tools, remote access
+# phase2-background.sh -- Background phase 2 provisioning (desktop/tools)
 # =============================================================================
-# Purpose:  Second phase of droplet provisioning, runs in the background after
-#           phase1 gets the bot online. Installs desktop environment (XFCE),
-#           developer tools, Chrome, configures VNC/XRDP remote access,
-#           installs skills, sets up email/calendar/Dropbox, builds full
-#           openclaw config, and reboots.
+# Purpose:  Installs desktop environment, developer tools, browser, skills,
+#           and configures all services after phase 1 (bot) is complete.
 #
-# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
-#           /etc/habitat-parsed.env -- parsed habitat config
-#
-# Outputs:  Desktop environment on :10, XRDP on port 3389, VNC on 5900 (localhost only)
-#           Skills installed, full config built, state restored from Dropbox
-#           /var/lib/init-status/phase2-complete -- completion marker
-#
-# Dependencies: apt-get, npm, set-stage.sh, build-full-config.sh,
-#               restore-openclaw-state.sh, tg-notify.sh
+# Runs:     As background job spawned by phase1-critical.sh
+# Stages:   4 (desktop-env) through 10 (finalizing)
+# Log:      /var/log/phase2.log
+# Marker:   Creates /var/lib/init-status/phase2-complete when done
 #
 # Original: /usr/local/sbin/phase2-background.sh (in hatch.yaml write_files)
 # =============================================================================
@@ -38,7 +30,7 @@ $S 4 "desktop-environment"
 apt-get update -qq >> "$LOG" 2>&1
 DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
   xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
-  xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme \
+  xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme yaru-theme-gtk \
   >> "$LOG" 2>&1
 $S 5 "developer-tools"
 DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
@@ -105,6 +97,7 @@ cat > /etc/systemd/system/x11vnc.service <<SVC
 Description=x11vnc
 After=desktop.service
 Requires=desktop.service
+ConditionPathExists=/var/lib/init-status/phase2-complete
 [Service]
 Type=simple
 User=$USERNAME
@@ -114,7 +107,7 @@ ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -nox
 Restart=always
 RestartSec=5
 [Install]
-# WantedBy removed - started explicitly after phase2 completes
+WantedBy=desktop.service
 SVC
 mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
 # Write desktop background config BEFORE starting desktop service (fixes race condition)
@@ -130,18 +123,18 @@ chown -R $USERNAME:$USERNAME $H/.config
 systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc
 # MOVED TO END: systemctl start xvfb
-# MOVED TO END: # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
 # MOVED TO END: for i in {1..30}; do
-# MOVED TO END:   if [ -f /tmp/xvfb.pid ]; then
-# MOVED TO END:     XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
-# MOVED TO END:     # Verify PID exists AND process is actually Xvfb (not a recycled PID)
-# MOVED TO END:     if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
-# MOVED TO END:       if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
-# MOVED TO END:         break
-# MOVED TO END:       fi
-# MOVED TO END:     fi
-# MOVED TO END:   fi
-# MOVED TO END:   sleep 0.5
+  # MOVED TO END: if [ -f /tmp/xvfb.pid ]; then
+    # MOVED TO END: XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+    # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+    # MOVED TO END: if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+      # MOVED TO END: if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+        # MOVED TO END: break
+      # MOVED TO END: fi
+    # MOVED TO END: fi
+  # MOVED TO END: fi
+  # MOVED TO END: sleep 0.5
 # MOVED TO END: done
 # MOVED TO END: systemctl start desktop
 # MOVED TO END: sleep 3
@@ -287,7 +280,6 @@ systemctl start desktop
 sleep 3
 systemctl start x11vnc
 systemctl restart xrdp
-
 touch /var/lib/init-status/phase2-complete
 touch /var/lib/init-status/needs-post-boot-check
 GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
@@ -302,3 +294,4 @@ HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
 $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
 sleep 5
 reboot
+
