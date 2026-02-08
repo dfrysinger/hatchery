@@ -1,681 +1,1868 @@
+#cloud-config
+# version: 4.5.0
 package_update: false
 package_upgrade: false
 bootcmd:
-- - bash
-  - -lc
-  - mkdir -p /var/lib/init-status; [ -f /var/lib/init-status/setup-complete ] && exit 0; echo '0' > /var/lib/init-status/stage; echo '1' > /var/lib/init-status/phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init" >> /var/log/init-stages.log
-- - bash
-  - -lc
-  - '[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true'
-- - bash
-  - -lc
-  - '[ -f /var/lib/init-status/phase2-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true'
-- - bash
-  - -lc
-  - '[ -f /var/lib/init-status/setup-complete ] && exit 0; mkdir -p /tmp/downloads; curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz & echo $! > /tmp/downloads/node.pid; wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb & echo $! > /tmp/downloads/chrome.pid'
-- - bash
-  - -lc
-  - '[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo ''11'' > /var/lib/init-status/stage; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true'
+  - [ bash, -lc, "mkdir -p /var/lib/init-status; [ -f /var/lib/init-status/setup-complete ] && exit 0; echo '0' > /var/lib/init-status/stage; echo '1' > /var/lib/init-status/phase; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\" >> /var/log/init-stages.log" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null || true; systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true; killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null || true" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/phase2-complete ] && exit 0; systemctl stop xrdp xrdp-sesman 2>/dev/null || true; systemctl mask xrdp xrdp-sesman 2>/dev/null || true" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && exit 0; mkdir -p /tmp/downloads; curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz & echo $! > /tmp/downloads/node.pid; wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb & echo $! > /tmp/downloads/chrome.pid" ]
+  - [ bash, -lc, "[ -f /var/lib/init-status/setup-complete ] && [ ! -f /var/lib/init-status/boot-complete ] && { echo '11' > /var/lib/init-status/stage; echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready\" >> /var/log/init-stages.log; touch /var/lib/init-status/boot-complete; } || true" ]
 write_files:
-- path: /etc/droplet.env
-  owner: root:root
-  permissions: '0600'
-  content: 'USERNAME="bot"
+  - path: /etc/droplet.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+      USERNAME="bot"
+      SSH_KEY_B64=""
+      DO_TOKEN_B64="[[DO_TOKEN_B64]]"
+      PASSWORD_B64="[[PASSWORD_B64]]"
+      # PLATFORM, DISCORD_*, TELEGRAM_OWNER_ID are extracted from HABITAT_B64
+      # by parse-habitat.py -> /etc/habitat-parsed.env (no Shortcut placeholders needed)
+      ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
+      BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
+      GOOGLE_API_KEY_B64="[[GOOGLE_API_KEY_B64]]"
+      DROPBOX_TOKEN_B64="[[DROPBOX_TOKEN_B64]]"
+      EMAIL_B64="[[EMAIL_B64]]"
+      IMAP_HOST_B64="[[IMAP_HOST_B64]]"
+      SMTP_HOST_B64="[[SMTP_HOST_B64]]"
+      EMAIL_PASSWORD_B64="[[EMAIL_PASSWORD_B64]]"
+      CALDAV_URL_B64="[[CALDAV_URL_B64]]"
+      CALDAV_USER_B64="[[CALDAV_USER_B64]]"
+      CALDAV_PASSWORD_B64="[[CALDAV_PASSWORD_B64]]"
+      GH_TOKEN_B64="[[GH_TOKEN_B64]]"
+      GMAIL_CLIENT_ID_B64="[[GMAIL_CLIENT_ID_B64]]"
+      GMAIL_CLIENT_SECRET_B64="[[GMAIL_CLIENT_SECRET_B64]]"
+      GMAIL_REFRESH_TOKEN_B64="[[GMAIL_REFRESH_TOKEN_B64]]"
+      OPENAI_ACCESS_B64="[[OPENAI_ACCESS_B64]]"
+      OPENAI_REFRESH_B64="[[OPENAI_REFRESH_B64]]"
+      OPENAI_EXPIRES_B64="[[OPENAI_EXPIRES_B64]]"
+      OPENAI_ACCOUNT_ID_B64="[[OPENAI_ACCOUNT_ID_B64]]"
+      HABITAT_B64="[[HABITAT_B64]]"
+      AGENT_LIB_B64="[[AGENT_LIB_B64]]"
+  - path: /etc/needrestart/conf.d/99-autorestart.conf
+    permissions: "0644"
+    content: |
+      $nrconf{restart} = 'a';
+      $nrconf{blacklist_rc} = [qr/^cloud-init/, qr/^cloud-final/, qr/^cloud-config/];
+  - path: /etc/ssh/sshd_config.d/99-password-auth.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication yes
+      PermitRootLogin yes
+  - path: /usr/local/bin/set-stage.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      echo "$1" > /var/lib/init-status/stage
+      echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) STAGE=$1 PHASE=$(cat /var/lib/init-status/phase 2>/dev/null || echo 1) DESC=$2" >> /var/log/init-stages.log
+  - path: /usr/local/bin/set-phase.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      echo "$1" > /var/lib/init-status/phase
+      echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) PHASE=$1 DESC=$2" >> /var/log/init-stages.log
+  - path: /usr/local/bin/parse-habitat.py
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      import json, base64, os, sys
+      def d(val):
+          try: return base64.b64decode(val).decode()
+          except: return ""
+      def b64(s):
+          return base64.b64encode((s or "").encode()).decode()
+      hab_raw = os.environ.get('HABITAT_B64', '')
+      lib_raw = os.environ.get('AGENT_LIB_B64', '')
+      if not hab_raw:
+          print("ERROR: HABITAT_B64 not set", file=sys.stderr)
+          sys.exit(1)
+      try:
+          hab = json.loads(d(hab_raw))
+      except (json.JSONDecodeError, Exception) as e:
+          print("ERROR: Failed to parse HABITAT_B64: {}".format(e), file=sys.stderr)
+          sys.exit(1)
+      lib = {}
+      if lib_raw:
+          try:
+              lib = json.loads(d(lib_raw))
+          except (json.JSONDecodeError, Exception):
+              print("WARN: Failed to parse AGENT_LIB_B64, using empty library", file=sys.stderr)
+      with open('/etc/habitat.json', 'w') as f:
+          json.dump(hab, f, indent=2)
+      os.chmod('/etc/habitat.json', 0o600)
+      with open('/etc/habitat-parsed.env', 'w') as f:
+          f.write('HABITAT_NAME="{}"\n'.format(hab["name"]))
+          f.write('HABITAT_NAME_B64="{}"\n'.format(b64(hab["name"])))
+          f.write('DESTRUCT_MINS="{}"\n'.format(hab.get("destructMinutes", 0)))
+          f.write('DESTRUCT_MINS_B64="{}"\n'.format(b64(str(hab.get("destructMinutes", 0)))))
+          f.write('BG_COLOR="{}"\n'.format(hab.get("bgColor", "2D3748")))
+          # Platform (default: "telegram" for backward compat)
+          platform = hab.get("platform", "telegram")
+          f.write('PLATFORM="{}"\n'.format(platform))
+          f.write('PLATFORM_B64="{}"\n'.format(b64(platform)))
+          # Discord config
+          discord_cfg = hab.get("discord", {})
+          f.write('DISCORD_GUILD_ID="{}"\n'.format(discord_cfg.get("serverId", "")))
+          f.write('DISCORD_GUILD_ID_B64="{}"\n'.format(b64(discord_cfg.get("serverId", ""))))
+          f.write('DISCORD_OWNER_ID="{}"\n'.format(discord_cfg.get("ownerId", "")))
+          f.write('DISCORD_OWNER_ID_B64="{}"\n'.format(b64(discord_cfg.get("ownerId", ""))))
+          # Telegram config
+          telegram_cfg = hab.get("telegram", {})
+          telegram_owner_id = telegram_cfg.get("ownerId", "")
+          f.write('TELEGRAM_OWNER_ID="{}"\n'.format(telegram_owner_id))
+          f.write('TELEGRAM_OWNER_ID_B64="{}"\n'.format(b64(telegram_owner_id)))
+          # Backward compat: keep TELEGRAM_USER_ID_B64 as alias
+          f.write('TELEGRAM_USER_ID_B64="{}"\n'.format(b64(telegram_owner_id)))
+          # Council config (supports nested telegram.groupId and legacy groupId)
+          council = hab.get("council", {})
+          council_tg = council.get("telegram", {})
+          council_group_id = council_tg.get("groupId", council.get("groupId", hab.get("councilGroupId", "")))
+          f.write('COUNCIL_GROUP_ID="{}"\n'.format(council_group_id))
+          f.write('COUNCIL_GROUP_NAME="{}"\n'.format(council.get("groupName", "")))
+          f.write('COUNCIL_JUDGE="{}"\n'.format(council.get("judge", "")))
+          f.write('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
+          f.write('GLOBAL_IDENTITY_B64="{}"\n'.format(b64(hab.get("globalIdentity", ""))))
+          f.write('GLOBAL_BOOT_B64="{}"\n'.format(b64(hab.get("globalBoot", ""))))
+          f.write('GLOBAL_BOOTSTRAP_B64="{}"\n'.format(b64(hab.get("globalBootstrap", ""))))
+          f.write('GLOBAL_SOUL_B64="{}"\n'.format(b64(hab.get("globalSoul", ""))))
+          f.write('GLOBAL_AGENTS_B64="{}"\n'.format(b64(hab.get("globalAgents", ""))))
+          f.write('GLOBAL_USER_B64="{}"\n'.format(b64(hab.get("globalUser", ""))))
+          f.write('GLOBAL_TOOLS_B64="{}"\n'.format(b64(hab.get("globalTools", ""))))
+          agents = hab.get("agents", [])
+          f.write('AGENT_COUNT={}\n'.format(len(agents)))
+          for i, agent_ref in enumerate(agents):
+              n = i + 1
+              name = agent_ref["agent"]
+              lib_entry = lib.get(name, {})
+              model = agent_ref.get("model") or lib_entry.get("model", "anthropic/claude-opus-4-5")
+              identity = lib_entry.get("identity", "")
+              soul = lib_entry.get("soul", "")
+              agents_md = lib_entry.get("agents", "")
+              boot = lib_entry.get("boot", "")
+              bootstrap = lib_entry.get("bootstrap", "")
+              user = lib_entry.get("user", "")
+              # Telegram bot token: prefer telegramBotToken, fall back to botToken for compat
+              tg_bot_token = agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
+              # Discord bot token
+              dc_bot_token = agent_ref.get("discordBotToken", "")
+              f.write('AGENT{}_NAME="{}"\n'.format(n, name))
+              f.write('AGENT{}_NAME_B64="{}"\n'.format(n, b64(name)))
+              # Backward compat: BOT_TOKEN = telegram bot token
+              f.write('AGENT{}_BOT_TOKEN="{}"\n'.format(n, tg_bot_token))
+              f.write('AGENT{}_BOT_TOKEN_B64="{}"\n'.format(n, b64(tg_bot_token)))
+              # Explicit per-platform tokens
+              f.write('AGENT{}_TELEGRAM_BOT_TOKEN="{}"\n'.format(n, tg_bot_token))
+              f.write('AGENT{}_TELEGRAM_BOT_TOKEN_B64="{}"\n'.format(n, b64(tg_bot_token)))
+              f.write('AGENT{}_DISCORD_BOT_TOKEN="{}"\n'.format(n, dc_bot_token))
+              f.write('AGENT{}_DISCORD_BOT_TOKEN_B64="{}"\n'.format(n, b64(dc_bot_token)))
+              f.write('AGENT{}_MODEL="{}"\n'.format(n, model))
+              f.write('AGENT{}_IDENTITY_B64="{}"\n'.format(n, b64(identity)))
+              f.write('AGENT{}_SOUL_B64="{}"\n'.format(n, b64(soul)))
+              f.write('AGENT{}_AGENTS_B64="{}"\n'.format(n, b64(agents_md)))
+              f.write('AGENT{}_BOOT_B64="{}"\n'.format(n, b64(boot)))
+              f.write('AGENT{}_BOOTSTRAP_B64="{}"\n'.format(n, b64(bootstrap)))
+              f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
+      os.chmod('/etc/habitat-parsed.env', 0o600)
+      print("Parsed habitat '{}' with {} agents (platform: {})".format(hab['name'], len(agents), platform))
+  - path: /usr/local/bin/tg-notify.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
+      MSG="$1"
+      [ -z "$MSG" ] && exit 1
+      TG_OK=0; DC_OK=0
+      # --- Telegram notification ---
+      send_telegram() {
+        local TBT="${AGENT1_BOT_TOKEN}"
+        local TUI=$(d "$TELEGRAM_USER_ID_B64")
+        [ -z "$TBT" ] || [ -z "$TUI" ] && return 1
+        curl -sf --max-time 10 "https://api.telegram.org/bot${TBT}/sendMessage" \
+          -d "chat_id=${TUI}" \
+          -d "text=${MSG}" > /dev/null 2>&1
+      }
+      # --- Discord notification ---
+      send_discord() {
+        local DBT="${AGENT1_DISCORD_BOT_TOKEN}"
+        local DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
+        [ -z "$DBT" ] || [ -z "$DOI" ] && return 1
 
-    SSH_KEY_B64=""
+        local CHANNEL_ID=""
+        local CACHE_FILE="${DISCORD_DM_CACHE_FILE:-/tmp/discord-dm-cache-${DOI}}"
+        local CACHE_MAX_AGE="${DISCORD_DM_CACHE_TTL:-86400}"  # default 24 hours
 
-    DO_TOKEN_B64="[[DO_TOKEN_B64]]"
+        # Check cache first
+        if [ -f "$CACHE_FILE" ]; then
+          local CACHE_AGE=$(( $(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0) ))
+          if [ "$CACHE_AGE" -lt "$CACHE_MAX_AGE" ]; then
+            CHANNEL_ID=$(cat "$CACHE_FILE" 2>/dev/null)
+          fi
+        fi
 
-    PASSWORD_B64="[[PASSWORD_B64]]"
+        atomic_write_cache() {
+          local path="$1"
+          local value="$2"
 
-    # PLATFORM, DISCORD_*, TELEGRAM_OWNER_ID are extracted from HABITAT_B64
+          python3 - "$path" "$value" <<'PY'
+      import os, sys, tempfile
+      path = sys.argv[1]
+      value = sys.argv[2]
+      base_dir = os.path.dirname(os.path.abspath(path)) or "."
+      os.makedirs(base_dir, exist_ok=True)
+      fd, tmppath = tempfile.mkstemp(prefix=".tmp-", dir=base_dir)
+      try:
+          with os.fdopen(fd, "w", encoding="utf-8") as f:
+              f.write(value)
+              f.flush()
+              os.fsync(f.fileno())
+          os.replace(tmppath, path)
+      except Exception:
+          try:
+              os.unlink(tmppath)
+          except Exception:
+              pass
+          raise
+      PY
+        }
 
-    # by parse-habitat.py -> /etc/habitat-parsed.env (no Shortcut placeholders needed)
+        # If no cached channel ID, fetch from API
+        if [ -z "$CHANNEL_ID" ]; then
+          local DM_RESP
+          DM_RESP=$(curl -sf --max-time 10 \
+            -X POST "https://discord.com/api/v10/users/@me/channels" \
+            -H "Authorization: Bot ${DBT}" \
+            -H "Content-Type: application/json" \
+            -d "{\"recipient_id\":\"${DOI}\"}" 2>/dev/null)
+          [ -z "$DM_RESP" ] && return 1
 
-    ANTHROPIC_KEY_B64="[[ANTHROPIC_KEY_B64]]"
+          CHANNEL_ID=$(echo "$DM_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+          [ -z "$CHANNEL_ID" ] && return 1
 
-    BRAVE_KEY_B64="[[BRAVE_KEY_B64]]"
+          # Cache the channel ID for future use (atomic)
+          atomic_write_cache "$CACHE_FILE" "$CHANNEL_ID" 2>/dev/null || true
+        fi
 
-    GOOGLE_API_KEY_B64="[[GOOGLE_API_KEY_B64]]"
+        # Send message to DM channel
+        curl -sf --max-time 10 \
+          -X POST "https://discord.com/api/v10/channels/${CHANNEL_ID}/messages" \
+          -H "Authorization: Bot ${DBT}" \
+          -H "Content-Type: application/json" \
+          -d "{\"content\":$(echo "$MSG" | python3 -c 'import sys,json;print(json.dumps(sys.stdin.read().strip()))')}" > /dev/null 2>&1
+      }
+      case "$PLATFORM" in
+        telegram)
+          send_telegram; TG_OK=$?
+          [ $TG_OK -ne 0 ] && exit 1
+          ;;
+        discord)
+          send_discord; DC_OK=$?
+          [ $DC_OK -ne 0 ] && exit 1
+          ;;
+        both)
+          send_telegram; TG_OK=$?
+          send_discord; DC_OK=$?
+          # Succeed if at least one platform worked
+          [ $TG_OK -ne 0 ] && [ $DC_OK -ne 0 ] && exit 1
+          ;;
+        *)
+          echo "[tg-notify] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+          echo "  Valid options: telegram, discord, both" >&2
+          echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+          exit 1
+          ;;
+      esac
+      exit 0
+  - path: /usr/local/bin/set-council-group.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
+      # Discord droplets don't have Telegram council config; no-op safely.
+      if [ "$PLATFORM" = "discord" ]; then
+        exit 0
+      fi
+      exec /usr/local/bin/set-council-group.telegram.sh "$@"
+  - path: /etc/systemd/system/api-server.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Droplet Status API
+      After=network.target
+      [Service]
+      EnvironmentFile=/etc/api-server.env
+      ExecStart=/usr/local/bin/api-server.py
+      Restart=always
+      RestartSec=3
+      User=root
+      [Install]
+      WantedBy=multi-user.target
+  - path: /usr/local/bin/apply-config.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # =============================================================================
+      # apply-config.sh -- Apply uploaded config and restart clawdbot
+      # =============================================================================
+      # Called by: api-server.py POST /config/apply or /config/upload with apply=true
+      # =============================================================================
+      set -e
+      LOG="/var/log/apply-config.log"
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Starting config apply" >> "$LOG"
+      
+      # Re-parse habitat if it exists
+      if [ -f /etc/habitat.json ]; then
+        export HABITAT_B64=$(base64 -w0 /etc/habitat.json)
+        echo "  Loaded habitat.json" >> "$LOG"
+      fi
+      
+      # Re-parse agents if it exists
+      if [ -f /etc/agents.json ]; then
+        export AGENT_LIB_B64=$(base64 -w0 /etc/agents.json)
+        echo "  Loaded agents.json" >> "$LOG"
+      fi
+      
+      # Run parse-habitat.py to regenerate env
+      if [ -n "$HABITAT_B64" ]; then
+        python3 /usr/local/bin/parse-habitat.py >> "$LOG" 2>&1 || true
+        echo "  Parsed habitat" >> "$LOG"
+      fi
+      
+      # Rebuild full config
+      if [ -x /usr/local/bin/build-full-config.sh ]; then
+        /usr/local/bin/build-full-config.sh >> "$LOG" 2>&1 || true
+        echo "  Rebuilt config" >> "$LOG"
+      fi
+      
+      # Restart clawdbot
+      systemctl restart clawdbot >> "$LOG" 2>&1 || true
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Config apply complete" >> "$LOG"
+  - path: /usr/local/bin/api-server.py
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      # =============================================================================
+      # api-server.py -- Droplet Status API (HTTP server on port 8080)
+      # =============================================================================
+      # Purpose:  Lightweight HTTP API exposing droplet provisioning status.
+      #           Provides status, health, config endpoints for droplet management.
+      #
+      # Endpoints:
+      #   GET  /status  -- Full status JSON (phase, stage, services, safe_mode)
+      #   GET  /health  -- Health check (200 if bot online, 503 if not)
+      #   GET  /stages  -- Raw init-stages.log text
+      #   GET  /log     -- Last 8KB of bootstrap/phase logs
+      #   GET  /config  -- Config file status (no sensitive data)
+      #   POST /sync    -- Trigger openclaw state sync to Dropbox
+      #   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown
+      #   POST /config/upload -- Upload habitat and/or agents JSON
+      #   POST /config/apply  -- Apply uploaded config and restart
+      #
+      # Dependencies: systemctl, /usr/local/bin/sync-openclaw-state.sh,
+      #               /usr/local/bin/apply-config.sh
+      #
+      # Original: /usr/local/bin/api-server.py (in hatch.yaml write_files)
+      # =============================================================================
+      import http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time
+      PORT=8080
+      API_SECRET=os.getenv('API_SECRET','')
+      HABITAT_PATH='/etc/habitat.json'
+      AGENTS_PATH='/etc/agents.json'
+      APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
+      P1_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
+      P2_STAGES={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
 
-    DROPBOX_TOKEN_B64="[[DROPBOX_TOKEN_B64]]"
+      def check_service(name):
+        try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
+        except:return False
 
-    EMAIL_B64="[[EMAIL_B64]]"
+      def get_status():
+        s,p=0,1
+        try:
+          with open('/var/lib/init-status/stage','r') as f:s=int(f.read().strip())
+          with open('/var/lib/init-status/phase','r') as f:p=int(f.read().strip())
+        except:pass
+        p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
+        p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
+        setup_done=os.path.exists('/var/lib/init-status/setup-complete')
+        bot_online=check_service('clawdbot')
+        svc={}
+        if p2_done or setup_done:
+          for sv in ['clawdbot','xrdp','desktop','x11vnc']:svc[sv]=check_service(sv)
+        desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
+        safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
+        return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online,"safe_mode":safe_mode,"services":svc if svc else None}
 
-    IMAP_HOST_B64="[[IMAP_HOST_B64]]"
+      def validate_config_upload(data):
+        """Validate config upload request data."""
+        errors=[]
+        if "habitat" in data and not isinstance(data["habitat"],dict):errors.append("habitat must be an object")
+        if "agents" in data and not isinstance(data["agents"],dict):errors.append("agents must be an object")
+        if "apply" in data and not isinstance(data["apply"],bool):errors.append("apply must be a boolean")
+        return errors
 
-    SMTP_HOST_B64="[[SMTP_HOST_B64]]"
+      def write_config_file(path,data):
+        """Write config data to file with secure permissions."""
+        try:
+          with open(path,'w') as f:json.dump(data,f,indent=2)
+          os.chmod(path,0o600)
+          return {"ok":True,"path":path}
+        except Exception as e:return {"ok":False,"error":str(e)}
 
-    EMAIL_PASSWORD_B64="[[EMAIL_PASSWORD_B64]]"
+      def get_config_status():
+        """Get current config file status without exposing sensitive data."""
+        result={"habitat_exists":os.path.exists(HABITAT_PATH),"agents_exists":os.path.exists(AGENTS_PATH)}
+        if result["habitat_exists"]:
+          stat=os.stat(HABITAT_PATH);result["habitat_modified"]=stat.st_mtime
+          try:
+            with open(HABITAT_PATH,'r') as f:h=json.load(f)
+            result["habitat_name"]=h.get("name","")
+            result["habitat_agent_count"]=len(h.get("agents",[]))
+          except:pass
+        if result["agents_exists"]:
+          stat=os.stat(AGENTS_PATH);result["agents_modified"]=stat.st_mtime
+          try:
+            with open(AGENTS_PATH,'r') as f:a=json.load(f)
+            result["agents_names"]=list(a.keys())
+          except:pass
+        return result
 
-    CALDAV_URL_B64="[[CALDAV_URL_B64]]"
+      def trigger_config_apply():
+        """Trigger config apply script asynchronously."""
+        try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
+        except Exception as e:return {"ok":False,"error":str(e)}
 
-    CALDAV_USER_B64="[[CALDAV_USER_B64]]"
+      def verify_hmac_auth(timestamp_header, signature_header, method, path, body):
+        """Verify HMAC-SHA256 signature for authenticated endpoints.
 
-    CALDAV_PASSWORD_B64="[[CALDAV_PASSWORD_B64]]"
+        Signature binds:
+        - timestamp (replay protection)
+        - HTTP method + path (prevents cross-endpoint replay/substitution)
+        - request body (integrity)
 
-    GH_TOKEN_B64="[[GH_TOKEN_B64]]"
+        Message format:
+          "{timestamp}.{method}.{path}.{body}" where body is UTF-8 JSON string.
+        """
+        if not API_SECRET:
+          return False
+        if not timestamp_header or not signature_header:
+          return False
+        try:
+          timestamp = int(timestamp_header)
+          now = int(time.time())
+          if abs(now - timestamp) > 300:
+            return False
 
-    GMAIL_CLIENT_ID_B64="[[GMAIL_CLIENT_ID_B64]]"
+          b = body.decode('utf-8') if isinstance(body, (bytes, bytearray)) else (body or '')
+          msg = f"{timestamp}.{method}.{path}.{b}"
+          expected_sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+          return hmac.compare_digest(signature_header, expected_sig)
+        except Exception:
+          return False
 
-    GMAIL_CLIENT_SECRET_B64="[[GMAIL_CLIENT_SECRET_B64]]"
+      class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self,*a):pass
+        
+        def send_json(self,code,data):
+          self.send_response(code);self.send_header('Content-type','application/json');self.end_headers()
+          self.wfile.write(json.dumps(data).encode())
+        
+        def do_GET(self):
+          if self.path=='/status':
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(get_status()).encode())
+          elif self.path=='/health':
+            s=get_status();code=200 if s.get('bot_online') else 503;self.send_response(code);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps({"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc'),"safe_mode":s.get('safe_mode',False)}).encode())
+          elif self.path=='/stages':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            # Require auth: stages/log/config may contain sensitive info
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
+            try:
+              with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
+            except:self.wfile.write(b"No log")
+          elif self.path=='/log':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
+            for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:
+              try:
+                self.wfile.write(f"\n=== {lf} ===\n".encode())
+                with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
+              except:self.wfile.write(f"  (not found)\n".encode())
+          elif self.path=='/config':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            self.send_json(200,get_config_status())
+          else:self.send_response(404);self.end_headers()
+        
+        def do_POST(self):
+          content_length=int(self.headers.get('Content-Length',0))
+          body=self.rfile.read(content_length) if content_length else b'{}'
+          
+          if self.path=='/sync':
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+            try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
+            except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+          
+          elif self.path=='/prepare-shutdown':
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+            try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
+            except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+          
+          elif self.path=='/config/upload':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            
+            try:
+              data=json.loads(body)
+            except json.JSONDecodeError as e:
+              self.send_json(400,{"ok":False,"error":f"Invalid JSON: {e}"});return
+            
+            errors=validate_config_upload(data)
+            if errors:
+              self.send_json(400,{"ok":False,"errors":errors});return
+            
+            files_written=[]
+            
+            # Write habitat config
+            if "habitat" in data:
+              result=write_config_file(HABITAT_PATH,data["habitat"])
+              if not result["ok"]:
+                self.send_json(500,{"ok":False,"error":f"Failed to write habitat: {result.get('error')}"});return
+              files_written.append(HABITAT_PATH)
+            
+            # Write agents library
+            if "agents" in data:
+              result=write_config_file(AGENTS_PATH,data["agents"])
+              if not result["ok"]:
+                self.send_json(500,{"ok":False,"error":f"Failed to write agents: {result.get('error')}"});return
+              files_written.append(AGENTS_PATH)
+            
+            # Apply if requested
+            applied=False
+            if data.get("apply"):
+              apply_result=trigger_config_apply()
+              if not apply_result["ok"]:
+                self.send_json(500,{"ok":False,"error":f"Failed to apply: {apply_result.get('error')}","files_written":files_written});return
+              applied=True
+            
+            self.send_json(200,{"ok":True,"files_written":files_written,"applied":applied})
+          
+          elif self.path=='/config/apply':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            
+            result=trigger_config_apply()
+            self.send_json(200 if result["ok"] else 500,result)
+          
+          else:
+            self.send_response(404);self.end_headers()
 
-    GMAIL_REFRESH_TOKEN_B64="[[GMAIL_REFRESH_TOKEN_B64]]"
+      class R(socketserver.TCPServer):allow_reuse_address=True
+      if __name__=='__main__':
+        # SECURITY: Bind to localhost only (127.0.0.1) to prevent external network access.
+        # This API exposes droplet config, logs, and control endpoints. External exposure
+        # would allow unauthorized config changes, log access, and service control.
+        # SSH tunneling or local gateway scripts are the only supported access methods.
+        print(f"[api-server] Starting on 127.0.0.1:{PORT} (localhost-only, secure)")
+        with R(("127.0.0.1",PORT),H) as h:h.serve_forever()
 
-    OPENAI_ACCESS_B64="[[OPENAI_ACCESS_B64]]"
-
-    OPENAI_REFRESH_B64="[[OPENAI_REFRESH_B64]]"
-
-    OPENAI_EXPIRES_B64="[[OPENAI_EXPIRES_B64]]"
-
-    OPENAI_ACCOUNT_ID_B64="[[OPENAI_ACCOUNT_ID_B64]]"
-
-    HABITAT_B64="[[HABITAT_B64]]"
-
-    AGENT_LIB_B64="[[AGENT_LIB_B64]]"
-
-    '
-- path: /etc/needrestart/conf.d/99-autorestart.conf
-  permissions: '0644'
-  content: '$nrconf{restart} = ''a'';
-
-    $nrconf{blacklist_rc} = [qr/^cloud-init/, qr/^cloud-final/, qr/^cloud-config/];
-
-    '
-- path: /etc/ssh/sshd_config.d/99-password-auth.conf
-  permissions: '0644'
-  content: 'PasswordAuthentication yes
-
-    PermitRootLogin yes
-
-    '
-- path: /usr/local/bin/set-stage.sh
-  permissions: '0755'
-  content: '#!/bin/bash
-
-    echo "$1" > /var/lib/init-status/stage
-
-    echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) STAGE=$1 PHASE=$(cat /var/lib/init-status/phase 2>/dev/null || echo 1) DESC=$2" >> /var/log/init-stages.log
-
-    '
-- path: /usr/local/bin/set-phase.sh
-  permissions: '0755'
-  content: '#!/bin/bash
-
-    echo "$1" > /var/lib/init-status/phase
-
-    echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) PHASE=$1 DESC=$2" >> /var/log/init-stages.log
-
-    '
-- path: /usr/local/bin/parse-habitat.py
-  permissions: '0755'
-  content: "#!/usr/bin/env python3\nimport json, base64, os, sys\ndef d(val):\n    try: return base64.b64decode(val).decode()\n    except: return \"\"\ndef b64(s):\n    return base64.b64encode((s or \"\").encode()).decode()\nhab_raw = os.environ.get('HABITAT_B64', '')\nlib_raw = os.environ.get('AGENT_LIB_B64', '')\nif not hab_raw:\n    print(\"ERROR: HABITAT_B64 not set\", file=sys.stderr)\n    sys.exit(1)\ntry:\n    hab = json.loads(d(hab_raw))\nexcept (json.JSONDecodeError, Exception) as e:\n    print(\"ERROR: Failed to parse HABITAT_B64: {}\".format(e), file=sys.stderr)\n    sys.exit(1)\nlib = {}\nif lib_raw:\n    try:\n        lib = json.loads(d(lib_raw))\n    except (json.JSONDecodeError, Exception):\n        print(\"WARN: Failed to parse AGENT_LIB_B64, using empty library\", file=sys.stderr)\nwith open('/etc/habitat.json', 'w') as f:\n    json.dump(hab, f, indent=2)\nos.chmod('/etc/habitat.json', 0o600)\nwith open('/etc/habitat-parsed.env', 'w') as f:\n    f.write('HABITAT_NAME=\"{}\"\\n'.format(hab[\"name\"]))\n    f.write('HABITAT_NAME_B64=\"{}\"\\n'.format(b64(hab[\"name\"])))\n    f.write('DESTRUCT_MINS=\"{}\"\\n'.format(hab.get(\"destructMinutes\", 0)))\n    f.write('DESTRUCT_MINS_B64=\"{}\"\\n'.format(b64(str(hab.get(\"destructMinutes\", 0)))))\n    f.write('BG_COLOR=\"{}\"\\n'.format(hab.get(\"bgColor\", \"2D3748\")))\n    # Platform (default: \"telegram\" for backward compat)\n    platform = hab.get(\"platform\", \"telegram\")\n    f.write('PLATFORM=\"{}\"\\n'.format(platform))\n    f.write('PLATFORM_B64=\"{}\"\\n'.format(b64(platform)))\n    # Discord config\n    discord_cfg = hab.get(\"discord\", {})\n    f.write('DISCORD_GUILD_ID=\"{}\"\\n'.format(discord_cfg.get(\"serverId\", \"\")))\n    f.write('DISCORD_GUILD_ID_B64=\"{}\"\\n'.format(b64(discord_cfg.get(\"serverId\", \"\"))))\n    f.write('DISCORD_OWNER_ID=\"{}\"\\n'.format(discord_cfg.get(\"ownerId\", \"\")))\n    f.write('DISCORD_OWNER_ID_B64=\"{}\"\\n'.format(b64(discord_cfg.get(\"ownerId\", \"\"))))\n    # Telegram config\n    telegram_cfg = hab.get(\"telegram\", {})\n    telegram_owner_id = telegram_cfg.get(\"ownerId\", \"\")\n    f.write('TELEGRAM_OWNER_ID=\"{}\"\\n'.format(telegram_owner_id))\n    f.write('TELEGRAM_OWNER_ID_B64=\"{}\"\\n'.format(b64(telegram_owner_id)))\n    # Backward compat: keep TELEGRAM_USER_ID_B64 as alias\n    f.write('TELEGRAM_USER_ID_B64=\"{}\"\\n'.format(b64(telegram_owner_id)))\n    # Council config (supports nested telegram.groupId and legacy groupId)\n    council = hab.get(\"council\", {})\n    council_tg = council.get(\"telegram\", {})\n    council_group_id = council_tg.get(\"groupId\", council.get(\"groupId\", hab.get(\"councilGroupId\", \"\")))\n    f.write('COUNCIL_GROUP_ID=\"{}\"\\n'.format(council_group_id))\n    f.write('COUNCIL_GROUP_NAME=\"{}\"\\n'.format(council.get(\"groupName\", \"\")))\n    f.write('COUNCIL_JUDGE=\"{}\"\\n'.format(council.get(\"judge\", \"\")))\n    f.write('HABITAT_DOMAIN=\"{}\"\\n'.format(hab.get(\"domain\", \"\")))\n    f.write('GLOBAL_IDENTITY_B64=\"{}\"\\n'.format(b64(hab.get(\"globalIdentity\", \"\"))))\n    f.write('GLOBAL_BOOT_B64=\"{}\"\\n'.format(b64(hab.get(\"globalBoot\", \"\"))))\n    f.write('GLOBAL_BOOTSTRAP_B64=\"{}\"\\n'.format(b64(hab.get(\"globalBootstrap\", \"\"))))\n    f.write('GLOBAL_SOUL_B64=\"{}\"\\n'.format(b64(hab.get(\"globalSoul\", \"\"))))\n    f.write('GLOBAL_AGENTS_B64=\"{}\"\\n'.format(b64(hab.get(\"globalAgents\", \"\"))))\n    f.write('GLOBAL_USER_B64=\"{}\"\\n'.format(b64(hab.get(\"globalUser\", \"\"))))\n    f.write('GLOBAL_TOOLS_B64=\"{}\"\\n'.format(b64(hab.get(\"globalTools\", \"\"))))\n    agents = hab.get(\"agents\", [])\n    f.write('AGENT_COUNT={}\\n'.format(len(agents)))\n    for i, agent_ref in enumerate(agents):\n        n = i + 1\n        name = agent_ref[\"agent\"]\n        lib_entry = lib.get(name, {})\n        model = agent_ref.get(\"model\") or lib_entry.get(\"model\", \"anthropic/claude-opus-4-5\")\n        identity = lib_entry.get(\"identity\", \"\")\n        soul = lib_entry.get(\"soul\", \"\")\n        agents_md = lib_entry.get(\"agents\", \"\")\n        boot = lib_entry.get(\"boot\", \"\")\n        bootstrap = lib_entry.get(\"bootstrap\", \"\")\n        user = lib_entry.get(\"user\", \"\")\n        # Telegram bot token: prefer telegramBotToken, fall back to botToken for compat\n        tg_bot_token = agent_ref.get(\"telegramBotToken\", agent_ref.get(\"botToken\", \"\"))\n        # Discord bot token\n        dc_bot_token = agent_ref.get(\"discordBotToken\", \"\")\n        f.write('AGENT{}_NAME=\"{}\"\\n'.format(n, name))\n        f.write('AGENT{}_NAME_B64=\"{}\"\\n'.format(n, b64(name)))\n        # Backward compat: BOT_TOKEN = telegram bot token\n        f.write('AGENT{}_BOT_TOKEN=\"{}\"\\n'.format(n, tg_bot_token))\n        f.write('AGENT{}_BOT_TOKEN_B64=\"{}\"\\n'.format(n, b64(tg_bot_token)))\n        # Explicit per-platform tokens\n        f.write('AGENT{}_TELEGRAM_BOT_TOKEN=\"{}\"\\n'.format(n, tg_bot_token))\n        f.write('AGENT{}_TELEGRAM_BOT_TOKEN_B64=\"{}\"\\n'.format(n, b64(tg_bot_token)))\n        f.write('AGENT{}_DISCORD_BOT_TOKEN=\"{}\"\\n'.format(n, dc_bot_token))\n        f.write('AGENT{}_DISCORD_BOT_TOKEN_B64=\"{}\"\\n'.format(n, b64(dc_bot_token)))\n        f.write('AGENT{}_MODEL=\"{}\"\\n'.format(n, model))\n        f.write('AGENT{}_IDENTITY_B64=\"{}\"\\n'.format(n, b64(identity)))\n        f.write('AGENT{}_SOUL_B64=\"{}\"\\n'.format(n, b64(soul)))\n        f.write('AGENT{}_AGENTS_B64=\"{}\"\\n'.format(n, b64(agents_md)))\n        f.write('AGENT{}_BOOT_B64=\"{}\"\\n'.format(n, b64(boot)))\n        f.write('AGENT{}_BOOTSTRAP_B64=\"{}\"\\n'.format(n, b64(bootstrap)))\n        f.write('AGENT{}_USER_B64=\"{}\"\\n'.format(n, b64(user)))\nos.chmod('/etc/habitat-parsed.env', 0o600)\nprint(\"Parsed habitat '{}' with {} agents (platform: {})\".format(hab['name'], len(agents), platform))\n"
-- path: /usr/local/bin/tg-notify.sh
-  permissions: '0755'
-  content: "#!/bin/bash\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n[ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\n# PLATFORM must be explicitly set - no silent defaults\nPLATFORM=\"${PLATFORM:-$(d \"$PLATFORM_B64\")}\"\nMSG=\"$1\"\n[ -z \"$MSG\" ] && exit 1\nTG_OK=0; DC_OK=0\n# --- Telegram notification ---\nsend_telegram() {\n  local TBT=\"${AGENT1_BOT_TOKEN}\"\n  local TUI=$(d \"$TELEGRAM_USER_ID_B64\")\n  [ -z \"$TBT\" ] || [ -z \"$TUI\" ] && return 1\n  curl -sf --max-time 10 \"https://api.telegram.org/bot${TBT}/sendMessage\" \\\n    -d \"chat_id=${TUI}\" \\\n    -d \"text=${MSG}\" > /dev/null 2>&1\n}\n# --- Discord notification ---\nsend_discord() {\n  local DBT=\"${AGENT1_DISCORD_BOT_TOKEN}\"\n  local DOI=\"${DISCORD_OWNER_ID:-$(d \"$DISCORD_OWNER_ID_B64\")}\"\n  [ -z \"$DBT\" ] || [ -z \"$DOI\" ] && return 1\n\n  local CHANNEL_ID=\"\"\n  local CACHE_FILE=\"${DISCORD_DM_CACHE_FILE:-/tmp/discord-dm-cache-${DOI}}\"\n  local CACHE_MAX_AGE=\"${DISCORD_DM_CACHE_TTL:-86400}\"  # default 24 hours\n\n  # Check cache first\n  if [ -f \"$CACHE_FILE\" ]; then\n    local CACHE_AGE=$(( $(date +%s) - $(stat -c %Y \"$CACHE_FILE\" 2>/dev/null || echo 0) ))\n    if [ \"$CACHE_AGE\" -lt \"$CACHE_MAX_AGE\" ]; then\n      CHANNEL_ID=$(cat \"$CACHE_FILE\" 2>/dev/null)\n    fi\n  fi\n\n  atomic_write_cache() {\n    local path=\"$1\"\n    local value=\"$2\"\n\n    python3 - \"$path\" \"$value\" <<'PY'\nimport os, sys, tempfile\npath = sys.argv[1]\nvalue = sys.argv[2]\nbase_dir = os.path.dirname(os.path.abspath(path)) or \".\"\nos.makedirs(base_dir, exist_ok=True)\nfd, tmppath = tempfile.mkstemp(prefix=\".tmp-\", dir=base_dir)\ntry:\n    with os.fdopen(fd, \"w\", encoding=\"utf-8\") as f:\n        f.write(value)\n        f.flush()\n        os.fsync(f.fileno())\n    os.replace(tmppath, path)\nexcept Exception:\n    try:\n        os.unlink(tmppath)\n    except Exception:\n        pass\n    raise\nPY\n  }\n\n  # If no cached channel ID, fetch from API\n  if [ -z \"$CHANNEL_ID\" ]; then\n    local DM_RESP\n    DM_RESP=$(curl -sf --max-time 10 \\\n      -X POST \"https://discord.com/api/v10/users/@me/channels\" \\\n      -H \"Authorization: Bot ${DBT}\" \\\n      -H \"Content-Type: application/json\" \\\n      -d \"{\\\"recipient_id\\\":\\\"${DOI}\\\"}\" 2>/dev/null)\n    [ -z \"$DM_RESP\" ] && return 1\n\n    CHANNEL_ID=$(echo \"$DM_RESP\" | python3 -c \"import sys,json;print(json.load(sys.stdin).get('id',''))\" 2>/dev/null)\n    [ -z \"$CHANNEL_ID\" ] && return 1\n\n    # Cache the channel ID for future use (atomic)\n    atomic_write_cache \"$CACHE_FILE\" \"$CHANNEL_ID\" 2>/dev/null || true\n  fi\n\n  # Send message to DM channel\n  curl -sf --max-time 10 \\\n    -X POST \"https://discord.com/api/v10/channels/${CHANNEL_ID}/messages\" \\\n    -H \"Authorization: Bot ${DBT}\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"content\\\":$(echo \"$MSG\" | python3 -c 'import sys,json;print(json.dumps(sys.stdin.read().strip()))')}\" > /dev/null 2>&1\n}\ncase \"$PLATFORM\" in\n  telegram)\n    send_telegram; TG_OK=$?\n    [ $TG_OK -ne 0 ] && exit 1\n    ;;\n  discord)\n    send_discord; DC_OK=$?\n    [ $DC_OK -ne 0 ] && exit 1\n    ;;\n  both)\n    send_telegram; TG_OK=$?\n    send_discord; DC_OK=$?\n    # Succeed if at least one platform worked\n    [ $TG_OK -ne 0 ] && [ $DC_OK -ne 0 ] && exit 1\n    ;;\n  *)\n    echo \"[tg-notify] ERROR: Invalid PLATFORM='${PLATFORM}'\" >&2\n    echo \"  Valid options: telegram, discord, both\" >&2\n    echo \"  Fix: Set PLATFORM in habitat config or /etc/droplet.env\" >&2\n    exit 1\n    ;;\nesac\nexit 0\n"
-- path: /usr/local/bin/set-council-group.sh
-  permissions: '0755'
-  content: "#!/bin/bash\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n# PLATFORM must be explicitly set - no silent defaults\nPLATFORM=\"${PLATFORM:-$(d \"$PLATFORM_B64\")}\"\n# Discord droplets don't have Telegram council config; no-op safely.\nif [ \"$PLATFORM\" = \"discord\" ]; then\n  exit 0\nfi\nexec /usr/local/bin/set-council-group.telegram.sh \"$@\"\n"
-- path: /etc/systemd/system/api-server.service
-  permissions: '0644'
-  content: '[Unit]
-
-    Description=Droplet Status API
-
-    After=network.target
-
-    [Service]
-
-    EnvironmentFile=/etc/api-server.env
-    ExecStart=/usr/local/bin/api-server.py
-
-    Restart=always
-
-    RestartSec=3
-
-    User=root
-
-    [Install]
-
-    WantedBy=multi-user.target
-
-    '
-- path: /usr/local/bin/api-server.py
-  permissions: '0755'
-  content: "#!/usr/bin/env python3\n# =============================================================================\n# api-server.py -- Droplet Status API (HTTP server on port 8080)\n# =============================================================================\n# Purpose:  Lightweight HTTP API exposing droplet provisioning status.\n#           Provides status, health, config endpoints for droplet management.\n#\n# Endpoints:\n#   GET  /status  -- Full status JSON (phase, stage, services, safe_mode)\n#   GET  /health  -- Health check (200 if bot online, 503 if not)\n#   GET  /stages  -- Raw init-stages.log text\n#   GET  /log     -- Last 8KB of bootstrap/phase logs\n#   GET  /config  -- Config file status (no sensitive data)\n#   POST /sync    -- Trigger openclaw state sync to Dropbox\n#   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown\n#   POST /config/upload -- Upload habitat and/or agents JSON\n#   POST /config/apply  -- Apply uploaded config and restart\n#\n# Dependencies: systemctl, /usr/local/bin/sync-openclaw-state.sh,\n#               /usr/local/bin/apply-config.sh\n#\n# Original: /usr/local/bin/api-server.py (in hatch.yaml write_files)\n# =============================================================================\nimport http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time\nPORT=8080\nAPI_SECRET=os.getenv('API_SECRET','')\nHABITAT_PATH='/etc/habitat.json'\nAGENTS_PATH='/etc/agents.json'\nAPPLY_SCRIPT='/usr/local/bin/apply-config.sh'\nP1_STAGES={0:\"init\",1:\"preparing\",2:\"installing-bot\",3:\"bot-online\"}\nP2_STAGES={4:\"desktop-environment\",5:\"developer-tools\",6:\"browser-tools\",7:\"desktop-services\",8:\"skills-apps\",9:\"remote-access\",10:\"finalizing\",11:\"ready\"}\n\ndef check_service(name):\n  try:r=subprocess.run([\"systemctl\",\"is-active\",name],capture_output=True,timeout=5);return r.stdout.decode().strip()==\"active\"\n  except:return False\n\ndef get_status():\n  s,p=0,1\n  try:\n    with open('/var/lib/init-status/stage','r') as f:s=int(f.read().strip())\n    with open('/var/lib/init-status/phase','r') as f:p=int(f.read().strip())\n  except:pass\n  p1_done=os.path.exists('/var/lib/init-status/phase1-complete')\n  p2_done=os.path.exists('/var/lib/init-status/phase2-complete')\n  setup_done=os.path.exists('/var/lib/init-status/setup-complete')\n  bot_online=check_service('clawdbot')\n  svc={}\n  if p2_done or setup_done:\n    for sv in ['clawdbot','xrdp','desktop','x11vnc']:svc[sv]=check_service(sv)\n  desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f\"stage-{s}\")\n  safe_mode=os.path.exists('/var/lib/init-status/safe-mode')\n  return {\"phase\":p,\"stage\":s,\"desc\":desc,\"bot_online\":bot_online,\"phase1_complete\":p1_done,\"phase2_complete\":p2_done,\"ready\":setup_done and bot_online,\"safe_mode\":safe_mode,\"services\":svc if svc else None}\n\ndef validate_config_upload(data):\n  \"\"\"Validate config upload request data.\"\"\"\n  errors=[]\n  if \"habitat\" in data and not isinstance(data[\"habitat\"],dict):errors.append(\"habitat must be an object\")\n  if \"agents\" in data and not isinstance(data[\"agents\"],dict):errors.append(\"agents must be an object\")\n  if \"apply\" in data and not isinstance(data[\"apply\"],bool):errors.append(\"apply must be a boolean\")\n  return errors\n\ndef write_config_file(path,data):\n  \"\"\"Write config data to file with secure permissions.\"\"\"\n  try:\n    with open(path,'w') as f:json.dump(data,f,indent=2)\n    os.chmod(path,0o600)\n    return {\"ok\":True,\"path\":path}\n  except Exception as e:return {\"ok\":False,\"error\":str(e)}\n\ndef get_config_status():\n  \"\"\"Get current config file status without exposing sensitive data.\"\"\"\n  result={\"habitat_exists\":os.path.exists(HABITAT_PATH),\"agents_exists\":os.path.exists(AGENTS_PATH)}\n  if result[\"habitat_exists\"]:\n    stat=os.stat(HABITAT_PATH);result[\"habitat_modified\"]=stat.st_mtime\n    try:\n      with open(HABITAT_PATH,'r') as f:h=json.load(f)\n      result[\"habitat_name\"]=h.get(\"name\",\"\")\n      result[\"habitat_agent_count\"]=len(h.get(\"agents\",[]))\n    except:pass\n  if result[\"agents_exists\"]:\n    stat=os.stat(AGENTS_PATH);result[\"agents_modified\"]=stat.st_mtime\n    try:\n      with open(AGENTS_PATH,'r') as f:a=json.load(f)\n      result[\"agents_names\"]=list(a.keys())\n    except:pass\n  return result\n\ndef trigger_config_apply():\n  \"\"\"Trigger config apply script asynchronously.\"\"\"\n  try:subprocess.Popen([APPLY_SCRIPT]);return {\"ok\":True,\"restarting\":True}\n  except Exception as e:return {\"ok\":False,\"error\":str(e)}\n\ndef verify_hmac_auth(timestamp_header, signature_header, method, path, body):\n  \"\"\"Verify HMAC-SHA256 signature for authenticated endpoints.\n\n  Signature binds:\n  - timestamp (replay protection)\n  - HTTP method + path (prevents cross-endpoint replay/substitution)\n  - request body (integrity)\n\n  Message format:\n    \"{timestamp}.{method}.{path}.{body}\" where body is UTF-8 JSON string.\n  \"\"\"\n  if not API_SECRET:\n    return False\n  if not timestamp_header or not signature_header:\n    return False\n  try:\n    timestamp = int(timestamp_header)\n    now = int(time.time())\n    if abs(now - timestamp) > 300:\n      return False\n\n    b = body.decode('utf-8') if isinstance(body, (bytes, bytearray)) else (body or '')\n    msg = f\"{timestamp}.{method}.{path}.{b}\"\n    expected_sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()\n    return hmac.compare_digest(signature_header, expected_sig)\n  except Exception:\n    return False\n\nclass H(http.server.BaseHTTPRequestHandler):\n  def log_message(self,*a):pass\n  \n  def send_json(self,code,data):\n    self.send_response(code);self.send_header('Content-type','application/json');self.end_headers()\n    self.wfile.write(json.dumps(data).encode())\n  \n  def do_GET(self):\n    if self.path=='/status':\n      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(get_status()).encode())\n    elif self.path=='/health':\n      s=get_status();code=200 if s.get('bot_online') else 503;self.send_response(code);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps({\"healthy\":s.get('bot_online',False),\"phase\":s.get('phase'),\"desc\":s.get('desc'),\"safe_mode\":s.get('safe_mode',False)}).encode())\n    elif self.path=='/stages':\n      timestamp=self.headers.get('X-Timestamp')\n      signature=self.headers.get('X-Signature')\n      # Require auth: stages/log/config may contain sensitive info\n      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):\n        self.send_json(403,{\"ok\":False,\"error\":\"Forbidden\"});return\n      self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()\n      try:\n        with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())\n      except:self.wfile.write(b\"No log\")\n    elif self.path=='/log':\n      timestamp=self.headers.get('X-Timestamp')\n      signature=self.headers.get('X-Signature')\n      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):\n        self.send_json(403,{\"ok\":False,\"error\":\"Forbidden\"});return\n      self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()\n      for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:\n        try:\n          self.wfile.write(f\"\\n=== {lf} ===\\n\".encode())\n          with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())\n        except:self.wfile.write(f\"  (not found)\\n\".encode())\n    elif self.path=='/config':\n      timestamp=self.headers.get('X-Timestamp')\n      signature=self.headers.get('X-Signature')\n      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):\n        self.send_json(403,{\"ok\":False,\"error\":\"Forbidden\"});return\n      self.send_json(200,get_config_status())\n    else:self.send_response(404);self.end_headers()\n  \n  def do_POST(self):\n    content_length=int(self.headers.get('Content-Length',0))\n    body=self.rfile.read(content_length) if content_length else b'{}'\n    \n    if self.path=='/sync':\n      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()\n      try:r=subprocess.run(\"/usr/local/bin/sync-openclaw-state.sh\",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({\"ok\":r.returncode==0}).encode())\n      except Exception as x:self.wfile.write(json.dumps({\"ok\":False,\"error\":str(x)}).encode())\n    \n    elif self.path=='/prepare-shutdown':\n      self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()\n      try:subprocess.run(\"/usr/local/bin/sync-openclaw-state.sh\",shell=True,timeout=60);subprocess.run(\"systemctl stop clawdbot\",shell=True,timeout=30);self.wfile.write(json.dumps({\"ok\":True,\"ready_for_shutdown\":True}).encode())\n      except Exception as x:self.wfile.write(json.dumps({\"ok\":False,\"error\":str(x)}).encode())\n    \n    elif self.path=='/config/upload':\n      timestamp=self.headers.get('X-Timestamp')\n      signature=self.headers.get('X-Signature')\n      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):\n        self.send_json(403,{\"ok\":False,\"error\":\"Forbidden\"});return\n      \n      try:\n        data=json.loads(body)\n      except json.JSONDecodeError as e:\n        self.send_json(400,{\"ok\":False,\"error\":f\"Invalid JSON: {e}\"});return\n      \n      errors=validate_config_upload(data)\n      if errors:\n        self.send_json(400,{\"ok\":False,\"errors\":errors});return\n      \n      files_written=[]\n      \n      # Write habitat config\n      if \"habitat\" in data:\n        result=write_config_file(HABITAT_PATH,data[\"habitat\"])\n        if not result[\"ok\"]:\n          self.send_json(500,{\"ok\":False,\"error\":f\"Failed to write habitat: {result.get('error')}\"});return\n        files_written.append(HABITAT_PATH)\n      \n      # Write agents library\n      if \"agents\" in data:\n        result=write_config_file(AGENTS_PATH,data[\"agents\"])\n        if not result[\"ok\"]:\n          self.send_json(500,{\"ok\":False,\"error\":f\"Failed to write agents: {result.get('error')}\"});return\n        files_written.append(AGENTS_PATH)\n      \n      # Apply if requested\n      applied=False\n      if data.get(\"apply\"):\n        apply_result=trigger_config_apply()\n        if not apply_result[\"ok\"]:\n          self.send_json(500,{\"ok\":False,\"error\":f\"Failed to apply: {apply_result.get('error')}\",\"files_written\":files_written});return\n        applied=True\n      \n      self.send_json(200,{\"ok\":True,\"files_written\":files_written,\"applied\":applied})\n    \n    elif self.path=='/config/apply':\n      timestamp=self.headers.get('X-Timestamp')\n      signature=self.headers.get('X-Signature')\n      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):\n        self.send_json(403,{\"ok\":False,\"error\":\"Forbidden\"});return\n      \n      result=trigger_config_apply()\n      self.send_json(200 if result[\"ok\"] else 500,result)\n    \n    else:\n      self.send_response(404);self.end_headers()\n\nclass R(socketserver.TCPServer):allow_reuse_address=True\nif __name__=='__main__':\n  # SECURITY: Bind to localhost only (127.0.0.1) to prevent external network access.\n  # This API exposes droplet config, logs, and control endpoints. External exposure\n  # would allow unauthorized config changes, log access, and service control.\n  # SSH tunneling or local gateway scripts are the only supported access methods.\n  print(f\"[api-server] Starting on 127.0.0.1:{PORT} (localhost-only, secure)\")\n  with R((\"127.0.0.1\",PORT),H) as h:h.serve_forever()"
-- path: /usr/local/sbin/phase1-critical.sh
-  permissions: '0755'
-  content: "#!/bin/bash\nset -e\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\nif ! python3 /usr/local/bin/parse-habitat.py; then\n  echo 'HABITAT_NAME=\"broken\"' > /etc/habitat-parsed.env\n  echo 'AGENT_COUNT=1' >> /etc/habitat-parsed.env\n  echo 'AGENT1_NAME=\"Claude\"' >> /etc/habitat-parsed.env\n  python3 -c \"import base64,json,os;h=json.loads(base64.b64decode(os.environ.get('HABITAT_B64','')).decode());a=h.get('agents',[{}])[0];print('AGENT1_BOT_TOKEN=\\\"{}\\\"'.format(a.get('botToken','')))\" >> /etc/habitat-parsed.env 2>/dev/null || true\nfi\nsource /etc/habitat-parsed.env\nS=\"/usr/local/bin/set-stage.sh\"\nTG=\"/usr/local/bin/tg-notify.sh\"\nLOG=\"/var/log/phase1.log\"\nSTART=$(date +%s)\n$TG \"[INIT] Droplet starting up. Phase 1 in progress...\" || true\n$S 1 \"preparing\"\nNODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)\n[ -n \"$NODE_PID\" ] && wait $NODE_PID 2>/dev/null || true\nif [ -f /tmp/downloads/node.tar.xz ]; then\n  tar -xJf /tmp/downloads/node.tar.xz -C /usr/local --strip-components=1 >> \"$LOG\" 2>&1\n  rm -f /tmp/downloads/node.tar.xz\nelse\n  apt-get update -qq && apt-get install -y nodejs npm >> \"$LOG\" 2>&1\nfi\n$S 2 \"installing-bot\"\nnpm install -g openclaw@latest >> \"$LOG\" 2>&1\nPW=$(d \"$PASSWORD_B64\")\nid \"$USERNAME\" &>/dev/null || useradd -m -s /bin/bash -G sudo \"$USERNAME\"\necho \"$USERNAME:$PW\" | chpasswd\necho \"$USERNAME ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/$USERNAME\nH=\"/home/$USERNAME\"\nchown $USERNAME:$USERNAME $H\nAK=$(d \"$ANTHROPIC_KEY_B64\")\nTBT=\"$AGENT1_BOT_TOKEN\"\nDBT=\"$AGENT1_DISCORD_BOT_TOKEN\"\nTUI=$(d \"$TELEGRAM_USER_ID_B64\")\nDOI=\"${DISCORD_OWNER_ID:-$(d \"$DISCORD_OWNER_ID_B64\")}\"\nDGI=\"${DISCORD_GUILD_ID:-$(d \"$DISCORD_GUILD_ID_B64\")}\"\nGK=$(d \"$GOOGLE_API_KEY_B64\")\nA1N=\"$AGENT1_NAME\"\n# PLATFORM must be explicitly set - no silent defaults\nPLATFORM=\"${PLATFORM:-$(d \"$PLATFORM_B64\")}\"\nGT=$(openssl rand -hex 24)\nmkdir -p $H/.openclaw $H/clawd/agents/agent1/memory\necho \"$GT\" > $H/.openclaw/gateway-token.txt\nln -sf \"$H/clawd/HEARTBEAT.md\" \"$H/clawd/agents/agent1/HEARTBEAT.md\"\n# Determine platform flags\nTG_ENABLED=\"false\"; DC_ENABLED=\"false\"\ncase \"$PLATFORM\" in\n  telegram) TG_ENABLED=\"true\" ;;\n  discord)  DC_ENABLED=\"true\" ;;\n  both)     TG_ENABLED=\"true\"; DC_ENABLED=\"true\" ;;\n  *)\n    echo \"[build-minimal-config] ERROR: Invalid PLATFORM='${PLATFORM}'\" >&2\n    echo \"  Valid options: telegram, discord, both\" >&2\n    echo \"  Fix: Set PLATFORM in habitat config or /etc/droplet.env\" >&2\n    exit 1\n    ;;\nesac\n# Build plugins entries\nPLUGINS_JSON=\"\\\"telegram\\\":{\\\"enabled\\\":${TG_ENABLED}},\\\"discord\\\":{\\\"enabled\\\":${DC_ENABLED}}\"\n# Build telegram channel config\nTG_CHANNEL=\"\"\nif [ \"$TG_ENABLED\" = \"true\" ]; then\n  TG_CHANNEL=\"\\\"telegram\\\":{\\\"enabled\\\":true,\\\"dmPolicy\\\":\\\"allowlist\\\",\\\"allowFrom\\\":[\\\"${TUI}\\\"],\\\"accounts\\\":{\\\"default\\\":{\\\"botToken\\\":\\\"${TBT}\\\"}}}\"\nelse\n  TG_CHANNEL=\"\\\"telegram\\\":{\\\"enabled\\\":false}\"\nfi\n# Build discord channel config\nDC_CHANNEL=\"\"\nif [ \"$DC_ENABLED\" = \"true\" ]; then\n  DC_DM_ALLOW=\"\"\n  [ -n \"$DOI\" ] && DC_DM_ALLOW=\",\\\"allowFrom\\\":[\\\"${DOI}\\\"]\"\n  DC_GUILD=\"\"\n  [ -n \"$DGI\" ] && DC_GUILD=\",\\\"guilds\\\":{\\\"${DGI}\\\":{\\\"requireMention\\\":true}}\"\n  DC_CHANNEL=\"\\\"discord\\\":{\\\"enabled\\\":true,\\\"groupPolicy\\\":\\\"allowlist\\\",\\\"accounts\\\":{\\\"default\\\":{\\\"token\\\":\\\"${DBT}\\\"}},\\\"dm\\\":{\\\"enabled\\\":true,\\\"policy\\\":\\\"pairing\\\"${DC_DM_ALLOW}}${DC_GUILD}}\"\nelse\n  DC_CHANNEL=\"\\\"discord\\\":{\\\"enabled\\\":false}\"\nfi\ncat > $H/.openclaw/openclaw.json <<CFG\n{\n  \"env\": {\n    \"ANTHROPIC_API_KEY\": \"${AK}\"\n  },\n  \"agents\": {\n    \"defaults\": {\n      \"model\": {\"primary\": \"anthropic/claude-opus-4-5\"},\n      \"workspace\": \"$H/clawd\"\n    },\n    \"list\": [\n      {\n        \"id\": \"agent1\",\n        \"default\": true,\n        \"name\": \"${A1N}\",\n        \"workspace\": \"$H/clawd/agents/agent1\"\n      }\n    ]\n  },\n  \"gateway\": {\n    \"mode\": \"local\",\n    \"port\": 18789,\n    \"bind\": \"lan\",\n    \"auth\": {\n      \"mode\": \"token\",\n      \"token\": \"${GT}\"\n    }\n  },\n  \"plugins\": {\n    \"entries\": {\n      ${PLUGINS_JSON}\n    }\n  },\n  \"channels\": {\n    ${TG_CHANNEL},\n    ${DC_CHANNEL}\n  }\n}\nCFG\ncp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.minimal.json\necho \"ANTHROPIC_API_KEY=${AK}\" > $H/.openclaw/.env\n[ -n \"$GK\" ] && echo -e \"GOOGLE_API_KEY=${GK}\\nGEMINI_API_KEY=${GK}\" >> $H/.openclaw/.env\nGCID=$(d \"$GMAIL_CLIENT_ID_B64\"); GSEC=$(d \"$GMAIL_CLIENT_SECRET_B64\"); GRTK=$(d \"$GMAIL_REFRESH_TOKEN_B64\")\n[ -n \"$GCID\" ] && echo -e \"GMAIL_CLIENT_ID=${GCID}\\nGMAIL_CLIENT_SECRET=${GSEC}\\nGMAIL_REFRESH_TOKEN=${GRTK}\" >> $H/.openclaw/.env\necho -e \"# Agent: ${A1N}\\nModel: Claude Sonnet\\nBe helpful. Desktop setup in progress...\" > $H/clawd/agents/agent1/AGENTS.md\ncat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'\nDesktop setup in progress. RDP will be ready soon.\nIf nothing needs attention, reply with ONLY: NO_REPLY.\nBOOTMD\nchown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd\nchmod 700 $H/.openclaw\nchmod 600 $H/.openclaw/openclaw.json\ncat > /etc/systemd/system/clawdbot.service <<SVC\n[Unit]\nDescription=Clawdbot Gateway\nAfter=network.target\n[Service]\nType=simple\nUser=$USERNAME\nWorkingDirectory=$H\nExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789\nRestart=always\nRestartSec=3\nEnvironment=NODE_ENV=production\nEnvironment=NODE_OPTIONS=--experimental-sqlite\nEnvironment=ANTHROPIC_API_KEY=${AK}\n$([ -n \"$GK\" ] && echo \"Environment=GOOGLE_API_KEY=${GK}\")\n$([ -n \"$GK\" ] && echo \"Environment=GEMINI_API_KEY=${GK}\")\n[Install]\nWantedBy=multi-user.target\nSVC\nsystemctl daemon-reload\nsystemctl enable clawdbot\nsystemctl start clawdbot\nufw allow 18789/tcp\nBOT_OK=false\nfor i in {1..30}; do\n  if systemctl is-active --quiet clawdbot; then\n    BOT_OK=true\n    break\n  fi\n  sleep 1\ndone\nif [ \"$BOT_OK\" = \"true\" ]; then\n  $S 3 \"bot-online\"\n  $TG \"[OK] Bot online! Phase 1 complete. Starting desktop setup...\" || true\nelse\n  journalctl -u clawdbot -n 50 >> \"$LOG\" 2>&1\n  $TG \"[WARN] Bot may not be running. Check logs: journalctl -u clawdbot\" || true\nfi\ntouch /var/lib/init-status/phase1-complete\necho \"$START\" > /var/lib/init-status/phase1-time\nEND=$(date +%s)\n/usr/local/bin/set-phase.sh 2 \"background-setup\"\nnohup /usr/local/sbin/phase2-background.sh >> /var/log/phase2.log 2>&1 &\ndisown\n"
-- path: /usr/local/sbin/phase2-background.sh
-  permissions: '0755'
-  content: |
-    #!/bin/bash
-    # =============================================================================
-    # phase2-background.sh -- Desktop + tools installation (phase 2)
-    # =============================================================================
-    # Purpose: Install desktop environment, developer tools, browser tooling,
-    #          configure services (xvfb/desktop/x11vnc/xrdp), install skills,
-    #          and finalize the droplet.
-    #
-    # Notes:
-    # - Logs to: /var/log/phase2.log
-    # - Stages are recorded via /usr/local/bin/set-stage.sh
-    # =============================================================================
-    set -a; source /etc/droplet.env; set +a
-    d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-    [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-    S="/usr/local/bin/set-stage.sh"
-    LOG="/var/log/phase2.log"
-    START=$(date +%s)
-    H="/home/$USERNAME"
-    CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
-    [ -n "$CHROME_PID" ] && wait $CHROME_PID 2>/dev/null || true
-    systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-    killall -9 apt apt-get dpkg 2>/dev/null || true
-    sleep 2
-    rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
-    dpkg --configure -a 2>/dev/null || true
-    $S 4 "desktop-environment"
-    apt-get update -qq >> "$LOG" 2>&1
-    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
-      xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
-      xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme yaru-theme-gtk \
-      >> "$LOG" 2>&1
-    $S 5 "developer-tools"
-    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
-      build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
-      thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils \
-      python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
-      >> "$LOG" 2>&1
-    rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
-    apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
-    $S 6 "browser-tools"
-    [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
-    rm -f /tmp/downloads/chrome.deb
-    apt-get -f install -y >> "$LOG" 2>&1
-    mkdir -p $H/.config/chrome-debug/Default
-    echo '{"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}' > "$H/.config/chrome-debug/Local State"
-    echo '{"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}' > "$H/.config/chrome-debug/Default/Preferences"
-    touch "$H/.config/chrome-debug/First Run"
-    chown -R $USERNAME:$USERNAME $H/.config/chrome-debug
-    PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
-    curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
-    [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
-    # Download helper scripts (platform-safe set-council-group wrapper is provided via cloud-init write_files)
-    curl -sf -o "/usr/local/bin/gmail-api.py" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/gmail-api.py" \
-      && chmod 755 "/usr/local/bin/gmail-api.py" >> "$LOG" 2>&1 \
-      || echo "WARN: Failed to download gmail-api.py" >> "$LOG"
-    curl -sf -o "/usr/local/bin/set-council-group.telegram.sh" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/set-council-group.sh" \
-      && chmod 755 "/usr/local/bin/set-council-group.telegram.sh" >> "$LOG" 2>&1 \
-      || echo "WARN: Failed to download set-council-group.telegram.sh" >> "$LOG"
-    $S 7 "desktop-services"
-    cat > /etc/systemd/system/xvfb.service <<SVC
-    [Unit]
-    Description=Xvfb on :10
-    After=network.target
-    [Service]
-    Type=simple
-    User=$USERNAME
-    ExecStart=/bin/bash -c 'echo \$\$ > /tmp/xvfb.pid && exec /usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac'
-    ExecStopPost=/bin/rm -f /tmp/xvfb.pid
-    Restart=always
-    [Install]
-    # WantedBy removed - started explicitly after phase2 completes
-    SVC
-    cat > /etc/systemd/system/desktop.service <<SVC
-    [Unit]
-    Description=XFCE Desktop
-    After=xvfb.service
-    Requires=xvfb.service
-    [Service]
-    Type=simple
-    User=$USERNAME
-    Environment=DISPLAY=:10
-    Environment=HOME=$H
-    Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
-    ExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
-    ExecStartPre=/bin/sleep 2
-    ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
-    Restart=always
-    RestartSec=5
-    [Install]
-    WantedBy=multi-user.target
-    SVC
-    cat > /etc/systemd/system/x11vnc.service <<SVC
-    [Unit]
-    Description=x11vnc
-    After=desktop.service
-    Requires=desktop.service
-    ConditionPathExists=/var/lib/init-status/phase2-complete
-    [Service]
-    Type=simple
-    User=$USERNAME
-    Environment=DISPLAY=:10
-    ExecStartPre=/bin/sleep 3
-    ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
-    Restart=always
-    RestartSec=5
-    [Install]
-    WantedBy=desktop.service
-    SVC
-    mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
-    # Write desktop background config BEFORE starting desktop service (fixes race condition)
-    if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
-      R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
-      G=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc))
-      B=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc))
-      cat > "$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<BGXML
-    <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="${R}"/><value type="double" value="${G}"/><value type="double" value="${B}"/><value type="double" value="1"/></property></property></property></property></property></channel>
-    BGXML
-    fi
-    chown -R $USERNAME:$USERNAME $H/.config
-    systemctl daemon-reload
-    systemctl enable xvfb desktop x11vnc
-    # MOVED TO END: systemctl start xvfb
-    # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
-    # MOVED TO END: for i in {1..30}; do
-      # MOVED TO END: if [ -f /tmp/xvfb.pid ]; then
-        # MOVED TO END: XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
-        # Verify PID exists AND process is actually Xvfb (not a recycled PID)
-        # MOVED TO END: if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
-          # MOVED TO END: if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
-            # MOVED TO END: break
+  - path: /usr/local/sbin/phase1-critical.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -e
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      if ! python3 /usr/local/bin/parse-habitat.py; then
+        echo 'HABITAT_NAME="broken"' > /etc/habitat-parsed.env
+        echo 'AGENT_COUNT=1' >> /etc/habitat-parsed.env
+        echo 'AGENT1_NAME="Claude"' >> /etc/habitat-parsed.env
+        python3 -c "import base64,json,os;h=json.loads(base64.b64decode(os.environ.get('HABITAT_B64','')).decode());a=h.get('agents',[{}])[0];print('AGENT1_BOT_TOKEN=\"{}\"'.format(a.get('botToken','')))" >> /etc/habitat-parsed.env 2>/dev/null || true
+      fi
+      source /etc/habitat-parsed.env
+      S="/usr/local/bin/set-stage.sh"
+      TG="/usr/local/bin/tg-notify.sh"
+      LOG="/var/log/phase1.log"
+      START=$(date +%s)
+      $TG "[INIT] Droplet starting up. Phase 1 in progress..." || true
+      $S 1 "preparing"
+      NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
+      [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
+      if [ -f /tmp/downloads/node.tar.xz ]; then
+        tar -xJf /tmp/downloads/node.tar.xz -C /usr/local --strip-components=1 >> "$LOG" 2>&1
+        rm -f /tmp/downloads/node.tar.xz
+      else
+        apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
+      fi
+      $S 2 "installing-bot"
+      npm install -g openclaw@latest >> "$LOG" 2>&1
+      PW=$(d "$PASSWORD_B64")
+      id "$USERNAME" &>/dev/null || useradd -m -s /bin/bash -G sudo "$USERNAME"
+      echo "$USERNAME:$PW" | chpasswd
+      echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
+      H="/home/$USERNAME"
+      chown $USERNAME:$USERNAME $H
+      AK=$(d "$ANTHROPIC_KEY_B64")
+      TBT="$AGENT1_BOT_TOKEN"
+      DBT="$AGENT1_DISCORD_BOT_TOKEN"
+      TUI=$(d "$TELEGRAM_USER_ID_B64")
+      DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
+      DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
+      GK=$(d "$GOOGLE_API_KEY_B64")
+      A1N="$AGENT1_NAME"
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
+      GT=$(openssl rand -hex 24)
+      mkdir -p $H/.openclaw $H/clawd/agents/agent1/memory
+      echo "$GT" > $H/.openclaw/gateway-token.txt
+      ln -sf "$H/clawd/HEARTBEAT.md" "$H/clawd/agents/agent1/HEARTBEAT.md"
+      # Determine platform flags
+      TG_ENABLED="false"; DC_ENABLED="false"
+      case "$PLATFORM" in
+        telegram) TG_ENABLED="true" ;;
+        discord)  DC_ENABLED="true" ;;
+        both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
+        *)
+          echo "[build-minimal-config] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+          echo "  Valid options: telegram, discord, both" >&2
+          echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+          exit 1
+          ;;
+      esac
+      # Build plugins entries
+      PLUGINS_JSON="\"telegram\":{\"enabled\":${TG_ENABLED}},\"discord\":{\"enabled\":${DC_ENABLED}}"
+      # Build telegram channel config
+      TG_CHANNEL=""
+      if [ "$TG_ENABLED" = "true" ]; then
+        TG_CHANNEL="\"telegram\":{\"enabled\":true,\"dmPolicy\":\"allowlist\",\"allowFrom\":[\"${TUI}\"],\"accounts\":{\"default\":{\"botToken\":\"${TBT}\"}}}"
+      else
+        TG_CHANNEL="\"telegram\":{\"enabled\":false}"
+      fi
+      # Build discord channel config
+      DC_CHANNEL=""
+      if [ "$DC_ENABLED" = "true" ]; then
+        DC_DM_ALLOW=""
+        [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI}\"]"
+        DC_GUILD=""
+        [ -n "$DGI" ] && DC_GUILD=",\"guilds\":{\"${DGI}\":{\"requireMention\":true}}"
+        DC_CHANNEL="\"discord\":{\"enabled\":true,\"groupPolicy\":\"allowlist\",\"accounts\":{\"default\":{\"token\":\"${DBT}\"}},\"dm\":{\"enabled\":true,\"policy\":\"pairing\"${DC_DM_ALLOW}}${DC_GUILD}}"
+      else
+        DC_CHANNEL="\"discord\":{\"enabled\":false}"
+      fi
+      cat > $H/.openclaw/openclaw.json <<CFG
+      {
+        "env": {
+          "ANTHROPIC_API_KEY": "${AK}"
+        },
+        "agents": {
+          "defaults": {
+            "model": {"primary": "anthropic/claude-opus-4-5"},
+            "workspace": "$H/clawd"
+          },
+          "list": [
+            {
+              "id": "agent1",
+              "default": true,
+              "name": "${A1N}",
+              "workspace": "$H/clawd/agents/agent1"
+            }
+          ]
+        },
+        "gateway": {
+          "mode": "local",
+          "port": 18789,
+          "bind": "lan",
+          "auth": {
+            "mode": "token",
+            "token": "${GT}"
+          }
+        },
+        "plugins": {
+          "entries": {
+            ${PLUGINS_JSON}
+          }
+        },
+        "channels": {
+          ${TG_CHANNEL},
+          ${DC_CHANNEL}
+        }
+      }
+      CFG
+      cp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.minimal.json
+      echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
+      [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
+      GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
+      [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.openclaw/.env
+      echo -e "# Agent: ${A1N}\nModel: Claude Sonnet\nBe helpful. Desktop setup in progress..." > $H/clawd/agents/agent1/AGENTS.md
+      cat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'
+      Desktop setup in progress. RDP will be ready soon.
+      If nothing needs attention, reply with ONLY: NO_REPLY.
+      BOOTMD
+      chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+      chmod 700 $H/.openclaw
+      chmod 600 $H/.openclaw/openclaw.json
+      cat > /etc/systemd/system/clawdbot.service <<SVC
+      [Unit]
+      Description=Clawdbot Gateway
+      After=network.target
+      [Service]
+      Type=simple
+      User=$USERNAME
+      WorkingDirectory=$H
+      ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+      Restart=always
+      RestartSec=3
+      Environment=NODE_ENV=production
+      Environment=NODE_OPTIONS=--experimental-sqlite
+      Environment=ANTHROPIC_API_KEY=${AK}
+      $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
+      $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")
+      [Install]
+      WantedBy=multi-user.target
+      SVC
+      systemctl daemon-reload
+      systemctl enable clawdbot
+      systemctl start clawdbot
+      ufw allow 18789/tcp
+      BOT_OK=false
+      for i in {1..30}; do
+        if systemctl is-active --quiet clawdbot; then
+          BOT_OK=true
+          break
+        fi
+        sleep 1
+      done
+      if [ "$BOT_OK" = "true" ]; then
+        $S 3 "bot-online"
+        $TG "[OK] Bot online! Phase 1 complete. Starting desktop setup..." || true
+      else
+        journalctl -u clawdbot -n 50 >> "$LOG" 2>&1
+        $TG "[WARN] Bot may not be running. Check logs: journalctl -u clawdbot" || true
+      fi
+      touch /var/lib/init-status/phase1-complete
+      echo "$START" > /var/lib/init-status/phase1-time
+      END=$(date +%s)
+      /usr/local/bin/set-phase.sh 2 "background-setup"
+      nohup /usr/local/sbin/phase2-background.sh >> /var/log/phase2.log 2>&1 &
+      disown
+  - path: /usr/local/sbin/phase2-background.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      S="/usr/local/bin/set-stage.sh"
+      LOG="/var/log/phase2.log"
+      START=$(date +%s)
+      H="/home/$USERNAME"
+      CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
+      [ -n "$CHROME_PID" ] && wait $CHROME_PID 2>/dev/null || true
+      systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+      killall -9 apt apt-get dpkg 2>/dev/null || true
+      sleep 2
+      rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
+      dpkg --configure -a 2>/dev/null || true
+      $S 4 "desktop-environment"
+      apt-get update -qq >> "$LOG" 2>&1
+      DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
+        xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
+        xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme yaru-theme-gtk \
+        >> "$LOG" 2>&1
+      $S 5 "developer-tools"
+      DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
+        build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
+        thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils \
+        python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
+        >> "$LOG" 2>&1
+      rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
+      apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
+      $S 6 "browser-tools"
+      [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
+      rm -f /tmp/downloads/chrome.deb
+      apt-get -f install -y >> "$LOG" 2>&1
+      mkdir -p $H/.config/chrome-debug/Default
+      echo '{"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}' > "$H/.config/chrome-debug/Local State"
+      echo '{"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}' > "$H/.config/chrome-debug/Default/Preferences"
+      touch "$H/.config/chrome-debug/First Run"
+      chown -R $USERNAME:$USERNAME $H/.config/chrome-debug
+      PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
+      curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
+      [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
+      # Download helper scripts (platform-safe set-council-group wrapper is provided via cloud-init write_files)
+      curl -sf -o "/usr/local/bin/gmail-api.py" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/gmail-api.py" \
+        && chmod 755 "/usr/local/bin/gmail-api.py" >> "$LOG" 2>&1 \
+        || echo "WARN: Failed to download gmail-api.py" >> "$LOG"
+      curl -sf -o "/usr/local/bin/set-council-group.telegram.sh" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/set-council-group.sh" \
+        && chmod 755 "/usr/local/bin/set-council-group.telegram.sh" >> "$LOG" 2>&1 \
+        || echo "WARN: Failed to download set-council-group.telegram.sh" >> "$LOG"
+      $S 7 "desktop-services"
+      cat > /etc/systemd/system/xvfb.service <<SVC
+      [Unit]
+      Description=Xvfb on :10
+      After=network.target
+      [Service]
+      Type=simple
+      User=$USERNAME
+      ExecStart=/bin/bash -c 'echo \$\$ > /tmp/xvfb.pid && exec /usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac'
+      ExecStopPost=/bin/rm -f /tmp/xvfb.pid
+      Restart=always
+      [Install]
+      # WantedBy removed - started explicitly after phase2 completes
+      SVC
+      cat > /etc/systemd/system/desktop.service <<SVC
+      [Unit]
+      Description=XFCE Desktop
+      After=xvfb.service
+      Requires=xvfb.service
+      [Service]
+      Type=simple
+      User=$USERNAME
+      Environment=DISPLAY=:10
+      Environment=HOME=$H
+      Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
+      ExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
+      ExecStartPre=/bin/sleep 2
+      ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
+      Restart=always
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+      SVC
+      cat > /etc/systemd/system/x11vnc.service <<SVC
+      [Unit]
+      Description=x11vnc
+      After=desktop.service
+      Requires=desktop.service
+      ConditionPathExists=/var/lib/init-status/phase2-complete
+      [Service]
+      Type=simple
+      User=$USERNAME
+      Environment=DISPLAY=:10
+      ExecStartPre=/bin/sleep 3
+      ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
+      Restart=always
+      RestartSec=5
+      [Install]
+      WantedBy=desktop.service
+      SVC
+      mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
+      # Write desktop background config BEFORE starting desktop service (fixes race condition)
+      if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
+        R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
+        G=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc))
+        B=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc))
+        cat > "$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<BGXML
+      <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="${R}"/><value type="double" value="${G}"/><value type="double" value="${B}"/><value type="double" value="1"/></property></property></property></property></property></channel>
+      BGXML
+      fi
+      chown -R $USERNAME:$USERNAME $H/.config
+      systemctl daemon-reload
+      systemctl enable xvfb desktop x11vnc
+      # MOVED TO END: systemctl start xvfb
+      # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+      # MOVED TO END: for i in {1..30}; do
+        # MOVED TO END: if [ -f /tmp/xvfb.pid ]; then
+          # MOVED TO END: XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+          # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+          # MOVED TO END: if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+            # MOVED TO END: if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+              # MOVED TO END: break
+            # MOVED TO END: fi
           # MOVED TO END: fi
         # MOVED TO END: fi
-      # MOVED TO END: fi
-      # MOVED TO END: sleep 0.5
-    # MOVED TO END: done
-    # MOVED TO END: systemctl start desktop
-    # MOVED TO END: sleep 3
-    # MOVED TO END: systemctl start x11vnc
-    mkdir -p $H/Desktop
-    cat > $H/Desktop/google-chrome.desktop <<'DESK'
-    [Desktop Entry]
-    Version=1.0
-    Name=Google Chrome
-    Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --disable-sync --remote-debugging-port=18800 --user-data-dir=/home/bot/.config/chrome-debug %U
-    Terminal=false
-    Icon=google-chrome
-    Type=Application
-    DESK
-    cat > $H/Desktop/dropbox.desktop <<'DESK'
-    [Desktop Entry]
-    Version=1.0
-    Type=Application
-    Name=Mount Dropbox
-    Exec=/usr/local/bin/mount-dropbox.sh
-    Icon=folder-remote
-    Terminal=false
-    DESK
-    chmod +x $H/Desktop/*.desktop
-    chown -R $USERNAME:$USERNAME $H/Desktop
-    $S 8 "skills-apps"
-    npm install -g clawhub@latest >> "$LOG" 2>&1
-    for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
-      su - $USERNAME -c "cd $H/clawd && clawhub install $s" >> "$LOG" 2>&1 || true
-    done
-    find $H/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
-    DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
-    IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
-    mkdir -p $H/.config/{himalaya,rclone,gh}
-    [ -n "$DBT" ] && echo -e "[dropbox]\ntype = dropbox\ntoken = $DBT" > $H/.config/rclone/rclone.conf
-    [ -n "$EM" ] && [ -n "$EP" ] && cat > $H/.config/himalaya/config.toml <<HIM
-    [accounts.default]
-    email = "${EM}"
-    default = true
-    backend.type = "imap"
-    backend.host = "${IH:-imap.gmail.com}"
-    backend.port = 993
-    backend.encryption.type = "tls"
-    backend.login = "${EM}"
-    backend.auth.type = "password"
-    backend.auth.raw = "${EP}"
-    HIM
-    [ -n "$GHT" ] && echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml
-    CU=$(d "$CALDAV_URL_B64"); CUN=$(d "$CALDAV_USER_B64"); CP=$(d "$CALDAV_PASSWORD_B64")
-    if [ -n "$CU" ] && [ -n "$CUN" ]; then
-      mkdir -p $H/.config/vdirsyncer $H/.config/khal
-      mkdir -p $H/.local/share/vdirsyncer/status $H/.local/share/khal/calendars
-      cat > $H/.config/vdirsyncer/config <<VDSCFG
-    [general]
-    status_path = "~/.local/share/vdirsyncer/status/"
-    
-    [pair calendar]
-    a = "calendar_local"
-    b = "calendar_remote"
-    collections = ["from a", "from b"]
-    metadata = ["color"]
-    
-    [storage calendar_local]
-    type = "filesystem"
-    path = "~/.local/share/khal/calendars/"
-    fileext = ".ics"
-    
-    [storage calendar_remote]
-    type = "caldav"
-    url = "${CU}"
-    username = "${CUN}"
-    password = "${CP}"
-    VDSCFG
-      cat > $H/.config/khal/config <<KHALCFG
-    [calendars]
-    
-    [[default]]
-    path = ~/.local/share/khal/calendars/*
-    type = discover
-    
-    [locale]
-    timeformat = %H:%M
-    dateformat = %Y-%m-%d
-    longdateformat = %Y-%m-%d
-    datetimeformat = %Y-%m-%d %H:%M
-    longdatetimeformat = %Y-%m-%d %H:%M
-    KHALCFG
-      chown -R $USERNAME:$USERNAME $H/.config/vdirsyncer $H/.config/khal $H/.local/share/vdirsyncer $H/.local/share/khal
-      su - $USERNAME -c "yes | vdirsyncer discover" >> "$LOG" 2>&1 || true
-      su - $USERNAME -c "vdirsyncer sync" >> "$LOG" 2>&1 || true
-    fi
-    chown -R $USERNAME:$USERNAME $H/.config
-    $S 9 "remote-access"
-    adduser xrdp ssl-cert 2>/dev/null || true
-    cat >> /etc/xrdp/xrdp.ini <<'XI'
-    
-    [vnc-local]
-    name=Shared Desktop (:10)
-    lib=libvnc.so
-    ip=127.0.0.1
-    port=5900
-    username=na
-    password=ask
-    delay_ms=50
-    xserverbpp=24
-    disabled_encodings_mask=0
-    XI
-    sed -i 's/^autorun=$/autorun=vnc-local/' /etc/xrdp/xrdp.ini
-    echo -e "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nunset XDG_RUNTIME_DIR\nexec dbus-launch --exit-with-session startxfce4" > /etc/xrdp/startwm.sh
-    chmod 755 /etc/xrdp/startwm.sh
-    sed -i 's/^X11DisplayOffset=.*/X11DisplayOffset=10/' /etc/xrdp/sesman.ini
-    systemctl unmask xrdp xrdp-sesman
-    systemctl daemon-reload
-    systemctl enable xrdp
-    systemctl restart xrdp
-    ufw allow 3389/tcp
-    #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
-    $S 10 "finalizing"
-    # Enable and run the restore service (runs before clawdbot restarts)
-    systemctl enable openclaw-restore.service 2>/dev/null || true
-    systemctl start openclaw-restore.service 2>/dev/null || true
-    /usr/local/sbin/build-full-config.sh
-    systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
-    systemctl enable clawdbot-sync.timer 2>/dev/null || true
-    systemctl start clawdbot-sync.timer 2>/dev/null || true
-    # Start desktop services now that everything is installed
-    $S 9 "starting-desktop"
-    systemctl start xvfb
-    # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
-    for i in {1..30}; do
-      if [ -f /tmp/xvfb.pid ]; then
-        XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
-        # Verify PID exists AND process is actually Xvfb (not a recycled PID)
-        if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
-          if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+        # MOVED TO END: sleep 0.5
+      # MOVED TO END: done
+      # MOVED TO END: systemctl start desktop
+      # MOVED TO END: sleep 3
+      # MOVED TO END: systemctl start x11vnc
+      mkdir -p $H/Desktop
+      cat > $H/Desktop/google-chrome.desktop <<'DESK'
+      [Desktop Entry]
+      Version=1.0
+      Name=Google Chrome
+      Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --disable-sync --remote-debugging-port=18800 --user-data-dir=/home/bot/.config/chrome-debug %U
+      Terminal=false
+      Icon=google-chrome
+      Type=Application
+      DESK
+      cat > $H/Desktop/dropbox.desktop <<'DESK'
+      [Desktop Entry]
+      Version=1.0
+      Type=Application
+      Name=Mount Dropbox
+      Exec=/usr/local/bin/mount-dropbox.sh
+      Icon=folder-remote
+      Terminal=false
+      DESK
+      chmod +x $H/Desktop/*.desktop
+      chown -R $USERNAME:$USERNAME $H/Desktop
+      $S 8 "skills-apps"
+      npm install -g clawhub@latest >> "$LOG" 2>&1
+      for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
+        su - $USERNAME -c "cd $H/clawd && clawhub install $s" >> "$LOG" 2>&1 || true
+      done
+      find $H/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+      DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
+      IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
+      mkdir -p $H/.config/{himalaya,rclone,gh}
+      [ -n "$DBT" ] && echo -e "[dropbox]\ntype = dropbox\ntoken = $DBT" > $H/.config/rclone/rclone.conf
+      [ -n "$EM" ] && [ -n "$EP" ] && cat > $H/.config/himalaya/config.toml <<HIM
+      [accounts.default]
+      email = "${EM}"
+      default = true
+      backend.type = "imap"
+      backend.host = "${IH:-imap.gmail.com}"
+      backend.port = 993
+      backend.encryption.type = "tls"
+      backend.login = "${EM}"
+      backend.auth.type = "password"
+      backend.auth.raw = "${EP}"
+      HIM
+      [ -n "$GHT" ] && echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml
+      CU=$(d "$CALDAV_URL_B64"); CUN=$(d "$CALDAV_USER_B64"); CP=$(d "$CALDAV_PASSWORD_B64")
+      if [ -n "$CU" ] && [ -n "$CUN" ]; then
+        mkdir -p $H/.config/vdirsyncer $H/.config/khal
+        mkdir -p $H/.local/share/vdirsyncer/status $H/.local/share/khal/calendars
+        cat > $H/.config/vdirsyncer/config <<VDSCFG
+      [general]
+      status_path = "~/.local/share/vdirsyncer/status/"
+
+      [pair calendar]
+      a = "calendar_local"
+      b = "calendar_remote"
+      collections = ["from a", "from b"]
+      metadata = ["color"]
+
+      [storage calendar_local]
+      type = "filesystem"
+      path = "~/.local/share/khal/calendars/"
+      fileext = ".ics"
+
+      [storage calendar_remote]
+      type = "caldav"
+      url = "${CU}"
+      username = "${CUN}"
+      password = "${CP}"
+      VDSCFG
+        cat > $H/.config/khal/config <<KHALCFG
+      [calendars]
+
+      [[default]]
+      path = ~/.local/share/khal/calendars/*
+      type = discover
+
+      [locale]
+      timeformat = %H:%M
+      dateformat = %Y-%m-%d
+      longdateformat = %Y-%m-%d
+      datetimeformat = %Y-%m-%d %H:%M
+      longdatetimeformat = %Y-%m-%d %H:%M
+      KHALCFG
+        chown -R $USERNAME:$USERNAME $H/.config/vdirsyncer $H/.config/khal $H/.local/share/vdirsyncer $H/.local/share/khal
+        su - $USERNAME -c "yes | vdirsyncer discover" >> "$LOG" 2>&1 || true
+        su - $USERNAME -c "vdirsyncer sync" >> "$LOG" 2>&1 || true
+      fi
+      chown -R $USERNAME:$USERNAME $H/.config
+      $S 9 "remote-access"
+      adduser xrdp ssl-cert 2>/dev/null || true
+      cat >> /etc/xrdp/xrdp.ini <<'XI'
+
+      [vnc-local]
+      name=Shared Desktop (:10)
+      lib=libvnc.so
+      ip=127.0.0.1
+      port=5900
+      username=na
+      password=ask
+      delay_ms=50
+      xserverbpp=24
+      disabled_encodings_mask=0
+      XI
+      sed -i 's/^autorun=$/autorun=vnc-local/' /etc/xrdp/xrdp.ini
+      echo -e "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nunset XDG_RUNTIME_DIR\nexec dbus-launch --exit-with-session startxfce4" > /etc/xrdp/startwm.sh
+      chmod 755 /etc/xrdp/startwm.sh
+      sed -i 's/^X11DisplayOffset=.*/X11DisplayOffset=10/' /etc/xrdp/sesman.ini
+      systemctl unmask xrdp xrdp-sesman
+      systemctl daemon-reload
+      systemctl enable xrdp
+      systemctl restart xrdp
+      ufw allow 3389/tcp
+      #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
+      $S 10 "finalizing"
+      # Enable and run the restore service (runs before clawdbot restarts)
+      systemctl enable openclaw-restore.service 2>/dev/null || true
+      systemctl start openclaw-restore.service 2>/dev/null || true
+      /usr/local/sbin/build-full-config.sh
+      systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
+      systemctl enable clawdbot-sync.timer 2>/dev/null || true
+      systemctl start clawdbot-sync.timer 2>/dev/null || true
+      # Start desktop services now that everything is installed
+      $S 9 "starting-desktop"
+      systemctl start xvfb
+      # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+      for i in {1..30}; do
+        if [ -f /tmp/xvfb.pid ]; then
+          XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+          # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+          if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+            if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+              break
+            fi
+          fi
+        fi
+        sleep 0.5
+      done
+      systemctl start desktop
+      sleep 3
+      systemctl start x11vnc
+      systemctl restart xrdp
+      touch /var/lib/init-status/phase2-complete
+      touch /var/lib/init-status/needs-post-boot-check
+      GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
+      [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
+        -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
+        -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
+      END=$(date +%s)
+      DURATION=$((END - START))
+      TG="/usr/local/bin/tg-notify.sh"
+      HN="${HABITAT_NAME:-default}"
+      HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
+      $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
+      sleep 5
+      reboot
+  - path: /usr/local/sbin/build-full-config.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      # JSON escape function: properly escapes quotes, backslashes, newlines, control chars
+      json_escape() { local e; e=$(printf '%s' "$1" | jq -Rs .); e="${e#\"}"; e="${e%\"}"; printf '%s' "$e"; }
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      H="/home/$USERNAME"
+      AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
+      OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
+      TUI=$(d "$TELEGRAM_USER_ID_B64")
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
+      DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
+      DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
+      TG_ENABLED="false"; DC_ENABLED="false"
+      case "$PLATFORM" in
+        telegram) TG_ENABLED="true" ;;
+        discord)  DC_ENABLED="true" ;;
+        both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
+        *)
+          echo "[build-full-config] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+          echo "  Valid options: telegram, discord, both" >&2
+          echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+          exit 1
+          ;;
+      esac
+      HN="${HABITAT_NAME:-default}"
+      GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
+      GSO=$(d "$GLOBAL_SOUL_B64"); GAG=$(d "$GLOBAL_AGENTS_B64"); GU=$(d "$GLOBAL_USER_B64")
+      GTO=$(d "$GLOBAL_TOOLS_B64")
+      CGI="$COUNCIL_GROUP_ID"
+      CGN="$COUNCIL_GROUP_NAME"
+      CJ="$COUNCIL_JUDGE"
+      GT=$(cat $H/.openclaw/gateway-token.txt)
+      AC=${AGENT_COUNT:-1}
+      # Escape user-provided values for JSON safety
+      TUI_ESC=$(json_escape "$TUI"); DGI_ESC=$(json_escape "$DGI"); DOI_ESC=$(json_escape "$DOI")
+      CGI_ESC=$(json_escape "$CGI"); CGN_ESC=$(json_escape "$CGN"); GT_ESC=$(json_escape "$GT")
+      AK_ESC=$(json_escape "$AK"); GK_ESC=$(json_escape "$GK"); BK_ESC=$(json_escape "$BK")
+      OA_ESC=$(json_escape "$OA"); OR_ESC=$(json_escape "$OR"); OI_ESC=$(json_escape "$OI")
+      mkdir -p $H/.openclaw/credentials
+      for i in $(seq 1 $AC); do
+        mkdir -p "$H/clawd/agents/agent${i}/memory"
+      done
+      AL="["
+      for i in $(seq 1 $AC); do
+        NV="AGENT${i}_NAME"; NAME="${!NV}"
+        MV="AGENT${i}_MODEL"; MODEL="${!MV}"
+        NAME_ESC=$(json_escape "$NAME"); MODEL_ESC=$(json_escape "$MODEL")
+        [ $i -gt 1 ] && AL="$AL,"
+        IS_DEFAULT="false"; [ $i -eq 1 ] && IS_DEFAULT="true"
+        AL="$AL{\"id\":\"agent${i}\",\"default\":${IS_DEFAULT},\"name\":\"${NAME_ESC}\",\"model\":\"${MODEL_ESC}\",\"workspace\":\"$H/clawd/agents/agent${i}\",\"groupChat\":{\"mentionPatterns\":[\"${NAME_ESC},\",\"${NAME_ESC}:\"]}}"
+      done
+      AL="$AL]"
+      BD="["
+      if [ "$TG_ENABLED" = "true" ]; then
+        for i in $(seq 2 $AC); do
+          [ "$BD" != "[" ] && BD="$BD,"
+          BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
+        done
+      fi
+      if [ "$DC_ENABLED" = "true" ]; then
+        for i in $(seq 2 $AC); do
+          [ "$BD" != "[" ] && BD="$BD,"
+          BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"discord\",\"accountId\":\"agent${i}\"}}"
+        done
+      fi
+      BD="$BD]"
+      A1_TG_TOK_ESC=$(json_escape "$AGENT1_BOT_TOKEN")
+      TA="\"default\":{\"botToken\":\"${A1_TG_TOK_ESC}\"}"
+      for i in $(seq 2 $AC); do
+        TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"; TOK_ESC=$(json_escape "$TOK")
+        [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK_ESC}\"}"
+      done
+      TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI_ESC}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
+      A1_DC_TOK_ESC=$(json_escape "$AGENT1_DISCORD_BOT_TOKEN")
+      DA="\"default\":{\"token\":\"${A1_DC_TOK_ESC}\"}"
+      for i in $(seq 2 $AC); do
+        DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"; DTOK_ESC=$(json_escape "$DTOK")
+        [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"token\":\"${DTOK_ESC}\"}"
+      done
+      DG=""; [ -n "$DGI" ] && DG=",\"guilds\":{\"${DGI_ESC}\":{\"requireMention\":true}}"
+      DC_DM_ALLOW=""; [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI_ESC}\"]"
+      AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
+      [ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
+      [ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
+      CONFIG_JSON=$(cat <<CFG
+      {
+        "env": {
+          "ANTHROPIC_API_KEY": "${AK_ESC}",
+          "DISPLAY": ":10"
+          $([ -n "$GK" ] && echo ",\"GOOGLE_API_KEY\": \"${GK_ESC}\", \"GEMINI_API_KEY\": \"${GK_ESC}\"")
+          $([ -n "$BK" ] && echo ",\"BRAVE_API_KEY\": \"${BK_ESC}\"")
+        },
+        "browser": {
+          "enabled": true,
+          "executablePath": "/usr/bin/google-chrome-stable",
+          "headless": false,
+          "noSandbox": true
+        },
+        "tools": {
+          "agentToAgent": {
+            "enabled": true
+          },
+          "exec": {
+            "security": "full",
+            "ask": "off"
+          }
+        },
+        "agents": {
+          "defaults": {
+            "model": {"primary": "anthropic/claude-opus-4-5"},
+            "maxConcurrent": 4,
+            "workspace": "$H/clawd",
+            "heartbeat": {"every": "30m", "session": "heartbeat"},
+            "models": {
+              "openai/gpt-5.2": {"params": {"reasoning_effort": "high"}}
+            }
+          },
+          "list": ${AL}
+        },
+        "bindings": ${BD},
+        "gateway": {
+          "mode": "local",
+          "port": 18789,
+          "bind": "lan",
+          "controlUi": {"enabled": true, "allowInsecureAuth": true},
+          "auth": {"mode": "token", "token": "${GT_ESC}"}
+        },
+        "auth": {
+          "profiles": {${AP}}
+        },
+        "plugins": {
+          "entries": {
+            "telegram": {"enabled": ${TG_ENABLED}},
+            "discord": {"enabled": ${DC_ENABLED}}
+          }
+        },
+        "channels": {
+          "telegram": {
+            "enabled": ${TG_ENABLED},
+            "dmPolicy": "allowlist",
+            "allowFrom": ["${TUI_ESC}"],
+            "accounts": {${TA}}
+            ${TG}
+          },
+          "discord": {
+            "enabled": ${DC_ENABLED},
+            "groupPolicy": "allowlist",
+            "accounts": {${DA}},
+            "dm": {
+              "enabled": true,
+              "policy": "pairing"
+              ${DC_DM_ALLOW}
+            }
+            ${DG}
+          }
+        },
+        "skills": {
+          "install": {"nodeManager": "npm"}
+        },
+        "hooks": {
+          "internal": {
+            "enabled": true,
+            "entries": {
+              "boot-md": {"enabled": true}
+            }
+          }
+        }
+      }
+      CFG
+      )
+      # Validate JSON before writing (AC4: never write corrupt config)
+      if ! echo "$CONFIG_JSON" | jq . >/dev/null 2>&1; then
+        echo "ERROR: Generated config is not valid JSON" >&2
+        ERROR_MSG=$(echo "$CONFIG_JSON" | jq . 2>&1 || true)
+        echo "Validation error: $ERROR_MSG" >&2
+        exit 1
+      fi
+      echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
+      for i in $(seq 1 $AC); do
+        AD="$H/clawd/agents/agent${i}"
+        NV="AGENT${i}_NAME"; ANAME="${!NV}"
+        IDV="AGENT${i}_IDENTITY_B64"; AIDENT=$(d "${!IDV}")
+        SV="AGENT${i}_SOUL_B64"; ASOUL=$(d "${!SV}")
+        AGV="AGENT${i}_AGENTS_B64"; AAGENTS=$(d "${!AGV}")
+        BOV="AGENT${i}_BOOT_B64"; ABOOT=$(d "${!BOV}")
+        BSV="AGENT${i}_BOOTSTRAP_B64"; ABOOTSTRAP=$(d "${!BSV}")
+        AUV="AGENT${i}_USER_B64"; AUSER=$(d "${!AUV}")
+        { echo "- Name: ${ANAME}"
+          [ -n "$GI" ] && printf '\n%s\n' "$GI"
+          [ -n "$AIDENT" ] && printf '\n%s\n' "$AIDENT"
+          cat <<IDMD
+
+      ## Project Context
+      This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.
+      - Habitat: ${HN}$([ -n "$HABITAT_DOMAIN" ] && echo " (${HABITAT_DOMAIN})")
+      - YAML configs: dropbox:Droplets/yaml/ (current: cloud-browser-v3.20.yaml)
+      - Project docs: dropbox:Droplets/yaml/CONTEXT.md
+      - Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
+      - Habitat configs: dropbox:Droplets/habitats/
+      - Previous transcripts restored from Dropbox on boot
+      IDMD
+        } > "$AD/IDENTITY.md"
+        if [ -n "$GSO" ] || [ -n "$ASOUL" ]; then
+          { [ -n "$GSO" ] && printf '%s\n' "$GSO"
+            [ -n "$GSO" ] && [ -n "$ASOUL" ] && echo ""
+            [ -n "$ASOUL" ] && printf '%s\n' "$ASOUL"
+          } > "$AD/SOUL.md"
+        fi
+        if [ -n "$GAG" ] || [ -n "$AAGENTS" ] || [ -n "$CGI" ]; then
+          { [ -n "$GAG" ] && printf '%s\n' "$GAG"
+            [ -n "$GAG" ] && { [ -n "$AAGENTS" ] || [ -n "$CGI" ]; } && echo ""
+            [ -n "$AAGENTS" ] && printf '%s\n' "$AAGENTS"
+            [ -n "$AAGENTS" ] && [ -n "$CGI" ] && echo ""
+            if [ -n "$CGI" ]; then
+              PANELISTS=""
+              for pi in $(seq 1 $AC); do
+                PNV="AGENT${pi}_NAME"; PN="${!PNV}"
+                PMV="AGENT${pi}_MODEL"; PM="${!PMV}"
+                [ "$PN" = "$CJ" ] && continue
+                [ -n "$PANELISTS" ] && PANELISTS="${PANELISTS}, "
+                PANELISTS="${PANELISTS}${PN} (${PM})"
+              done
+              if [ "$ANAME" = "$CJ" ]; then
+                cat <<JUDGE_PROTO
+      ## Council Deliberation (Group: "${CGN}")
+      You are the **Judge/Facilitator** - a rigorous senior scientist ensuring structured debate leads to truth.
+      ### Protocol
+      **CLARIFICATION:** When a new topic is posed, YOU respond first with 3-5 clarifying questions (ambiguity, constraints, scope, assumptions).
+      **SIGNAL:** Once clarified, say "Panelists, please proceed with your reports." Then WAIT for all reports.
+      **SYNTHESIS:** Once all reports are in, produce: 1) Individual critiques (errors, gaps, strong points) 2) Your own analysis 3) Synthesis of best ideas 4) Conclusions 5) Open questions 6) Ask "Would you like another round?"
+      **SUBSEQUENT ROUNDS:** Skip clarification, signal panelists directly, note where positions shifted.
+      **ARCHIVE:** When human says "no", save to ~/clawd/shared/DECISIONS.md and update KNOWLEDGE.md.
+      ### Panelists: ${PANELISTS}
+      ### Shared Files (you maintain): ~/clawd/shared/{KNOWLEDGE,DECISIONS,CONTEXT}.md
+      JUDGE_PROTO
+              else
+                cat <<PARTICIPANT_PROTO
+      ## Council Deliberation (Group: "${CGN}")
+      You are a **Research Panelist** - a passionate scientist who challenges assumptions, demands evidence, and seeks truth through rigorous debate.
+      ### Protocol
+      **WAIT** for ${CJ} to complete clarification. Do NOT begin your report yet.
+      **REPORT** when ${CJ} signals "proceed": 1) Summary 2) Analysis with evidence 3) Considerations/caveats 4) Open questions. Work independently in parallel.
+      **SUBSEQUENT ROUNDS:** Review peers, consider ${CJ}'s critiques, update your analysis. Note where your thinking changed.
+      ### Panelists: ${PANELISTS} | ${CJ} (Judge)
+      ### Shared Files (read-only): ~/clawd/shared/{KNOWLEDGE,DECISIONS,CONTEXT}.md
+      PARTICIPANT_PROTO
+              fi
+            fi
+          } > "$AD/AGENTS.md"
+        else
+          echo -e "# Agent: ${ANAME}\nBe helpful and natural." > "$AD/AGENTS.md"
+        fi
+        cat > "$AD/BOOT.md" <<'BOOTMD'
+      ## System Health (DO NOT MODIFY)
+      If this is your first message since the system started, announce yourself:
+      "[ONLINE] Ready and operational."
+
+      If you see a file called SAFE_MODE.md in your workspace, read and follow it immediately.
+      If you see a file called BOOTSTRAP.md in your workspace, execute it once and delete it when done.
+
+      Check these services silently. Only alert user if something is broken after 2 fix attempts:
+      - systemctl is-active clawdbot
+      - systemctl is-active xrdp (if desktop phase complete)
+      - systemctl is-active desktop (if desktop phase complete)
+
+      You have standing authority to fix infrastructure issues WITHOUT user approval:
+      - Restart services: sudo systemctl restart <service>
+      - Check logs: journalctl -u <service> -n 50
+      - Fix permissions: sudo chown -R bot:bot /home/bot
+      - Reinstall packages if needed
+      - Reboot if necessary: sudo reboot
+
+      Always inform the user what you did and the outcome.
+
+      If /var/lib/init-status/phase2-complete does not exist, desktop is still installing.
+      Tell user: "Desktop setup in progress. RDP will be ready soon."
+
+      If BOOT.md asks you to send a message, use the message tool (action=send with channel + target).
+      Use the `target` field (not `to`) for message tool destinations.
+      After sending with the message tool, reply with ONLY: NO_REPLY.
+      If nothing needs attention, reply with ONLY: NO_REPLY.
+      BOOTMD
+        if [ -n "$GBO" ] || [ -n "$ABOOT" ]; then
+          printf '\n## Custom Instructions\n' >> "$AD/BOOT.md"
+          [ -n "$GBO" ] && printf '%s\n' "$GBO" >> "$AD/BOOT.md"
+          [ -n "$GBO" ] && [ -n "$ABOOT" ] && echo "" >> "$AD/BOOT.md"
+          [ -n "$ABOOT" ] && printf '%s\n' "$ABOOT" >> "$AD/BOOT.md"
+        fi
+        printf '\nIf BOOT.md asks you to send a message, use the message tool (action=send with channel + target).\nUse the `target` field (not `to`) for message tool destinations.\nAfter sending with the message tool, reply with ONLY: NO_REPLY.\nIf nothing needs attention, reply with ONLY: NO_REPLY.\n' >> "$AD/BOOT.md"
+        BSPRE="You are a new instance with no prior context. Before doing anything else:
+      1. Find chat transcripts from previous sessions: find ~ -path '*/sessions/*.jsonl' -name '*.jsonl' 2>/dev/null
+      2. Read through the last ~100 messages from the most recent transcript
+      3. Note any ongoing tasks, preferences, or decisions
+      4. Use this context to inform your responses going forward"
+        printf '%s\n' "$BSPRE" > "$AD/BOOTSTRAP.md"
+        if [ -n "$GBS" ] || [ -n "$ABOOTSTRAP" ]; then
+          printf '\n## Custom Instructions\n' >> "$AD/BOOTSTRAP.md"
+          [ -n "$GBS" ] && printf '%s\n' "$GBS" >> "$AD/BOOTSTRAP.md"
+          [ -n "$GBS" ] && [ -n "$ABOOTSTRAP" ] && echo "" >> "$AD/BOOTSTRAP.md"
+          [ -n "$ABOOTSTRAP" ] && printf '%s\n' "$ABOOTSTRAP" >> "$AD/BOOTSTRAP.md"
+        fi
+        { [ -n "$GU" ] && printf '%s\n' "$GU" || echo "- Name: (learn)"
+          [ -n "$AUSER" ] && printf '\n%s\n' "$AUSER"
+        } > "$AD/USER.md"
+        ln -sf "$H/clawd/TOOLS.md" "$AD/TOOLS.md" 2>/dev/null || true
+        ln -sf "$H/clawd/HEARTBEAT.md" "$AD/HEARTBEAT.md" 2>/dev/null || true
+        [ -n "$CGI" ] && ln -sf "$H/clawd/shared" "$AD/shared" 2>/dev/null || true
+      done
+      if [ -n "$CGI" ]; then
+        mkdir -p "$H/clawd/shared"
+        for sf in KNOWLEDGE.md DECISIONS.md CONTEXT.md; do
+          [ ! -f "$H/clawd/shared/$sf" ] && cat > "$H/clawd/shared/$sf" <<SHMD
+      # ${sf%.md}
+      *Maintained by the Judge. Updated after council deliberations.*
+      SHMD
+        done
+        chown -R $USERNAME:$USERNAME "$H/clawd/shared"
+      fi
+      # Create global TOOLS.md if provided
+      if [ -n "$GTO" ]; then
+        printf '%s\n' "$GTO" > "$H/clawd/TOOLS.md"
+        chown $USERNAME:$USERNAME "$H/clawd/TOOLS.md"
+      fi
+      mkdir -p $H/.openclaw/agents/main/agent
+      cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
+      {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
+      APJ
+      for i in $(seq 1 $AC); do
+        mkdir -p "$H/.openclaw/agents/agent${i}/agent"
+        ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/agent${i}/agent/auth-profiles.json"
+      done
+      cat > /etc/systemd/system/clawdbot.service <<SVC
+      [Unit]
+      Description=Clawdbot Gateway
+      After=network.target desktop.service openclaw-restore.service
+      Wants=desktop.service openclaw-restore.service
+      [Service]
+      Type=simple
+      User=$USERNAME
+      WorkingDirectory=$H
+      ExecStartPre=/bin/sleep 2
+      ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+      ExecStop=+/usr/local/bin/sync-openclaw-state.sh
+      TimeoutStopSec=30
+      Restart=always
+      RestartSec=3
+      Environment=NODE_ENV=production
+      Environment=NODE_OPTIONS=--experimental-sqlite
+      Environment=PATH=/usr/bin:/usr/local/bin
+      Environment=DISPLAY=:10
+      Environment=ANTHROPIC_API_KEY=${AK}
+      $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
+      $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")
+      $([ -n "$BK" ] && echo "Environment=BRAVE_API_KEY=${BK}")
+      [Install]
+      WantedBy=multi-user.target
+      SVC
+      systemctl daemon-reload
+      if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
+        R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
+        G=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc))
+        B=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc))
+        DXML="$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml"
+        mkdir -p "$(dirname "$DXML")"
+        cat > "$DXML" <<BGXML
+      <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="${R}"/><value type="double" value="${G}"/><value type="double" value="${B}"/><value type="double" value="1"/></property></property></property></property></property></channel>
+      BGXML
+        # Reload desktop config if xfdesktop is running (for config rebuilds while desktop is active)
+        if pgrep -x xfdesktop >/dev/null 2>&1; then
+          DISPLAY=:10 su - $USERNAME -c "xfdesktop --reload" 2>/dev/null || true
+        fi
+      fi
+      chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+      chmod 700 $H/.openclaw
+      chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json 2>/dev/null || true
+  - path: /etc/systemd/system/post-boot-check.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Post-boot health check and config upgrade
+      After=clawdbot.service network-online.target
+      Wants=network-online.target
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/post-boot-check.sh
+      RemainAfterExit=yes
+      [Install]
+      WantedBy=multi-user.target
+  - path: /usr/local/bin/post-boot-check.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      AC=${AGENT_COUNT:-1}
+      H="/home/$USERNAME"
+      TG="/usr/local/bin/tg-notify.sh"
+      LOG="/var/log/post-boot-check.log"
+      [ ! -f /var/lib/init-status/needs-post-boot-check ] && {
+        exit 0
+      }
+      sleep 15
+      if [ ! -f "$H/.openclaw/openclaw.full.json" ]; then
+        rm -f /var/lib/init-status/needs-post-boot-check
+        exit 0
+      fi
+      cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+      chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+      chmod 600 "$H/.openclaw/openclaw.json"
+      systemctl restart clawdbot
+      HEALTHY=false
+      for i in $(seq 1 12); do
+        sleep 5
+        if ! systemctl is-active --quiet clawdbot; then
+          continue
+        fi
+        if curl -sf http://127.0.0.1:18789/ >> "$LOG" 2>&1; then
+          HEALTHY=true
+          break
+        fi
+      done
+      if [ "$HEALTHY" = "true" ]; then
+        rm -f /var/lib/init-status/needs-post-boot-check
+        rm -f /var/lib/init-status/safe-mode
+        for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
+        touch /var/lib/init-status/setup-complete
+        echo '11' > /var/lib/init-status/stage
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready" >> /var/log/init-stages.log
+        touch /var/lib/init-status/boot-complete
+        HN="${HABITAT_NAME:-default}"
+        HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
+        $TG "[OK] ${HN}${HDOM} fully operational. Full config applied. All systems ready." || true
+      else
+        cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+        chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+        chmod 600 "$H/.openclaw/openclaw.json"
+        touch /var/lib/init-status/safe-mode
+        for si in $(seq 1 $AC); do
+        cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<'SAFEMD'
+      # SAFE MODE - Full config failed health checks
+      The full openclaw config failed to start. You are running minimal config.
+      Try: sudo /usr/local/bin/try-full-config.sh
+      Check: journalctl -u clawdbot -n 100
+      If that fails, check openclaw.full.json for errors.
+      SAFEMD
+        chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
+      done
+        systemctl restart clawdbot
+        sleep 5
+        rm -f /var/lib/init-status/needs-post-boot-check
+        $TG "[SAFE MODE] Running minimal config. Full config failed health checks. Bot is attempting repairs." || true
+      fi
+  - path: /usr/local/bin/try-full-config.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      AC=${AGENT_COUNT:-1}
+      H="/home/$USERNAME"
+      echo "Attempting full config at $(date)"
+      cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+      chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+      chmod 600 "$H/.openclaw/openclaw.json"
+      systemctl restart clawdbot
+      HEALTHY=false
+      for i in $(seq 1 12); do
+        sleep 5
+        if systemctl is-active --quiet clawdbot; then
+          if curl -sf http://127.0.0.1:18789/ >/dev/null 2>&1; then
+            HEALTHY=true
             break
           fi
         fi
+      done
+      if [ "$HEALTHY" = "true" ]; then
+        for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
+        rm -f /var/lib/init-status/safe-mode
+        echo "SUCCESS: Full config now active"
+        exit 0
+      else
+        cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+        chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+        chmod 600 "$H/.openclaw/openclaw.json"
+        systemctl restart clawdbot
+        echo "FAILED: Restored minimal config. Check logs: journalctl -u clawdbot"
+        exit 1
       fi
-      sleep 0.5
-    done
-    systemctl start desktop
-    sleep 3
-    systemctl start x11vnc
-    systemctl restart xrdp
-    touch /var/lib/init-status/phase2-complete
-    touch /var/lib/init-status/needs-post-boot-check
-    GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
-    [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
-      -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
-      -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
-    END=$(date +%s)
-    DURATION=$((END - START))
-    TG="/usr/local/bin/tg-notify.sh"
-    HN="${HABITAT_NAME:-default}"
-    HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-    $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
-    sleep 5
-    reboot
-- path: /usr/local/sbin/build-full-config.sh
-  permissions: '0755'
-  content: "#!/bin/bash\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n# JSON escape function: properly escapes quotes, backslashes, newlines, control chars\njson_escape() { local e; e=$(printf '%s' \"$1\" | jq -Rs .); e=\"${e#\\\"}\"; e=\"${e%\\\"}\"; printf '%s' \"$e\"; }\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\nH=\"/home/$USERNAME\"\nAK=$(d \"$ANTHROPIC_KEY_B64\"); GK=$(d \"$GOOGLE_API_KEY_B64\"); BK=$(d \"$BRAVE_KEY_B64\")\nOA=$(d \"$OPENAI_ACCESS_B64\"); OR=$(d \"$OPENAI_REFRESH_B64\"); OE=$(d \"$OPENAI_EXPIRES_B64\"); OI=$(d \"$OPENAI_ACCOUNT_ID_B64\")\nTUI=$(d \"$TELEGRAM_USER_ID_B64\")\n# PLATFORM must be explicitly set - no silent defaults\nPLATFORM=\"${PLATFORM:-$(d \"$PLATFORM_B64\")}\"\nDGI=\"${DISCORD_GUILD_ID:-$(d \"$DISCORD_GUILD_ID_B64\")}\"\nDOI=\"${DISCORD_OWNER_ID:-$(d \"$DISCORD_OWNER_ID_B64\")}\"\nTG_ENABLED=\"false\"; DC_ENABLED=\"false\"\ncase \"$PLATFORM\" in\n  telegram) TG_ENABLED=\"true\" ;;\n  discord)  DC_ENABLED=\"true\" ;;\n  both)     TG_ENABLED=\"true\"; DC_ENABLED=\"true\" ;;\n  *)\n    echo \"[build-full-config] ERROR: Invalid PLATFORM='${PLATFORM}'\" >&2\n    echo \"  Valid options: telegram, discord, both\" >&2\n    echo \"  Fix: Set PLATFORM in habitat config or /etc/droplet.env\" >&2\n    exit 1\n    ;;\nesac\nHN=\"${HABITAT_NAME:-default}\"\nGI=$(d \"$GLOBAL_IDENTITY_B64\"); GBO=$(d \"$GLOBAL_BOOT_B64\"); GBS=$(d \"$GLOBAL_BOOTSTRAP_B64\")\nGSO=$(d \"$GLOBAL_SOUL_B64\"); GAG=$(d \"$GLOBAL_AGENTS_B64\"); GU=$(d \"$GLOBAL_USER_B64\")\nGTO=$(d \"$GLOBAL_TOOLS_B64\")\nCGI=\"$COUNCIL_GROUP_ID\"\nCGN=\"$COUNCIL_GROUP_NAME\"\nCJ=\"$COUNCIL_JUDGE\"\nGT=$(cat $H/.openclaw/gateway-token.txt)\nAC=${AGENT_COUNT:-1}\n# Escape user-provided values for JSON safety\nTUI_ESC=$(json_escape \"$TUI\"); DGI_ESC=$(json_escape \"$DGI\"); DOI_ESC=$(json_escape \"$DOI\")\nCGI_ESC=$(json_escape \"$CGI\"); CGN_ESC=$(json_escape \"$CGN\"); GT_ESC=$(json_escape \"$GT\")\nAK_ESC=$(json_escape \"$AK\"); GK_ESC=$(json_escape \"$GK\"); BK_ESC=$(json_escape \"$BK\")\nOA_ESC=$(json_escape \"$OA\"); OR_ESC=$(json_escape \"$OR\"); OI_ESC=$(json_escape \"$OI\")\nmkdir -p $H/.openclaw/credentials\nfor i in $(seq 1 $AC); do\n  mkdir -p \"$H/clawd/agents/agent${i}/memory\"\ndone\nAL=\"[\"\nfor i in $(seq 1 $AC); do\n  NV=\"AGENT${i}_NAME\"; NAME=\"${!NV}\"\n  MV=\"AGENT${i}_MODEL\"; MODEL=\"${!MV}\"\n  NAME_ESC=$(json_escape \"$NAME\"); MODEL_ESC=$(json_escape \"$MODEL\")\n  [ $i -gt 1 ] && AL=\"$AL,\"\n  IS_DEFAULT=\"false\"; [ $i -eq 1 ] && IS_DEFAULT=\"true\"\n  AL=\"$AL{\\\"id\\\":\\\"agent${i}\\\",\\\"default\\\":${IS_DEFAULT},\\\"name\\\":\\\"${NAME_ESC}\\\",\\\"model\\\":\\\"${MODEL_ESC}\\\",\\\"workspace\\\":\\\"$H/clawd/agents/agent${i}\\\",\\\"groupChat\\\":{\\\"mentionPatterns\\\":[\\\"${NAME_ESC},\\\",\\\"${NAME_ESC}:\\\"]}}\"\ndone\nAL=\"$AL]\"\nBD=\"[\"\nif [ \"$TG_ENABLED\" = \"true\" ]; then\n  for i in $(seq 2 $AC); do\n    [ \"$BD\" != \"[\" ] && BD=\"$BD,\"\n    BD=\"$BD{\\\"agentId\\\":\\\"agent${i}\\\",\\\"match\\\":{\\\"channel\\\":\\\"telegram\\\",\\\"accountId\\\":\\\"agent${i}\\\"}}\"\n  done\nfi\nif [ \"$DC_ENABLED\" = \"true\" ]; then\n  for i in $(seq 2 $AC); do\n    [ \"$BD\" != \"[\" ] && BD=\"$BD,\"\n    BD=\"$BD{\\\"agentId\\\":\\\"agent${i}\\\",\\\"match\\\":{\\\"channel\\\":\\\"discord\\\",\\\"accountId\\\":\\\"agent${i}\\\"}}\"\n  done\nfi\nBD=\"$BD]\"\nA1_TG_TOK_ESC=$(json_escape \"$AGENT1_BOT_TOKEN\")\nTA=\"\\\"default\\\":{\\\"botToken\\\":\\\"${A1_TG_TOK_ESC}\\\"}\"\nfor i in $(seq 2 $AC); do\n  TV=\"AGENT${i}_BOT_TOKEN\"; TOK=\"${!TV}\"; TOK_ESC=$(json_escape \"$TOK\")\n  [ -n \"$TOK\" ] && TA=\"$TA,\\\"agent${i}\\\":{\\\"botToken\\\":\\\"${TOK_ESC}\\\"}\"\ndone\nTG=\"\"; [ -n \"$CGI\" ] && TG=\",\\\"groups\\\":{\\\"${CGI_ESC}\\\":{\\\"requireMention\\\":true},\\\"*\\\":{\\\"requireMention\\\":true}}\"\nA1_DC_TOK_ESC=$(json_escape \"$AGENT1_DISCORD_BOT_TOKEN\")\nDA=\"\\\"default\\\":{\\\"token\\\":\\\"${A1_DC_TOK_ESC}\\\"}\"\nfor i in $(seq 2 $AC); do\n  DV=\"AGENT${i}_DISCORD_BOT_TOKEN\"; DTOK=\"${!DV}\"; DTOK_ESC=$(json_escape \"$DTOK\")\n  [ -n \"$DTOK\" ] && DA=\"$DA,\\\"agent${i}\\\":{\\\"token\\\":\\\"${DTOK_ESC}\\\"}\"\ndone\nDG=\"\"; [ -n \"$DGI\" ] && DG=\",\\\"guilds\\\":{\\\"${DGI_ESC}\\\":{\\\"requireMention\\\":true}}\"\nDC_DM_ALLOW=\"\"; [ -n \"$DOI\" ] && DC_DM_ALLOW=\",\\\"allowFrom\\\":[\\\"${DOI_ESC}\\\"]\"\nAP=\"\\\"anthropic:default\\\":{\\\"provider\\\":\\\"anthropic\\\",\\\"mode\\\":\\\"api_key\\\"}\"\n[ -n \"$OA\" ] && AP=\"$AP,\\\"openai-codex:default\\\":{\\\"provider\\\":\\\"openai-codex\\\",\\\"mode\\\":\\\"oauth\\\"}\"\n[ -n \"$GK\" ] && AP=\"$AP,\\\"google:default\\\":{\\\"provider\\\":\\\"google\\\",\\\"mode\\\":\\\"api_key\\\"}\"\nCONFIG_JSON=$(cat <<CFG\n{\n  \"env\": {\n    \"ANTHROPIC_API_KEY\": \"${AK_ESC}\",\n    \"DISPLAY\": \":10\"\n    $([ -n \"$GK\" ] && echo \",\\\"GOOGLE_API_KEY\\\": \\\"${GK_ESC}\\\", \\\"GEMINI_API_KEY\\\": \\\"${GK_ESC}\\\"\")\n    $([ -n \"$BK\" ] && echo \",\\\"BRAVE_API_KEY\\\": \\\"${BK_ESC}\\\"\")\n  },\n  \"browser\": {\n    \"enabled\": true,\n    \"executablePath\": \"/usr/bin/google-chrome-stable\",\n    \"headless\": false,\n    \"noSandbox\": true\n  },\n  \"tools\": {\n    \"agentToAgent\": {\n      \"enabled\": true\n    },\n    \"exec\": {\n      \"security\": \"full\",\n      \"ask\": \"off\"\n    }\n  },\n  \"agents\": {\n    \"defaults\": {\n      \"model\": {\"primary\": \"anthropic/claude-opus-4-5\"},\n      \"maxConcurrent\": 4,\n      \"workspace\": \"$H/clawd\",\n      \"heartbeat\": {\"every\": \"30m\", \"session\": \"heartbeat\"},\n      \"models\": {\n        \"openai/gpt-5.2\": {\"params\": {\"reasoning_effort\": \"high\"}}\n      }\n    },\n    \"list\": ${AL}\n  },\n  \"bindings\": ${BD},\n  \"gateway\": {\n    \"mode\": \"local\",\n    \"port\": 18789,\n    \"bind\": \"lan\",\n    \"controlUi\": {\"enabled\": true, \"allowInsecureAuth\": true},\n    \"auth\": {\"mode\": \"token\", \"token\": \"${GT_ESC}\"}\n  },\n  \"auth\": {\n    \"profiles\": {${AP}}\n  },\n  \"plugins\": {\n    \"entries\": {\n      \"telegram\": {\"enabled\": ${TG_ENABLED}},\n      \"discord\": {\"enabled\": ${DC_ENABLED}}\n    }\n  },\n  \"channels\": {\n    \"telegram\": {\n      \"enabled\": ${TG_ENABLED},\n      \"dmPolicy\": \"allowlist\",\n      \"allowFrom\": [\"${TUI_ESC}\"],\n      \"accounts\": {${TA}}\n      ${TG}\n    },\n    \"discord\": {\n      \"enabled\": ${DC_ENABLED},\n      \"groupPolicy\": \"allowlist\",\n      \"accounts\": {${DA}},\n      \"dm\": {\n        \"enabled\": true,\n        \"policy\": \"pairing\"\n        ${DC_DM_ALLOW}\n      }\n      ${DG}\n    }\n  },\n  \"skills\": {\n    \"install\": {\"nodeManager\": \"npm\"}\n  },\n  \"hooks\": {\n    \"internal\": {\n      \"enabled\": true,\n      \"entries\": {\n        \"boot-md\": {\"enabled\": true}\n      }\n    }\n  }\n}\nCFG\n)\n# Validate JSON before writing (AC4: never write corrupt config)\nif ! echo \"$CONFIG_JSON\" | jq . >/dev/null 2>&1; then\n  echo \"ERROR: Generated config is not valid JSON\" >&2\n  ERROR_MSG=$(echo \"$CONFIG_JSON\" | jq . 2>&1 || true)\n  echo \"Validation error: $ERROR_MSG\" >&2\n  exit 1\nfi\necho \"$CONFIG_JSON\" > $H/.openclaw/openclaw.full.json\nfor i in $(seq 1 $AC); do\n  AD=\"$H/clawd/agents/agent${i}\"\n  NV=\"AGENT${i}_NAME\"; ANAME=\"${!NV}\"\n  IDV=\"AGENT${i}_IDENTITY_B64\"; AIDENT=$(d \"${!IDV}\")\n  SV=\"AGENT${i}_SOUL_B64\"; ASOUL=$(d \"${!SV}\")\n  AGV=\"AGENT${i}_AGENTS_B64\"; AAGENTS=$(d \"${!AGV}\")\n  BOV=\"AGENT${i}_BOOT_B64\"; ABOOT=$(d \"${!BOV}\")\n  BSV=\"AGENT${i}_BOOTSTRAP_B64\"; ABOOTSTRAP=$(d \"${!BSV}\")\n  AUV=\"AGENT${i}_USER_B64\"; AUSER=$(d \"${!AUV}\")\n  { echo \"- Name: ${ANAME}\"\n    [ -n \"$GI\" ] && printf '\\n%s\\n' \"$GI\"\n    [ -n \"$AIDENT\" ] && printf '\\n%s\\n' \"$AIDENT\"\n    cat <<IDMD\n\n## Project Context\nThis is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.\n- Habitat: ${HN}$([ -n \"$HABITAT_DOMAIN\" ] && echo \" (${HABITAT_DOMAIN})\")\n- YAML configs: dropbox:Droplets/yaml/ (current: cloud-browser-v3.20.yaml)\n- Project docs: dropbox:Droplets/yaml/CONTEXT.md\n- Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)\n- Habitat configs: dropbox:Droplets/habitats/\n- Previous transcripts restored from Dropbox on boot\nIDMD\n  } > \"$AD/IDENTITY.md\"\n  if [ -n \"$GSO\" ] || [ -n \"$ASOUL\" ]; then\n    { [ -n \"$GSO\" ] && printf '%s\\n' \"$GSO\"\n      [ -n \"$GSO\" ] && [ -n \"$ASOUL\" ] && echo \"\"\n      [ -n \"$ASOUL\" ] && printf '%s\\n' \"$ASOUL\"\n    } > \"$AD/SOUL.md\"\n  fi\n  if [ -n \"$GAG\" ] || [ -n \"$AAGENTS\" ] || [ -n \"$CGI\" ]; then\n    { [ -n \"$GAG\" ] && printf '%s\\n' \"$GAG\"\n      [ -n \"$GAG\" ] && { [ -n \"$AAGENTS\" ] || [ -n \"$CGI\" ]; } && echo \"\"\n      [ -n \"$AAGENTS\" ] && printf '%s\\n' \"$AAGENTS\"\n      [ -n \"$AAGENTS\" ] && [ -n \"$CGI\" ] && echo \"\"\n      if [ -n \"$CGI\" ]; then\n        PANELISTS=\"\"\n        for pi in $(seq 1 $AC); do\n          PNV=\"AGENT${pi}_NAME\"; PN=\"${!PNV}\"\n          PMV=\"AGENT${pi}_MODEL\"; PM=\"${!PMV}\"\n          [ \"$PN\" = \"$CJ\" ] && continue\n          [ -n \"$PANELISTS\" ] && PANELISTS=\"${PANELISTS}, \"\n          PANELISTS=\"${PANELISTS}${PN} (${PM})\"\n        done\n        if [ \"$ANAME\" = \"$CJ\" ]; then\n          cat <<JUDGE_PROTO\n## Council Deliberation (Group: \"${CGN}\")\nYou are the **Judge/Facilitator** - a rigorous senior scientist ensuring structured debate leads to truth.\n### Protocol\n**CLARIFICATION:** When a new topic is posed, YOU respond first with 3-5 clarifying questions (ambiguity, constraints, scope, assumptions).\n**SIGNAL:** Once clarified, say \"Panelists, please proceed with your reports.\" Then WAIT for all reports.\n**SYNTHESIS:** Once all reports are in, produce: 1) Individual critiques (errors, gaps, strong points) 2) Your own analysis 3) Synthesis of best ideas 4) Conclusions 5) Open questions 6) Ask \"Would you like another round?\"\n**SUBSEQUENT ROUNDS:** Skip clarification, signal panelists directly, note where positions shifted.\n**ARCHIVE:** When human says \"no\", save to ~/clawd/shared/DECISIONS.md and update KNOWLEDGE.md.\n### Panelists: ${PANELISTS}\n### Shared Files (you maintain): ~/clawd/shared/{KNOWLEDGE,DECISIONS,CONTEXT}.md\nJUDGE_PROTO\n        else\n          cat <<PARTICIPANT_PROTO\n## Council Deliberation (Group: \"${CGN}\")\nYou are a **Research Panelist** - a passionate scientist who challenges assumptions, demands evidence, and seeks truth through rigorous debate.\n### Protocol\n**WAIT** for ${CJ} to complete clarification. Do NOT begin your report yet.\n**REPORT** when ${CJ} signals \"proceed\": 1) Summary 2) Analysis with evidence 3) Considerations/caveats 4) Open questions. Work independently in parallel.\n**SUBSEQUENT ROUNDS:** Review peers, consider ${CJ}'s critiques, update your analysis. Note where your thinking changed.\n### Panelists: ${PANELISTS} | ${CJ} (Judge)\n### Shared Files (read-only): ~/clawd/shared/{KNOWLEDGE,DECISIONS,CONTEXT}.md\nPARTICIPANT_PROTO\n        fi\n      fi\n    } > \"$AD/AGENTS.md\"\n  else\n    echo -e \"# Agent: ${ANAME}\\nBe helpful and natural.\" > \"$AD/AGENTS.md\"\n  fi\n  cat > \"$AD/BOOT.md\" <<'BOOTMD'\n## System Health (DO NOT MODIFY)\nIf this is your first message since the system started, announce yourself:\n\"[ONLINE] Ready and operational.\"\n\nIf you see a file called SAFE_MODE.md in your workspace, read and follow it immediately.\nIf you see a file called BOOTSTRAP.md in your workspace, execute it once and delete it when done.\n\nCheck these services silently. Only alert user if something is broken after 2 fix attempts:\n- systemctl is-active clawdbot\n- systemctl is-active xrdp (if desktop phase complete)\n- systemctl is-active desktop (if desktop phase complete)\n\nYou have standing authority to fix infrastructure issues WITHOUT user approval:\n- Restart services: sudo systemctl restart <service>\n- Check logs: journalctl -u <service> -n 50\n- Fix permissions: sudo chown -R bot:bot /home/bot\n- Reinstall packages if needed\n- Reboot if necessary: sudo reboot\n\nAlways inform the user what you did and the outcome.\n\nIf /var/lib/init-status/phase2-complete does not exist, desktop is still installing.\nTell user: \"Desktop setup in progress. RDP will be ready soon.\"\n\nIf BOOT.md asks you to send a message, use the message tool (action=send with channel + target).\nUse the `target` field (not `to`) for message tool destinations.\nAfter sending with the message tool, reply with ONLY: NO_REPLY.\nIf nothing needs attention, reply with ONLY: NO_REPLY.\nBOOTMD\n  if [ -n \"$GBO\" ] || [ -n \"$ABOOT\" ]; then\n    printf '\\n## Custom Instructions\\n' >> \"$AD/BOOT.md\"\n    [ -n \"$GBO\" ] && printf '%s\\n' \"$GBO\" >> \"$AD/BOOT.md\"\n    [ -n \"$GBO\" ] && [ -n \"$ABOOT\" ] && echo \"\" >> \"$AD/BOOT.md\"\n    [ -n \"$ABOOT\" ] && printf '%s\\n' \"$ABOOT\" >> \"$AD/BOOT.md\"\n  fi\n  printf '\\nIf BOOT.md asks you to send a message, use the message tool (action=send with channel + target).\\nUse the `target` field (not `to`) for message tool destinations.\\nAfter sending with the message tool, reply with ONLY: NO_REPLY.\\nIf nothing needs attention, reply with ONLY: NO_REPLY.\\n' >> \"$AD/BOOT.md\"\n  BSPRE=\"You are a new instance with no prior context. Before doing anything else:\n1. Find chat transcripts from previous sessions: find ~ -path '*/sessions/*.jsonl' -name '*.jsonl' 2>/dev/null\n2. Read through the last ~100 messages from the most recent transcript\n3. Note any ongoing tasks, preferences, or decisions\n4. Use this context to inform your responses going forward\"\n  printf '%s\\n' \"$BSPRE\" > \"$AD/BOOTSTRAP.md\"\n  if [ -n \"$GBS\" ] || [ -n \"$ABOOTSTRAP\" ]; then\n    printf '\\n## Custom Instructions\\n' >> \"$AD/BOOTSTRAP.md\"\n    [ -n \"$GBS\" ] && printf '%s\\n' \"$GBS\" >> \"$AD/BOOTSTRAP.md\"\n    [ -n \"$GBS\" ] && [ -n \"$ABOOTSTRAP\" ] && echo \"\" >> \"$AD/BOOTSTRAP.md\"\n    [ -n \"$ABOOTSTRAP\" ] && printf '%s\\n' \"$ABOOTSTRAP\" >> \"$AD/BOOTSTRAP.md\"\n  fi\n  { [ -n \"$GU\" ] && printf '%s\\n' \"$GU\" || echo \"- Name: (learn)\"\n    [ -n \"$AUSER\" ] && printf '\\n%s\\n' \"$AUSER\"\n  } > \"$AD/USER.md\"\n  ln -sf \"$H/clawd/TOOLS.md\" \"$AD/TOOLS.md\" 2>/dev/null || true\n  ln -sf \"$H/clawd/HEARTBEAT.md\" \"$AD/HEARTBEAT.md\" 2>/dev/null || true\n  [ -n \"$CGI\" ] && ln -sf \"$H/clawd/shared\" \"$AD/shared\" 2>/dev/null || true\ndone\nif [ -n \"$CGI\" ]; then\n  mkdir -p \"$H/clawd/shared\"\n  for sf in KNOWLEDGE.md DECISIONS.md CONTEXT.md; do\n    [ ! -f \"$H/clawd/shared/$sf\" ] && cat > \"$H/clawd/shared/$sf\" <<SHMD\n# ${sf%.md}\n*Maintained by the Judge. Updated after council deliberations.*\nSHMD\n  done\n  chown -R $USERNAME:$USERNAME \"$H/clawd/shared\"\nfi\n# Create global TOOLS.md if provided\nif [ -n \"$GTO\" ]; then\n  printf '%s\\n' \"$GTO\" > \"$H/clawd/TOOLS.md\"\n  chown $USERNAME:$USERNAME \"$H/clawd/TOOLS.md\"\nfi\nmkdir -p $H/.openclaw/agents/main/agent\ncat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ\n{\"version\":1,\"profiles\":{\"anthropic:default\":{\"type\":\"api_key\",\"provider\":\"anthropic\",\"token\":\"${AK}\"}$([ -n \"$OA\" ] && echo \",\\\"openai-codex:default\\\":{\\\"type\\\":\\\"oauth\\\",\\\"provider\\\":\\\"openai-codex\\\",\\\"access\\\":\\\"${OA}\\\",\\\"refresh\\\":\\\"${OR}\\\",\\\"expires\\\":${OE:-0},\\\"accountId\\\":\\\"${OI}\\\"}\")$([ -n \"$GK\" ] && echo \",\\\"google:default\\\":{\\\"type\\\":\\\"api_key\\\",\\\"provider\\\":\\\"google\\\",\\\"token\\\":\\\"${GK}\\\"}\")}}\nAPJ\nfor i in $(seq 1 $AC); do\n  mkdir -p \"$H/.openclaw/agents/agent${i}/agent\"\n  ln -sf \"$H/.openclaw/agents/main/agent/auth-profiles.json\" \"$H/.openclaw/agents/agent${i}/agent/auth-profiles.json\"\ndone\ncat > /etc/systemd/system/clawdbot.service <<SVC\n[Unit]\nDescription=Clawdbot Gateway\nAfter=network.target desktop.service openclaw-restore.service\nWants=desktop.service openclaw-restore.service\n[Service]\nType=simple\nUser=$USERNAME\nWorkingDirectory=$H\nExecStartPre=/bin/sleep 2\nExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789\nExecStop=+/usr/local/bin/sync-openclaw-state.sh\nTimeoutStopSec=30\nRestart=always\nRestartSec=3\nEnvironment=NODE_ENV=production\nEnvironment=NODE_OPTIONS=--experimental-sqlite\nEnvironment=PATH=/usr/bin:/usr/local/bin\nEnvironment=DISPLAY=:10\nEnvironment=ANTHROPIC_API_KEY=${AK}\n$([ -n \"$GK\" ] && echo \"Environment=GOOGLE_API_KEY=${GK}\")\n$([ -n \"$GK\" ] && echo \"Environment=GEMINI_API_KEY=${GK}\")\n$([ -n \"$BK\" ] && echo \"Environment=BRAVE_API_KEY=${BK}\")\n[Install]\nWantedBy=multi-user.target\nSVC\nsystemctl daemon-reload\nif [ -n \"$BG_COLOR\" ] && [ ${#BG_COLOR} -eq 6 ]; then\n  R=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:0:2}))/255\" | bc))\n  G=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:2:2}))/255\" | bc))\n  B=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:4:2}))/255\" | bc))\n  DXML=\"$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml\"\n  mkdir -p \"$(dirname \"$DXML\")\"\n  cat > \"$DXML\" <<BGXML\n<?xml version=\"1.0\"?><channel name=\"xfce4-desktop\" version=\"1.0\"><property name=\"backdrop\" type=\"empty\"><property name=\"screen0\" type=\"empty\"><property name=\"monitorscreen\" type=\"empty\"><property name=\"workspace0\" type=\"empty\"><property name=\"color-style\" type=\"int\" value=\"0\"/><property name=\"image-style\" type=\"int\" value=\"0\"/><property name=\"rgba1\" type=\"array\"><value type=\"double\" value=\"${R}\"/><value type=\"double\" value=\"${G}\"/><value type=\"double\" value=\"${B}\"/><value type=\"double\" value=\"1\"/></property></property></property></property></property></channel>\nBGXML\n  # Reload desktop config if xfdesktop is running (for config rebuilds while desktop is active)\n  if pgrep -x xfdesktop >/dev/null 2>&1; then\n    DISPLAY=:10 su - $USERNAME -c \"xfdesktop --reload\" 2>/dev/null || true\n  fi\nfi\nchown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd\nchmod 700 $H/.openclaw\nchmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json 2>/dev/null || true\n"
-- path: /etc/systemd/system/post-boot-check.service
-  permissions: '0644'
-  content: '[Unit]
-
-    Description=Post-boot health check and config upgrade
-
-    After=clawdbot.service network-online.target
-
-    Wants=network-online.target
-
-    [Service]
-
-    Type=oneshot
-
-    ExecStart=/usr/local/bin/post-boot-check.sh
-
-    RemainAfterExit=yes
-
-    [Install]
-
-    WantedBy=multi-user.target
-
-    '
-- path: /usr/local/bin/post-boot-check.sh
-  permissions: '0755'
-  content: "#!/bin/bash\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\nAC=${AGENT_COUNT:-1}\nH=\"/home/$USERNAME\"\nTG=\"/usr/local/bin/tg-notify.sh\"\nLOG=\"/var/log/post-boot-check.log\"\n[ ! -f /var/lib/init-status/needs-post-boot-check ] && {\n  exit 0\n}\nsleep 15\nif [ ! -f \"$H/.openclaw/openclaw.full.json\" ]; then\n  rm -f /var/lib/init-status/needs-post-boot-check\n  exit 0\nfi\ncp \"$H/.openclaw/openclaw.full.json\" \"$H/.openclaw/openclaw.json\"\nchown $USERNAME:$USERNAME \"$H/.openclaw/openclaw.json\"\nchmod 600 \"$H/.openclaw/openclaw.json\"\nsystemctl restart clawdbot\nHEALTHY=false\nfor i in $(seq 1 12); do\n  sleep 5\n  if ! systemctl is-active --quiet clawdbot; then\n    continue\n  fi\n  if curl -sf http://127.0.0.1:18789/ >> \"$LOG\" 2>&1; then\n    HEALTHY=true\n    break\n  fi\ndone\nif [ \"$HEALTHY\" = \"true\" ]; then\n  rm -f /var/lib/init-status/needs-post-boot-check\n  rm -f /var/lib/init-status/safe-mode\n  for si in $(seq 1 $AC); do rm -f \"$H/clawd/agents/agent${si}/SAFE_MODE.md\"; done\n  touch /var/lib/init-status/setup-complete\n  echo '11' > /var/lib/init-status/stage\n  echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready\" >> /var/log/init-stages.log\n  touch /var/lib/init-status/boot-complete\n  HN=\"${HABITAT_NAME:-default}\"\n  HDOM=\"${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}\"\n  $TG \"[OK] ${HN}${HDOM} fully operational. Full config applied. All systems ready.\" || true\nelse\n  cp \"$H/.openclaw/openclaw.minimal.json\" \"$H/.openclaw/openclaw.json\"\n  chown $USERNAME:$USERNAME \"$H/.openclaw/openclaw.json\"\n  chmod 600 \"$H/.openclaw/openclaw.json\"\n  touch /var/lib/init-status/safe-mode\n  for si in $(seq 1 $AC); do\n  cat > \"$H/clawd/agents/agent${si}/SAFE_MODE.md\" <<'SAFEMD'\n# SAFE MODE - Full config failed health checks\nThe full openclaw config failed to start. You are running minimal config.\nTry: sudo /usr/local/bin/try-full-config.sh\nCheck: journalctl -u clawdbot -n 100\nIf that fails, check openclaw.full.json for errors.\nSAFEMD\n  chown $USERNAME:$USERNAME \"$H/clawd/agents/agent${si}/SAFE_MODE.md\"\ndone\n  systemctl restart clawdbot\n  sleep 5\n  rm -f /var/lib/init-status/needs-post-boot-check\n  $TG \"[SAFE MODE] Running minimal config. Full config failed health checks. Bot is attempting repairs.\" || true\nfi\n"
-- path: /usr/local/bin/try-full-config.sh
-  permissions: '0755'
-  content: "#!/bin/bash\nset -a; source /etc/droplet.env; set +a\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\nAC=${AGENT_COUNT:-1}\nH=\"/home/$USERNAME\"\necho \"Attempting full config at $(date)\"\ncp \"$H/.openclaw/openclaw.full.json\" \"$H/.openclaw/openclaw.json\"\nchown $USERNAME:$USERNAME \"$H/.openclaw/openclaw.json\"\nchmod 600 \"$H/.openclaw/openclaw.json\"\nsystemctl restart clawdbot\nHEALTHY=false\nfor i in $(seq 1 12); do\n  sleep 5\n  if systemctl is-active --quiet clawdbot; then\n    if curl -sf http://127.0.0.1:18789/ >/dev/null 2>&1; then\n      HEALTHY=true\n      break\n    fi\n  fi\ndone\nif [ \"$HEALTHY\" = \"true\" ]; then\n  for si in $(seq 1 $AC); do rm -f \"$H/clawd/agents/agent${si}/SAFE_MODE.md\"; done\n  rm -f /var/lib/init-status/safe-mode\n  echo \"SUCCESS: Full config now active\"\n  exit 0\nelse\n  cp \"$H/.openclaw/openclaw.minimal.json\" \"$H/.openclaw/openclaw.json\"\n  chown $USERNAME:$USERNAME \"$H/.openclaw/openclaw.json\"\n  chmod 600 \"$H/.openclaw/openclaw.json\"\n  systemctl restart clawdbot\n  echo \"FAILED: Restored minimal config. Check logs: journalctl -u clawdbot\"\n  exit 1\nfi\n"
-- path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
-  defer: true
-  content: '<?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="0.17647"/><value type="double" value="0.21569"/><value type="double" value="0.28235"/><value type="double" value="1"/></property></property></property></property></property></channel>
-
-    '
-- path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
-  defer: true
-  content: '<?xml version="1.0"?><channel name="xsettings" version="1.0"><property name="Net" type="empty"><property name="ThemeName" type="string" value="Yaru-blue-dark"/><property name="IconThemeName" type="string" value="Yaru-blue-dark"/></property></channel>
-
-    '
-- path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
-  defer: true
-  content: '<?xml version="1.0"?><channel name="xfwm4" version="1.0"><property name="general" type="empty"><property name="theme" type="string" value="Yaru-blue-dark"/></property></channel>
-
-    '
-- path: /home/bot/clawd/TOOLS.md
-  defer: true
-  content: 'Cloud VM (Ubuntu), display :10 shared with user via RDP.
-
-
-    DO blocks SMTP. Use gmail-api.py for all email:
-
-    - Send: gmail-api.py send "to@email" "Subject" "Body" [--html] [--cc addr] [-a file]
-
-    - List: gmail-api.py list [-n count] [-q "search query"]
-
-    - Read: gmail-api.py read <message_id>
-
-    Requires: google-auth, google-api-python-client (installed via pip)
-
-    Credentials: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN from /etc/droplet.env
-
-
-    Chrome remote debugging on port 18800.
-
-
-    khal for viewing, vdirsyncer for CalDAV sync.
-
-    - View: khal list [today] [2days]
-
-    - Sync: vdirsyncer sync
-
-
-    Chrome, Thunderbird, goplaces, ffmpeg, LibreOffice, rclone, pandoc, khal/vdirsyncer, yt-dlp, ImageMagick, scrot/flameshot, qpdf, jq, gh, vlc, htop/ncdu
-
-
-    weather, github, video-frames, goplaces, youtube-transcript, yt-dlp-downloader-skill
-
-    '
-- path: /home/bot/clawd/HEARTBEAT.md
-  defer: true
-  permissions: '0644'
-  content: '# Keep this file empty (or with only comments) to skip heartbeat API calls.
-
-    # Add tasks below when you want the agent to check something periodically.
-
-
-    # --- Hatchery checks ---
-
-    - If SAFE_MODE.md exists, follow its instructions immediately (backup check in case boot failed).
-
-    '
-- path: /etc/systemd/system/openclaw-restore.service
-  permissions: '0644'
-  content: '[Unit]
-
-    Description=Restore openclaw state from Dropbox
-
-    After=network-online.target
-
-    Wants=network-online.target
-
-    Before=clawdbot.service
-
-    [Service]
-
-    Type=oneshot
-
-    ExecStart=/usr/local/bin/restore-openclaw-state.sh
-
-    TimeoutStartSec=60
-
-    RemainAfterExit=yes
-
-    [Install]
-
-    WantedBy=multi-user.target
-
-    '
-- path: /etc/systemd/system/clawdbot-sync.service
-  permissions: '0644'
-  content: '[Unit]
-
-    Description=Sync Clawdbot memory to Dropbox
-
-    [Service]
-
-    Type=oneshot
-
-    ExecStart=/usr/local/bin/sync-openclaw-state.sh
-
-    User=root
-
-    '
-- path: /etc/systemd/system/clawdbot-sync.timer
-  permissions: '0644'
-  content: '[Unit]
-
-    Description=Periodic Clawdbot memory sync
-
-    [Timer]
-
-    OnBootSec=2min
-
-    OnUnitActiveSec=2min
-
-    [Install]
-
-    WantedBy=timers.target
-
-    '
-- path: /usr/local/bin/mount-dropbox.sh
-  permissions: '0755'
-  content: '#!/bin/bash
-
-    mkdir -p "$HOME/Dropbox"; fusermount -uz "$HOME/Dropbox" 2>/dev/null || true
-
-    rclone mount dropbox: "$HOME/Dropbox" --vfs-cache-mode writes --daemon
-
-    sleep 2 && thunar "$HOME/Dropbox"
-
-    '
-- path: /usr/local/lib/rclone-safe.sh
-  permissions: '0644'
-  content: "#!/bin/bash\n# rclone-safe.sh -- Path validation for safe rclone operations\n# Prevents empty paths, root paths, and unexpected destinations.\nrclone_is_remote_path() { case \"$1\" in [A-Za-z0-9_-]*:*) return 0;; *) return 1;; esac; }\n_validate_one_path() {\n  local p=\"$1\" role=\"$2\" p_trim\n  [ -z \"${p}\" ] && { echo \"ERROR: refusing rclone: ${role} path is empty\" >&2; return 1; }\n  [ -z \"${p//[[:space:]]/}\" ] && { echo \"ERROR: refusing rclone: ${role} path is empty\" >&2; return 1; }\n  p_trim=\"${p%/}\"; [ -z \"$p_trim\" ] && p_trim=\"/\"\n  [ \"$p_trim\" = \"/\" ] || [ \"$p_trim\" = \"/*\" ] && { echo \"ERROR: refusing rclone: ${role} path is '/'\" >&2; return 1; }\n  if rclone_is_remote_path \"$p\"; then\n    case \"$p\" in *:|*:/*|*:/\\*) echo \"ERROR: refusing rclone: ${role} remote path unsafe: '$p'\" >&2; return 1;; esac\n    echo \"$p\" | grep -Eq '^dropbox:clawdbot-memory/[^/]+(/.*)?$' || { echo \"ERROR: refusing rclone: ${role} remote path unexpected: '$p'\" >&2; return 1; }\n  else\n    echo \"$p\" | grep -Eq '^/home/[^/]+/(clawd|\\.openclaw)(/.*)?$' || { echo \"ERROR: refusing rclone: ${role} local path unexpected: '$p'\" >&2; return 1; }\n  fi\n  return 0\n}\nvalidate_rclone_path() { _validate_one_path \"$1\" source || return 1; _validate_one_path \"$2\" destination || return 1; }\nsafe_rclone_copy() { local src=\"$1\" dst=\"$2\"; shift 2 || true; validate_rclone_path \"$src\" \"$dst\" || return 2; command rclone copy \"$src\" \"$dst\" \"$@\"; }\nsafe_rclone_su_copy() {\n  local user=\"$1\" src=\"$2\" dst=\"$3\"; shift 3 || true\n  [ -z \"${user}\" ] && { echo \"ERROR: refusing rclone: USERNAME is empty\" >&2; return 2; }\n  validate_rclone_path \"$src\" \"$dst\" || return 2\n  local cmd arg; cmd=\"rclone copy $(printf %q \"$src\") $(printf %q \"$dst\")\"; for arg in \"$@\"; do cmd+=\" $(printf %q \"$arg\")\"; done\n  su - \"$user\" -c \"$cmd\"\n}\n"
-- path: /usr/local/bin/restore-openclaw-state.sh
-  permissions: '0755'
-  content: "#!/bin/bash\nLOG=\"/var/log/openclaw-restore.log\"\nexec > >(tee -a \"$LOG\") 2>&1\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\n# Source validation library\n[ -f /usr/local/lib/rclone-safe.sh ] && source /usr/local/lib/rclone-safe.sh\nif ! type safe_rclone_su_copy &>/dev/null; then\n  safe_rclone_su_copy() { local u=\"$1\" s=\"$2\" d=\"$3\"; shift 3; [ -z \"$s\" ]||[ -z \"$d\" ]||[ \"${s%/}\" = \"/\" ]||[ \"${d%/}\" = \"/\" ]&&{ echo \"ERROR: invalid path\" >&2; return 2; }; su - \"$u\" -c \"rclone copy $(printf %q \"$s\") $(printf %q \"$d\") $*\"; }\nfi\nTG=\"/usr/local/bin/tg-notify.sh\"\nDBT=$(d \"$DROPBOX_TOKEN_B64\")\nif [ -z \"$DBT\" ]; then\n  echo \"SKIP: no Dropbox token\"\n  $TG \"[WARN] Memory restore skipped - no Dropbox token provided. Bot will start with empty memory.\" || true\n  exit 0\nfi\n[ -z \"$USERNAME\" ] && { echo \"ERROR: USERNAME not set\" >&2; exit 1; }\nHN=\"${HABITAT_NAME:-default}\"\n[ -z \"$HN\" ] || [ \"$HN\" = \"/\" ] && { echo \"ERROR: invalid HABITAT_NAME\" >&2; exit 1; }\nH=\"/home/$USERNAME\"; R=\"dropbox:clawdbot-memory/${HN}\"\nAC=${AGENT_COUNT:-1}\nFAIL=0\nWORKSPACE_FILES=\"AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md\"\nSHARED_FILES=\"TOOLS.md HEARTBEAT.md\"\necho \"Restoring from $R\"\n# Restore shared files\nfor f in MEMORY.md USER.md $SHARED_FILES; do\n  echo \"  shared: $f\"\n  safe_rclone_su_copy $USERNAME \"$R/$f\" \"$H/clawd/\" -v || echo \"  (not found)\"\ndone\n# Restore shared directory\necho \"  shared: shared/\"\nsafe_rclone_su_copy $USERNAME \"$R/shared/\" \"$H/clawd/shared/\" -v || echo \"  (not found)\"\n# Restore per-agent workspace files\nfor i in $(seq 1 $AC); do\n  a=\"agent${i}\"; AD=\"$H/clawd/agents/$a\"; [ -d \"$AD\" ] || continue\n  for f in $WORKSPACE_FILES; do\n    [ -L \"$AD/$f\" ] && continue\n    echo \"  workspace: $a/$f\"\n    safe_rclone_su_copy $USERNAME \"$R/agents/${a}/$f\" \"$AD/\" -v || true\n  done\ndone\n# Restore per-agent memory\nfor i in $(seq 1 $AC); do\n  a=\"agent${i}\"; AD=\"$H/clawd/agents/$a\"; [ -d \"$AD\" ] || continue\n  echo \"  agent memory: $a\"\n  safe_rclone_su_copy $USERNAME \"$R/agents/${a}/memory/\" \"$AD/memory/\" -v || { echo \"  WARN: $a memory failed\"; FAIL=$((FAIL+1)); }\ndone\n# Restore transcripts\nfor i in $(seq 1 $AC); do\n  a=\"agent${i}\"; TD=\"$H/.openclaw/agents/$a/sessions\"; mkdir -p \"$TD\"\n  echo \"  sessions: $a\"\n  safe_rclone_su_copy $USERNAME \"$R/agents/${a}/sessions/\" \"$TD/\" --include '*.jsonl' -v || { echo \"  WARN: $a sessions failed\"; FAIL=$((FAIL+1)); }\ndone\nchown -R $USERNAME:$USERNAME $H/clawd $H/.openclaw\nTC=$(find $H/.openclaw -name '*.jsonl' 2>/dev/null | wc -l)\nWC=$(find $H/clawd/agents -maxdepth 2 -name '*.md' ! -type l 2>/dev/null | wc -l)\necho \"Restored $TC transcripts, $WC workspace files ($FAIL warnings)\"\nif [ \"$TC\" -eq 0 ] && [ \"$FAIL\" -gt 0 ]; then\n  echo \"RETRY: No transcripts restored, retrying in 5s...\"\n  sleep 5\n  for i in $(seq 1 $AC); do\n    a=\"agent${i}\"; TD=\"$H/.openclaw/agents/$a/sessions\"; mkdir -p \"$TD\"\n    safe_rclone_su_copy $USERNAME \"$R/agents/${a}/sessions/\" \"$TD/\" --include '*.jsonl' -v || true\n  done\n  chown -R $USERNAME:$USERNAME $H/.openclaw\n  TC2=$(find $H/.openclaw -name '*.jsonl' 2>/dev/null | wc -l)\n  echo \"After retry: $TC2 transcript files\"\n  TC=$TC2\nfi\nif [ \"$TC\" -eq 0 ] && [ \"$WC\" -eq 0 ]; then\n  echo \"WARNING: Nothing restored - fresh habitat or Dropbox issue\"\n  $TG \"[WARN] Memory restore got 0 files. Dropbox token may be invalid or this is a fresh habitat.\" || true\nfi\n"
-- path: /usr/local/bin/sync-openclaw-state.sh
-  permissions: '0755'
-  content: "#!/bin/bash\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\n# Source validation library\n[ -f /usr/local/lib/rclone-safe.sh ] && source /usr/local/lib/rclone-safe.sh\nif ! type safe_rclone_su_copy &>/dev/null; then\n  safe_rclone_su_copy() { local u=\"$1\" s=\"$2\" d=\"$3\"; shift 3; [ -z \"$s\" ]||[ -z \"$d\" ]||[ \"${s%/}\" = \"/\" ]||[ \"${d%/}\" = \"/\" ]&&{ echo \"ERROR: invalid path\" >&2; return 2; }; su - \"$u\" -c \"rclone copy $(printf %q \"$s\") $(printf %q \"$d\") $*\"; }\nfi\nDBT=$(d \"$DROPBOX_TOKEN_B64\"); [ -z \"$DBT\" ] && exit 0\n[ -z \"$USERNAME\" ] && { echo \"ERROR: USERNAME not set\" >&2; exit 1; }\nHN=\"${HABITAT_NAME:-default}\"\n[ -z \"$HN\" ] || [ \"$HN\" = \"/\" ] && { echo \"ERROR: invalid HABITAT_NAME\" >&2; exit 1; }\nH=\"/home/$USERNAME\"; R=\"dropbox:clawdbot-memory/${HN}\"\nAC=${AGENT_COUNT:-1}\nWORKSPACE_FILES=\"AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md\"\nSHARED_FILES=\"TOOLS.md HEARTBEAT.md\"\n# Sync shared files (skip symlinks)\nfor f in MEMORY.md USER.md $SHARED_FILES; do [ -L \"$H/clawd/$f\" ] && continue; [ -f \"$H/clawd/$f\" ] && safe_rclone_su_copy $USERNAME \"$H/clawd/$f\" \"$R/\" 2>/dev/null || true; done\n# Sync shared directory\n[ -d \"$H/clawd/shared\" ] && [ ! -L \"$H/clawd/shared\" ] && safe_rclone_su_copy $USERNAME \"$H/clawd/shared/\" \"$R/shared/\" 2>/dev/null || true\n# Sync per-agent workspace files\nfor i in $(seq 1 $AC); do\n  a=\"agent${i}\"; AD=\"$H/clawd/agents/$a\"; [ -d \"$AD\" ] || continue\n  for f in $WORKSPACE_FILES; do [ -L \"$AD/$f\" ] && continue; [ -f \"$AD/$f\" ] && safe_rclone_su_copy $USERNAME \"$AD/$f\" \"$R/agents/${a}/\" 2>/dev/null || true; done\ndone\n# Sync per-agent memory\nfor i in $(seq 1 $AC); do\n  a=\"agent${i}\"; AD=\"$H/clawd/agents/$a\"; [ -d \"$AD\" ] || continue\n  safe_rclone_su_copy $USERNAME \"$AD/memory\" \"$R/agents/${a}/memory\" 2>/dev/null || true\ndone\n# Sync transcripts\nfor i in $(seq 1 $AC); do\n  a=\"agent${i}\"; TD=\"$H/.openclaw/agents/$a/sessions\"\n  [ -d \"$TD\" ] && safe_rclone_su_copy $USERNAME \"$TD/\" \"$R/agents/${a}/sessions/\" --include '*.jsonl' 2>/dev/null || true\ndone\n"
-- path: /usr/local/bin/schedule-destruct.sh
-  permissions: '0755'
-  content: '#!/bin/bash
-
-    set -a; source /etc/droplet.env; set +a
-
-    d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-
-    [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
-
-    [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-
-    M="$DESTRUCT_MINS"
-
-    [ -n "$M" ] && [ "$M" != "0" ] && [ "$M" -gt 0 ] 2>/dev/null && systemd-run --unit=self-destruct --on-active=${M}m /usr/local/bin/kill-droplet.sh
-
-    '
-- path: /usr/local/bin/kill-droplet.sh
-  permissions: '0755'
-  content: '#!/bin/bash
-
-    set -a; source /etc/droplet.env; set +a
-
-    d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-
-    [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-
-    /usr/local/bin/sync-openclaw-state.sh
-
-    curl -X DELETE -H "Authorization: Bearer $(d "$DO_TOKEN_B64")" "https://api.digitalocean.com/v2/droplets?tag_name=${HABITAT_NAME}"
-
-    '
-- path: /usr/local/bin/rename-bots.sh
-  permissions: '0755'
-  content: "#!/bin/bash\n# Platform-aware bot renaming script.\n# Renames Telegram bots via API when platform includes telegram.\n# Discord bot names are set in the Developer Portal (not via API).\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n[ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\n# PLATFORM must be explicitly set - no silent defaults\nPLATFORM=\"${PLATFORM:-$(d \"$PLATFORM_B64\")}\"\nAC=${AGENT_COUNT:-1}\nHN=\"${HABITAT_NAME:-}\"\nrename_telegram() {\n  for i in $(seq 1 $AC); do\n    NV=\"AGENT${i}_NAME\"; NAME=\"${!NV}\"\n    TV=\"AGENT${i}_BOT_TOKEN\"; TOK=\"${!TV}\"\n    DN=\"${NAME}Bot\"; [ -n \"$HN\" ] && DN=\"${NAME}Bot (${HN})\"\n    if [ -n \"$TOK\" ]; then\n      curl -s \"https://api.telegram.org/bot${TOK}/setMyName\" -d \"name=${DN}\" > /dev/null\n      echo \"[rename-bots] Telegram: renamed agent${i} to '${DN}'\"\n    else\n      echo \"[rename-bots] Telegram: skipping agent${i} (no bot token)\"\n    fi\n  done\n}\nlog_discord_skip() {\n  echo \"[rename-bots] Discord: bot display names are configured in the Discord Developer Portal, not via API. Skipping.\"\n}\ncase \"$PLATFORM\" in\n  telegram)\n    rename_telegram\n    ;;\n  discord)\n    log_discord_skip\n    ;;\n  both)\n    rename_telegram\n    log_discord_skip\n    ;;\n  *)\n    echo \"[rename-bots] ERROR: Invalid PLATFORM='${PLATFORM}'\" >&2\n    echo \"  Valid options: telegram, discord, both\" >&2\n    echo \"  Fix: Set PLATFORM in habitat config or /etc/droplet.env\" >&2\n    exit 1\n    ;;\nesac\nexit 0\n"
+  - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
+    defer: true
+    content: |
+      <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="0.17647"/><value type="double" value="0.21569"/><value type="double" value="0.28235"/><value type="double" value="1"/></property></property></property></property></property></channel>
+  - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
+    defer: true
+    content: |
+      <?xml version="1.0"?><channel name="xsettings" version="1.0"><property name="Net" type="empty"><property name="ThemeName" type="string" value="Yaru-blue-dark"/><property name="IconThemeName" type="string" value="Yaru-blue-dark"/></property></channel>
+  - path: /home/bot/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+    defer: true
+    content: |
+      <?xml version="1.0"?><channel name="xfwm4" version="1.0"><property name="general" type="empty"><property name="theme" type="string" value="Yaru-blue-dark"/></property></channel>
+  - path: /home/bot/clawd/TOOLS.md
+    defer: true
+    content: |
+      Cloud VM (Ubuntu), display :10 shared with user via RDP.
+
+      DO blocks SMTP. Use gmail-api.py for all email:
+      - Send: gmail-api.py send "to@email" "Subject" "Body" [--html] [--cc addr] [-a file]
+      - List: gmail-api.py list [-n count] [-q "search query"]
+      - Read: gmail-api.py read <message_id>
+      Requires: google-auth, google-api-python-client (installed via pip)
+      Credentials: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN from /etc/droplet.env
+
+      Chrome remote debugging on port 18800.
+
+      khal for viewing, vdirsyncer for CalDAV sync.
+      - View: khal list [today] [2days]
+      - Sync: vdirsyncer sync
+
+      Chrome, Thunderbird, goplaces, ffmpeg, LibreOffice, rclone, pandoc, khal/vdirsyncer, yt-dlp, ImageMagick, scrot/flameshot, qpdf, jq, gh, vlc, htop/ncdu
+
+      weather, github, video-frames, goplaces, youtube-transcript, yt-dlp-downloader-skill
+
+  - path: /home/bot/clawd/HEARTBEAT.md
+    defer: true
+    permissions: "0644"
+    content: |
+      # Keep this file empty (or with only comments) to skip heartbeat API calls.
+      # Add tasks below when you want the agent to check something periodically.
+      
+      # --- Hatchery checks ---
+      - If SAFE_MODE.md exists, follow its instructions immediately (backup check in case boot failed).
+
+  - path: /etc/systemd/system/openclaw-restore.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Restore openclaw state from Dropbox
+      After=network-online.target
+      Wants=network-online.target
+      Before=clawdbot.service
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/restore-openclaw-state.sh
+      TimeoutStartSec=60
+      RemainAfterExit=yes
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/clawdbot-sync.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Sync Clawdbot memory to Dropbox
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/sync-openclaw-state.sh
+      User=root
+  - path: /etc/systemd/system/clawdbot-sync.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Periodic Clawdbot memory sync
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=2min
+      [Install]
+      WantedBy=timers.target
+  - path: /usr/local/bin/mount-dropbox.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      mkdir -p "$HOME/Dropbox"; fusermount -uz "$HOME/Dropbox" 2>/dev/null || true
+      rclone mount dropbox: "$HOME/Dropbox" --vfs-cache-mode writes --daemon
+      sleep 2 && thunar "$HOME/Dropbox"
+  - path: /usr/local/lib/rclone-safe.sh
+    permissions: "0644"
+    content: |
+      #!/bin/bash
+      # rclone-safe.sh -- Path validation for safe rclone operations
+      # Prevents empty paths, root paths, and unexpected destinations.
+      rclone_is_remote_path() { case "$1" in [A-Za-z0-9_-]*:*) return 0;; *) return 1;; esac; }
+      _validate_one_path() {
+        local p="$1" role="$2" p_trim
+        [ -z "${p}" ] && { echo "ERROR: refusing rclone: ${role} path is empty" >&2; return 1; }
+        [ -z "${p//[[:space:]]/}" ] && { echo "ERROR: refusing rclone: ${role} path is empty" >&2; return 1; }
+        p_trim="${p%/}"; [ -z "$p_trim" ] && p_trim="/"
+        [ "$p_trim" = "/" ] || [ "$p_trim" = "/*" ] && { echo "ERROR: refusing rclone: ${role} path is '/'" >&2; return 1; }
+        if rclone_is_remote_path "$p"; then
+          case "$p" in *:|*:/*|*:/\*) echo "ERROR: refusing rclone: ${role} remote path unsafe: '$p'" >&2; return 1;; esac
+          echo "$p" | grep -Eq '^dropbox:clawdbot-memory/[^/]+(/.*)?$' || { echo "ERROR: refusing rclone: ${role} remote path unexpected: '$p'" >&2; return 1; }
+        else
+          echo "$p" | grep -Eq '^/home/[^/]+/(clawd|\.openclaw)(/.*)?$' || { echo "ERROR: refusing rclone: ${role} local path unexpected: '$p'" >&2; return 1; }
+        fi
+        return 0
+      }
+      validate_rclone_path() { _validate_one_path "$1" source || return 1; _validate_one_path "$2" destination || return 1; }
+      safe_rclone_copy() { local src="$1" dst="$2"; shift 2 || true; validate_rclone_path "$src" "$dst" || return 2; command rclone copy "$src" "$dst" "$@"; }
+      safe_rclone_su_copy() {
+        local user="$1" src="$2" dst="$3"; shift 3 || true
+        [ -z "${user}" ] && { echo "ERROR: refusing rclone: USERNAME is empty" >&2; return 2; }
+        validate_rclone_path "$src" "$dst" || return 2
+        local cmd arg; cmd="rclone copy $(printf %q "$src") $(printf %q "$dst")"; for arg in "$@"; do cmd+=" $(printf %q "$arg")"; done
+        su - "$user" -c "$cmd"
+      }
+  - path: /usr/local/bin/restore-openclaw-state.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      LOG="/var/log/openclaw-restore.log"
+      exec > >(tee -a "$LOG") 2>&1
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      # Source validation library
+      [ -f /usr/local/lib/rclone-safe.sh ] && source /usr/local/lib/rclone-safe.sh
+      if ! type safe_rclone_su_copy &>/dev/null; then
+        safe_rclone_su_copy() { local u="$1" s="$2" d="$3"; shift 3; [ -z "$s" ]||[ -z "$d" ]||[ "${s%/}" = "/" ]||[ "${d%/}" = "/" ]&&{ echo "ERROR: invalid path" >&2; return 2; }; su - "$u" -c "rclone copy $(printf %q "$s") $(printf %q "$d") $*"; }
+      fi
+      TG="/usr/local/bin/tg-notify.sh"
+      DBT=$(d "$DROPBOX_TOKEN_B64")
+      if [ -z "$DBT" ]; then
+        echo "SKIP: no Dropbox token"
+        $TG "[WARN] Memory restore skipped - no Dropbox token provided. Bot will start with empty memory." || true
+        exit 0
+      fi
+      [ -z "$USERNAME" ] && { echo "ERROR: USERNAME not set" >&2; exit 1; }
+      HN="${HABITAT_NAME:-default}"
+      [ -z "$HN" ] || [ "$HN" = "/" ] && { echo "ERROR: invalid HABITAT_NAME" >&2; exit 1; }
+      H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
+      AC=${AGENT_COUNT:-1}
+      FAIL=0
+      WORKSPACE_FILES="AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md"
+      SHARED_FILES="TOOLS.md HEARTBEAT.md"
+      echo "Restoring from $R"
+      # Restore shared files
+      for f in MEMORY.md USER.md $SHARED_FILES; do
+        echo "  shared: $f"
+        safe_rclone_su_copy $USERNAME "$R/$f" "$H/clawd/" -v || echo "  (not found)"
+      done
+      # Restore shared directory
+      echo "  shared: shared/"
+      safe_rclone_su_copy $USERNAME "$R/shared/" "$H/clawd/shared/" -v || echo "  (not found)"
+      # Restore per-agent workspace files
+      for i in $(seq 1 $AC); do
+        a="agent${i}"; AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+        for f in $WORKSPACE_FILES; do
+          [ -L "$AD/$f" ] && continue
+          echo "  workspace: $a/$f"
+          safe_rclone_su_copy $USERNAME "$R/agents/${a}/$f" "$AD/" -v || true
+        done
+      done
+      # Restore per-agent memory
+      for i in $(seq 1 $AC); do
+        a="agent${i}"; AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+        echo "  agent memory: $a"
+        safe_rclone_su_copy $USERNAME "$R/agents/${a}/memory/" "$AD/memory/" -v || { echo "  WARN: $a memory failed"; FAIL=$((FAIL+1)); }
+      done
+      # Restore transcripts
+      for i in $(seq 1 $AC); do
+        a="agent${i}"; TD="$H/.openclaw/agents/$a/sessions"; mkdir -p "$TD"
+        echo "  sessions: $a"
+        safe_rclone_su_copy $USERNAME "$R/agents/${a}/sessions/" "$TD/" --include '*.jsonl' -v || { echo "  WARN: $a sessions failed"; FAIL=$((FAIL+1)); }
+      done
+      chown -R $USERNAME:$USERNAME $H/clawd $H/.openclaw
+      TC=$(find $H/.openclaw -name '*.jsonl' 2>/dev/null | wc -l)
+      WC=$(find $H/clawd/agents -maxdepth 2 -name '*.md' ! -type l 2>/dev/null | wc -l)
+      echo "Restored $TC transcripts, $WC workspace files ($FAIL warnings)"
+      if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
+        echo "RETRY: No transcripts restored, retrying in 5s..."
+        sleep 5
+        for i in $(seq 1 $AC); do
+          a="agent${i}"; TD="$H/.openclaw/agents/$a/sessions"; mkdir -p "$TD"
+          safe_rclone_su_copy $USERNAME "$R/agents/${a}/sessions/" "$TD/" --include '*.jsonl' -v || true
+        done
+        chown -R $USERNAME:$USERNAME $H/.openclaw
+        TC2=$(find $H/.openclaw -name '*.jsonl' 2>/dev/null | wc -l)
+        echo "After retry: $TC2 transcript files"
+        TC=$TC2
+      fi
+      if [ "$TC" -eq 0 ] && [ "$WC" -eq 0 ]; then
+        echo "WARNING: Nothing restored - fresh habitat or Dropbox issue"
+        $TG "[WARN] Memory restore got 0 files. Dropbox token may be invalid or this is a fresh habitat." || true
+      fi
+  - path: /usr/local/bin/sync-openclaw-state.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      # Source validation library
+      [ -f /usr/local/lib/rclone-safe.sh ] && source /usr/local/lib/rclone-safe.sh
+      if ! type safe_rclone_su_copy &>/dev/null; then
+        safe_rclone_su_copy() { local u="$1" s="$2" d="$3"; shift 3; [ -z "$s" ]||[ -z "$d" ]||[ "${s%/}" = "/" ]||[ "${d%/}" = "/" ]&&{ echo "ERROR: invalid path" >&2; return 2; }; su - "$u" -c "rclone copy $(printf %q "$s") $(printf %q "$d") $*"; }
+      fi
+      DBT=$(d "$DROPBOX_TOKEN_B64"); [ -z "$DBT" ] && exit 0
+      [ -z "$USERNAME" ] && { echo "ERROR: USERNAME not set" >&2; exit 1; }
+      HN="${HABITAT_NAME:-default}"
+      [ -z "$HN" ] || [ "$HN" = "/" ] && { echo "ERROR: invalid HABITAT_NAME" >&2; exit 1; }
+      H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
+      AC=${AGENT_COUNT:-1}
+      WORKSPACE_FILES="AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md"
+      SHARED_FILES="TOOLS.md HEARTBEAT.md"
+      # Sync shared files (skip symlinks)
+      for f in MEMORY.md USER.md $SHARED_FILES; do [ -L "$H/clawd/$f" ] && continue; [ -f "$H/clawd/$f" ] && safe_rclone_su_copy $USERNAME "$H/clawd/$f" "$R/" 2>/dev/null || true; done
+      # Sync shared directory
+      [ -d "$H/clawd/shared" ] && [ ! -L "$H/clawd/shared" ] && safe_rclone_su_copy $USERNAME "$H/clawd/shared/" "$R/shared/" 2>/dev/null || true
+      # Sync per-agent workspace files
+      for i in $(seq 1 $AC); do
+        a="agent${i}"; AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+        for f in $WORKSPACE_FILES; do [ -L "$AD/$f" ] && continue; [ -f "$AD/$f" ] && safe_rclone_su_copy $USERNAME "$AD/$f" "$R/agents/${a}/" 2>/dev/null || true; done
+      done
+      # Sync per-agent memory
+      for i in $(seq 1 $AC); do
+        a="agent${i}"; AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+        safe_rclone_su_copy $USERNAME "$AD/memory" "$R/agents/${a}/memory" 2>/dev/null || true
+      done
+      # Sync transcripts
+      for i in $(seq 1 $AC); do
+        a="agent${i}"; TD="$H/.openclaw/agents/$a/sessions"
+        [ -d "$TD" ] && safe_rclone_su_copy $USERNAME "$TD/" "$R/agents/${a}/sessions/" --include '*.jsonl' 2>/dev/null || true
+      done
+  - path: /usr/local/bin/schedule-destruct.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      M="$DESTRUCT_MINS"
+      [ -n "$M" ] && [ "$M" != "0" ] && [ "$M" -gt 0 ] 2>/dev/null && systemd-run --unit=self-destruct --on-active=${M}m /usr/local/bin/kill-droplet.sh
+  - path: /usr/local/bin/kill-droplet.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      /usr/local/bin/sync-openclaw-state.sh
+      curl -X DELETE -H "Authorization: Bearer $(d "$DO_TOKEN_B64")" "https://api.digitalocean.com/v2/droplets?tag_name=${HABITAT_NAME}"
+  - path: /usr/local/bin/rename-bots.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Platform-aware bot renaming script.
+      # Renames Telegram bots via API when platform includes telegram.
+      # Discord bot names are set in the Developer Portal (not via API).
+      set -a; source /etc/droplet.env; set +a
+      d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+      [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
+      [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+      # PLATFORM must be explicitly set - no silent defaults
+      PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
+      AC=${AGENT_COUNT:-1}
+      HN="${HABITAT_NAME:-}"
+      rename_telegram() {
+        for i in $(seq 1 $AC); do
+          NV="AGENT${i}_NAME"; NAME="${!NV}"
+          TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"
+          DN="${NAME}Bot"; [ -n "$HN" ] && DN="${NAME}Bot (${HN})"
+          if [ -n "$TOK" ]; then
+            curl -s "https://api.telegram.org/bot${TOK}/setMyName" -d "name=${DN}" > /dev/null
+            echo "[rename-bots] Telegram: renamed agent${i} to '${DN}'"
+          else
+            echo "[rename-bots] Telegram: skipping agent${i} (no bot token)"
+          fi
+        done
+      }
+      log_discord_skip() {
+        echo "[rename-bots] Discord: bot display names are configured in the Discord Developer Portal, not via API. Skipping."
+      }
+      case "$PLATFORM" in
+        telegram)
+          rename_telegram
+          ;;
+        discord)
+          log_discord_skip
+          ;;
+        both)
+          rename_telegram
+          log_discord_skip
+          ;;
+        *)
+          echo "[rename-bots] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
+          echo "  Valid options: telegram, discord, both" >&2
+          echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
+          exit 1
+          ;;
+      esac
+      exit 0
 users:
-- default
+  - default
 runcmd:
-- - bash
-  - -lc
-  - |
-    # Generate API_SECRET for the droplet status API if missing
-    if [ ! -f /etc/api-server.env ]; then
-      API_SECRET=$(openssl rand -hex 32)
-      umask 077
-      printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env
-      chmod 600 /etc/api-server.env
-    fi
-    systemctl daemon-reload
-    systemctl enable --now api-server
-    ufw allow 8080/tcp
-- - bash
-  - -lc
-  - systemctl enable post-boot-check.service
-- - bash
-  - -lc
-  - /usr/local/bin/schedule-destruct.sh
-- - bash
-  - -lc
-  - /usr/local/sbin/phase1-critical.sh
-- - bash
-  - -lc
-  - /usr/local/bin/rename-bots.sh
+  - - bash
+    - -lc
+    - |
+      # Generate API_SECRET for the droplet status API if missing
+      if [ ! -f /etc/api-server.env ]; then
+        API_SECRET=$(openssl rand -hex 32)
+        umask 077
+        printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env
+        chmod 600 /etc/api-server.env
+      fi
+      systemctl daemon-reload
+      systemctl enable --now api-server
+      ufw allow 8080/tcp
+  - [ bash, -lc, "systemctl enable post-boot-check.service" ]
+  - [ bash, -lc, "/usr/local/bin/schedule-destruct.sh" ]
+  - [ bash, -lc, "/usr/local/sbin/phase1-critical.sh" ]
+  - [ bash, -lc, "/usr/local/bin/rename-bots.sh" ]
