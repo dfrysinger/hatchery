@@ -228,4 +228,9 @@ class H(http.server.BaseHTTPRequestHandler):
 
 class R(socketserver.TCPServer):allow_reuse_address=True
 if __name__=='__main__':
-  with R(("",PORT),H) as h:h.serve_forever()
+  # SECURITY: Bind to localhost only (127.0.0.1) to prevent external network access.
+  # This API exposes droplet config, logs, and control endpoints. External exposure
+  # would allow unauthorized config changes, log access, and service control.
+  # SSH tunneling or local gateway scripts are the only supported access methods.
+  print(f"[api-server] Starting on 127.0.0.1:{PORT} (localhost-only, secure)")
+  with R(("127.0.0.1",PORT),H) as h:h.serve_forever()
