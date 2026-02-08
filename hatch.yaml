@@ -557,7 +557,7 @@ write_files:
       apt-get update -qq >> "$LOG" 2>&1
       DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
         xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
-        xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme \
+        xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme yaru-theme-gtk \
         >> "$LOG" 2>&1
       $S 5 "developer-tools"
       DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
@@ -1083,7 +1083,8 @@ write_files:
       If this is your first message since the system started, announce yourself:
       "[ONLINE] Ready and operational."
 
-      If you see a file called SAFE_MODE.md in your workspace, read and follow it.
+      If you see a file called SAFE_MODE.md in your workspace, read and follow it immediately.
+      If you see a file called BOOTSTRAP.md in your workspace, execute it once and delete it when done.
 
       Check these services silently. Only alert user if something is broken after 2 fix attempts:
       - systemctl is-active clawdbot
@@ -1352,9 +1353,11 @@ write_files:
     defer: true
     permissions: "0644"
     content: |
-      - If BOOTSTRAP.md exists, execute it first and delete when done.
-      - If BOOT.md exists, execute it on every heartbeat (do NOT delete).
-      - If SAFE_MODE.md exists, follow its instructions to repair the system.
+      # Keep this file empty (or with only comments) to skip heartbeat API calls.
+      # Add tasks below when you want the agent to check something periodically.
+      
+      # --- Hatchery checks ---
+      - If SAFE_MODE.md exists, follow its instructions immediately (backup check in case boot failed).
 
   - path: /etc/systemd/system/openclaw-restore.service
     permissions: "0644"
@@ -1454,33 +1457,47 @@ write_files:
       H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
       AC=${AGENT_COUNT:-1}
       FAIL=0
+      WORKSPACE_FILES="AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md"
+      SHARED_FILES="TOOLS.md HEARTBEAT.md"
       echo "Restoring from $R"
-      for f in MEMORY.md USER.md; do
-        echo "  memory: $f"
-        safe_rclone_su_copy $USERNAME "$R/$f" "$H/clawd/" -v || { echo "  WARN: $f failed"; FAIL=$((FAIL+1)); }
+      # Restore shared files
+      for f in MEMORY.md USER.md $SHARED_FILES; do
+        echo "  shared: $f"
+        safe_rclone_su_copy $USERNAME "$R/$f" "$H/clawd/" -v || echo "  (not found)"
       done
+      # Restore shared directory
+      echo "  shared: shared/"
+      safe_rclone_su_copy $USERNAME "$R/shared/" "$H/clawd/shared/" -v || echo "  (not found)"
+      # Restore per-agent workspace files
       for i in $(seq 1 $AC); do
-        a="agent${i}"
-        AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+        a="agent${i}"; AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+        for f in $WORKSPACE_FILES; do
+          [ -L "$AD/$f" ] && continue
+          echo "  workspace: $a/$f"
+          safe_rclone_su_copy $USERNAME "$R/agents/${a}/$f" "$AD/" -v || true
+        done
+      done
+      # Restore per-agent memory
+      for i in $(seq 1 $AC); do
+        a="agent${i}"; AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
         echo "  agent memory: $a"
         safe_rclone_su_copy $USERNAME "$R/agents/${a}/memory/" "$AD/memory/" -v || { echo "  WARN: $a memory failed"; FAIL=$((FAIL+1)); }
       done
+      # Restore transcripts
       for i in $(seq 1 $AC); do
-        a="agent${i}"
-        TD="$H/.openclaw/agents/$a/sessions"; mkdir -p "$TD"
+        a="agent${i}"; TD="$H/.openclaw/agents/$a/sessions"; mkdir -p "$TD"
         echo "  sessions: $a"
         safe_rclone_su_copy $USERNAME "$R/agents/${a}/sessions/" "$TD/" --include '*.jsonl' -v || { echo "  WARN: $a sessions failed"; FAIL=$((FAIL+1)); }
       done
       chown -R $USERNAME:$USERNAME $H/clawd $H/.openclaw
       TC=$(find $H/.openclaw -name '*.jsonl' 2>/dev/null | wc -l)
-      echo "Restored $TC transcript files ($FAIL warnings)"
-      MC=$(find $H/clawd -name 'MEMORY.md' -o -name 'USER.md' 2>/dev/null | xargs -I{} sh -c '[ -s "{}" ] && echo 1' | wc -l)
+      WC=$(find $H/clawd/agents -maxdepth 2 -name '*.md' ! -type l 2>/dev/null | wc -l)
+      echo "Restored $TC transcripts, $WC workspace files ($FAIL warnings)"
       if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
         echo "RETRY: No transcripts restored, retrying in 5s..."
         sleep 5
         for i in $(seq 1 $AC); do
-          a="agent${i}"
-          TD="$H/.openclaw/agents/$a/sessions"; mkdir -p "$TD"
+          a="agent${i}"; TD="$H/.openclaw/agents/$a/sessions"; mkdir -p "$TD"
           safe_rclone_su_copy $USERNAME "$R/agents/${a}/sessions/" "$TD/" --include '*.jsonl' -v || true
         done
         chown -R $USERNAME:$USERNAME $H/.openclaw
@@ -1488,9 +1505,9 @@ write_files:
         echo "After retry: $TC2 transcript files"
         TC=$TC2
       fi
-      if [ "$TC" -eq 0 ] && [ "$MC" -eq 0 ]; then
-        echo "WARNING: Nothing restored - possible Dropbox token issue"
-        $TG "[WARN] Memory restore got 0 files. Dropbox token may be invalid. Bot starting with empty memory." || true
+      if [ "$TC" -eq 0 ] && [ "$WC" -eq 0 ]; then
+        echo "WARNING: Nothing restored - fresh habitat or Dropbox issue"
+        $TG "[WARN] Memory restore got 0 files. Dropbox token may be invalid or this is a fresh habitat." || true
       fi
   - path: /usr/local/bin/sync-openclaw-state.sh
     permissions: "0755"
@@ -1510,11 +1527,23 @@ write_files:
       [ -z "$HN" ] || [ "$HN" = "/" ] && { echo "ERROR: invalid HABITAT_NAME" >&2; exit 1; }
       H="/home/$USERNAME"; R="dropbox:clawdbot-memory/${HN}"
       AC=${AGENT_COUNT:-1}
-      for f in MEMORY.md USER.md; do [ -f "$H/clawd/$f" ] && safe_rclone_su_copy $USERNAME "$H/clawd/$f" "$R/" 2>/dev/null || true; done
+      WORKSPACE_FILES="AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md"
+      SHARED_FILES="TOOLS.md HEARTBEAT.md"
+      # Sync shared files (skip symlinks)
+      for f in MEMORY.md USER.md $SHARED_FILES; do [ -L "$H/clawd/$f" ] && continue; [ -f "$H/clawd/$f" ] && safe_rclone_su_copy $USERNAME "$H/clawd/$f" "$R/" 2>/dev/null || true; done
+      # Sync shared directory
+      [ -d "$H/clawd/shared" ] && [ ! -L "$H/clawd/shared" ] && safe_rclone_su_copy $USERNAME "$H/clawd/shared/" "$R/shared/" 2>/dev/null || true
+      # Sync per-agent workspace files
+      for i in $(seq 1 $AC); do
+        a="agent${i}"; AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
+        for f in $WORKSPACE_FILES; do [ -L "$AD/$f" ] && continue; [ -f "$AD/$f" ] && safe_rclone_su_copy $USERNAME "$AD/$f" "$R/agents/${a}/" 2>/dev/null || true; done
+      done
+      # Sync per-agent memory
       for i in $(seq 1 $AC); do
         a="agent${i}"; AD="$H/clawd/agents/$a"; [ -d "$AD" ] || continue
         safe_rclone_su_copy $USERNAME "$AD/memory" "$R/agents/${a}/memory" 2>/dev/null || true
       done
+      # Sync transcripts
       for i in $(seq 1 $AC); do
         a="agent${i}"; TD="$H/.openclaw/agents/$a/sessions"
         [ -d "$TD" ] && safe_rclone_su_copy $USERNAME "$TD/" "$R/agents/${a}/sessions/" --include '*.jsonl' 2>/dev/null || true

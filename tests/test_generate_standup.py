@@ -308,7 +308,7 @@ class TestStandupFormatter:
         # Check Slack mrkdwn formatting (bold with asterisks, bullets with •)
         assert "*Daily Standup" in output
         assert "*Release:*" in output
-        assert "R1 — Test Sprint" in output
+        assert "R1 -- Test Sprint" in output
         assert "*✅ Completed Yesterday*" in output
         assert "• TASK-1" in output
         assert "*🏗️ In Progress*" in output
@@ -453,8 +453,8 @@ class TestIntegration:
         output = gs.format_standup(parsed, date="2026-02-08")
         
         # Verify output format
-        assert "## Daily Standup — 2026-02-08" in output
-        assert "**Release:** R3 — Tooling & Observability" in output
+        assert "## Daily Standup -- 2026-02-08" in output
+        assert "**Release:** R3 -- Tooling & Observability" in output
         assert "TASK-10: Implement secret redaction" in output
         assert "TASK-11: Add npm audit" in output
         assert "TASK-15: Standup generator" in output

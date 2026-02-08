@@ -77,7 +77,7 @@ CANONICAL_STATUSES = {
     "code-review", "blocked", "done", "completed", "merged"
 }
 
-# Status aliases (non-canonical → canonical)
+# Status aliases (non-canonical -> canonical)
 STATUS_ALIASES = {
     "in_progress": "in-progress",
     "not_started": "not-started",
@@ -119,7 +119,7 @@ def parse_sprint_state(state: Dict[str, Any]) -> Dict[str, Any]:
     Parse sprint state and categorize tasks.
     
     Status values are normalized to lowercase. Common aliases
-    (in_progress → in-progress, not_started → not-started) are
+    (in_progress -> in-progress, not_started -> not-started) are
     mapped automatically with warnings logged for non-canonical values.
     
     Args:
@@ -233,7 +233,7 @@ def format_task(task: Dict[str, Any], show_details: bool = True) -> str:
         blockers = task.get('blockers', [])
         
         if notes and len(notes) > 0:
-            line += f" — {notes[0]}"
+            line += f" -- {notes[0]}"
         elif blockers and len(blockers) > 0:
             # Handle blockers that may be objects with 'description' field
             blocker = blockers[0]
@@ -241,7 +241,7 @@ def format_task(task: Dict[str, Any], show_details: bool = True) -> str:
                 blocker_text = blocker.get('description', str(blocker))
             else:
                 blocker_text = str(blocker)
-            line += f" — {blocker_text}"
+            line += f" -- {blocker_text}"
     
     return line
 
@@ -304,8 +304,8 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     
     # Build report
     lines = [
-        f"## Daily Standup — {date}",
-        f"**Release:** {release} — {release_name}",
+        f"## Daily Standup -- {date}",
+        f"**Release:** {release} -- {release_name}",
         "",
     ]
     
@@ -367,7 +367,7 @@ def format_json(data: Dict[str, Any], date: str = None) -> str:
     
     return json.dumps({
         'date': date,
-        'release': f"{data['release']} — {data['release_name']}",
+        'release': f"{data['release']} -- {data['release_name']}",
         'summary': {
             'completed': len(data['completed']),
             'in_progress': len(data['in_progress']),
@@ -397,8 +397,8 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
     
     # Slack mrkdwn format (bold with asterisks, headers with bold)
     lines = [
-        f"*Daily Standup — {date}*",
-        f"*Release:* {release} — {release_name}",
+        f"*Daily Standup -- {date}*",
+        f"*Release:* {release} -- {release_name}",
         "",
     ]
     
@@ -424,7 +424,7 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
             assignee = task.get('assignee', '')
             assignee_text = f" ({assignee})" if assignee else ""
             notes = task.get('notes', [])
-            note_text = f" — {notes[0]}" if notes else ""
+            note_text = f" -- {notes[0]}" if notes else ""
             lines.append(f"• {task_id}: {title}{assignee_text}{note_text}")
     else:
         lines.append("• None")
@@ -443,9 +443,9 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
             if blockers:
                 blocker = blockers[0]
                 if isinstance(blocker, dict):
-                    blocker_text = f" — {blocker.get('description', '')}"
+                    blocker_text = f" -- {blocker.get('description', '')}"
                 else:
-                    blocker_text = f" — {blocker}"
+                    blocker_text = f" -- {blocker}"
             lines.append(f"• {task_id}: {title}{assignee_text}{blocker_text}")
     else:
         lines.append("• None")
