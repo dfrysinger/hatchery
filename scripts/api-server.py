@@ -24,6 +24,7 @@
 import http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time
 PORT=8080
 API_SECRET=os.getenv('API_SECRET','')
+API_BIND_ADDRESS=os.getenv('API_BIND_ADDRESS','0.0.0.0')
 HABITAT_PATH='/etc/habitat.json'
 AGENTS_PATH='/etc/agents.json'
 APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
@@ -228,9 +229,13 @@ class H(http.server.BaseHTTPRequestHandler):
 
 class R(socketserver.TCPServer):allow_reuse_address=True
 if __name__=='__main__':
-  # SECURITY: Bind to localhost only (127.0.0.1) to prevent external network access.
-  # This API exposes droplet config, logs, and control endpoints. External exposure
-  # would allow unauthorized config changes, log access, and service control.
-  # SSH tunneling or local gateway scripts are the only supported access methods.
-  print(f"[api-server] Starting on 127.0.0.1:{PORT} (localhost-only, secure)")
-  with R(("127.0.0.1",PORT),H) as h:h.serve_forever()
+  # SECURITY MODEL:
+  # - Default: 0.0.0.0 (all interfaces) for iOS Shortcut remote access
+  # - Configurable via API_BIND_ADDRESS env var or habitat.apiBindAddress
+  # - /status, /health: Public (read-only, no secrets, needed for polling)
+  # - /stages, /log, /config: HMAC auth required (may contain sensitive info)
+  # - /config/upload, /config/apply: HMAC auth required (mutation endpoints)
+  # - Ephemeral droplets (~hours lifetime) limit exposure window
+  bind_addr = API_BIND_ADDRESS if API_BIND_ADDRESS != '0.0.0.0' else ''
+  print(f"[api-server] Starting on {API_BIND_ADDRESS}:{PORT}")
+  with R((bind_addr,PORT),H) as h:h.serve_forever()
