@@ -102,7 +102,8 @@ class TestEnvVarRedaction:
     
     def test_password_env_var(self):
         # Env var pattern: [A-Z_]{3,50}_PASSWORD with 3-100 char value
-        text = "DB_PASSWORD=supersecretpass123"
+        # Prefix must be 3+ chars before _PASSWORD
+        text = "DATABASE_PASSWORD=supersecretpass123"
         result = redact_text(text)
         assert "***REDACTED***" in result
         assert "supersecretpass123" not in result
