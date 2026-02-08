@@ -1,0 +1,17 @@
+{
+  "name": "MyHabitat",
+  "platform": "discord",
+  "platforms": {
+    "discord": {
+      "ownerId": "YOUR_DISCORD_USER_ID"
+    }
+  },
+  "agents": [
+    {
+      "agent": "claude",
+      "tokens": {
+        "discord": "YOUR_BOT_TOKEN"
+      }
+    }
+  ]
+}
