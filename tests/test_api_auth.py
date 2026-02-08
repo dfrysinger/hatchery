@@ -23,7 +23,7 @@ def test_unsigned_request_rejected():
     timestamp = str(int(time.time()))
     body = b'{"habitat": {}}'
     
-    result = api['verify_hmac_auth'](timestamp, None, body)
+    result = api['verify_hmac_auth'](timestamp, None, 'POST', '/config/upload', body)
     assert result is False, "Unsigned request should be rejected"
 
 def test_bad_signature_rejected():
@@ -35,7 +35,7 @@ def test_bad_signature_rejected():
     body = b'{"habitat": {}}'
     bad_signature = "invalid-signature"
     
-    result = api['verify_hmac_auth'](timestamp, bad_signature, body)
+    result = api['verify_hmac_auth'](timestamp, bad_signature, 'POST', '/config/upload', body)
     assert result is False, "Bad signature should be rejected"
 
 def test_stale_timestamp_rejected():
@@ -48,14 +48,14 @@ def test_stale_timestamp_rejected():
     body = b'{"habitat": {}}'
     
     # Generate valid signature for stale timestamp
-    message = f"{stale_timestamp}.{body.decode('utf-8')}"
+    message = f"{stale_timestamp}.POST./config/upload.{body.decode('utf-8')}"
     signature = hmac.new(
         'test-secret-123'.encode(),
         message.encode(),
         hashlib.sha256
     ).hexdigest()
     
-    result = api['verify_hmac_auth'](stale_timestamp, signature, body)
+    result = api['verify_hmac_auth'](stale_timestamp, signature, 'POST', '/config/upload', body)
     assert result is False, "Stale timestamp should be rejected"
 
 def test_valid_signature_accepted():
@@ -67,15 +67,33 @@ def test_valid_signature_accepted():
     body = b'{"habitat": {}}'
     
     # Generate valid signature
-    message = f"{timestamp}.{body.decode('utf-8')}"
+    message = f"{timestamp}.POST./config/upload.{body.decode('utf-8')}"
     signature = hmac.new(
         'test-secret-123'.encode(),
         message.encode(),
         hashlib.sha256
     ).hexdigest()
     
-    result = api['verify_hmac_auth'](timestamp, signature, body)
+    result = api['verify_hmac_auth'](timestamp, signature, 'POST', '/config/upload', body)
     assert result is True, "Valid signature should be accepted"
+
+
+def test_signature_binds_method_and_path():
+    """A valid signature for one endpoint/method must not work for another."""
+    os.environ['API_SECRET'] = 'test-secret-123'
+    api = load_api_server()
+
+    timestamp = str(int(time.time()))
+    body = b'{"agents": {"a": 1}}'
+
+    # Sign for /config/upload
+    msg = f"{timestamp}.POST./config/upload.{body.decode('utf-8')}"
+    sig = hmac.new('test-secret-123'.encode(), msg.encode(), hashlib.sha256).hexdigest()
+
+    assert api['verify_hmac_auth'](timestamp, sig, 'POST', '/config/upload', body) is True
+    # Same signature must fail for different method/path
+    assert api['verify_hmac_auth'](timestamp, sig, 'POST', '/config/apply', body) is False
+    assert api['verify_hmac_auth'](timestamp, sig, 'GET', '/config/upload', body) is False
 
 def test_missing_api_secret():
     """Server rejects all auth when API_SECRET is not set."""
@@ -86,5 +104,5 @@ def test_missing_api_secret():
     timestamp = str(int(time.time()))
     body = b'{"habitat": {}}'
     
-    result = api['verify_hmac_auth'](timestamp, "any-signature", body)
+    result = api['verify_hmac_auth'](timestamp, "any-signature", 'POST', '/config/upload', body)
     assert result is False, "Should reject when API_SECRET is missing"
