@@ -21,8 +21,9 @@
 #
 # Original: /usr/local/bin/api-server.py (in hatch.yaml write_files)
 # =============================================================================
-import http.server,socketserver,subprocess,json,os,base64
+import http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time
 PORT=8080
+API_SECRET=os.getenv('API_SECRET','')
 HABITAT_PATH='/etc/habitat.json'
 AGENTS_PATH='/etc/agents.json'
 APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
@@ -89,6 +90,19 @@ def trigger_config_apply():
   try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
   except Exception as e:return {"ok":False,"error":str(e)}
 
+def verify_hmac_auth(timestamp_header,signature_header,body):
+  """Verify HMAC-SHA256 signature for authenticated endpoints."""
+  if not API_SECRET:return False
+  if not timestamp_header or not signature_header:return False
+  try:
+    timestamp=int(timestamp_header)
+    now=int(time.time())
+    if abs(now-timestamp)>300:return False
+    message=f"{timestamp}.{body.decode('utf-8') if isinstance(body,bytes) else body}"
+    expected_sig=hmac.new(API_SECRET.encode(),message.encode(),hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature_header,expected_sig)
+  except:return False
+
 class H(http.server.BaseHTTPRequestHandler):
   def log_message(self,*a):pass
   
@@ -132,6 +146,11 @@ class H(http.server.BaseHTTPRequestHandler):
       except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
     
     elif self.path=='/config/upload':
+      timestamp=self.headers.get('X-Timestamp')
+      signature=self.headers.get('X-Signature')
+      if not verify_hmac_auth(timestamp,signature,body):
+        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      
       try:
         data=json.loads(body)
       except json.JSONDecodeError as e:
@@ -168,6 +187,11 @@ class H(http.server.BaseHTTPRequestHandler):
       self.send_json(200,{"ok":True,"files_written":files_written,"applied":applied})
     
     elif self.path=='/config/apply':
+      timestamp=self.headers.get('X-Timestamp')
+      signature=self.headers.get('X-Signature')
+      if not verify_hmac_auth(timestamp,signature,body):
+        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      
       result=trigger_config_apply()
       self.send_json(200 if result["ok"] else 500,result)
     
