@@ -7,12 +7,11 @@ import pathlib, pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-# Files that MUST be pure ASCII (anything cloud-init touches)
+# Files that MUST be pure ASCII (only YAML files that go through iOS Shortcut pipeline)
+# Scripts are fetched directly from GitHub and can contain emoji/Unicode
 ASCII_REQUIRED = [
     "hatch.yaml",
     "hatch-slim.yaml",
-    *[str(p.relative_to(REPO)) for p in (REPO / "scripts").glob("*.sh")],
-    *[str(p.relative_to(REPO)) for p in (REPO / "scripts").glob("*.py")],
 ]
 
 
