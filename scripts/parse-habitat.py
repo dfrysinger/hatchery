@@ -71,6 +71,17 @@ def get_platform_config(hab, platform_name):
     # v1 fallback: top-level discord/telegram
     return hab.get(platform_name, {})
 
+# Helper: normalize agent reference (string shorthand to dict)
+def normalize_agent_ref(agent_ref):
+    """Normalize agent reference to dict format.
+    
+    Converts string shorthand ("Claude") to dict format ({"agent": "Claude"}).
+    Dict refs are returned unchanged.
+    """
+    if isinstance(agent_ref, str):
+        return {"agent": agent_ref}
+    return agent_ref
+
 # Helper: get agent token with v2/v1 fallback
 def get_agent_token(agent_ref, platform_name):
     """Get agent token: v2 (tokens.X) or v1 (XBotToken) format."""
@@ -134,8 +145,9 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     agents = hab.get("agents", [])
     f.write('AGENT_COUNT={}\n'.format(len(agents)))
 
-    for i, agent_ref in enumerate(agents):
+    for i, raw_agent_ref in enumerate(agents):
         n = i + 1
+        agent_ref = normalize_agent_ref(raw_agent_ref)
         name = agent_ref["agent"]
         lib_entry = lib.get(name, {})
         model = agent_ref.get("model") or lib_entry.get("model", "anthropic/claude-opus-4-5")
