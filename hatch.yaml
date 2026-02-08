@@ -395,6 +395,7 @@ write_files:
       API_BIND_ADDRESS=os.getenv('API_BIND_ADDRESS','0.0.0.0')
       HABITAT_PATH='/etc/habitat.json'
       AGENTS_PATH='/etc/agents.json'
+      MARKER_PATH='/etc/config-api-uploaded'
       APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
       P1_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
       P2_STAGES={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
@@ -436,6 +437,13 @@ write_files:
           return {"ok":True,"path":path}
         except Exception as e:return {"ok":False,"error":str(e)}
 
+      def write_upload_marker():
+        """Write API upload marker with timestamp."""
+        try:
+          with open(MARKER_PATH,'w') as f:f.write(str(time.time()))
+          os.chmod(MARKER_PATH,0o600)
+        except:pass
+
       def get_config_status():
         """Get current config file status without exposing sensitive data."""
         result={"habitat_exists":os.path.exists(HABITAT_PATH),"agents_exists":os.path.exists(AGENTS_PATH)}
@@ -452,6 +460,14 @@ write_files:
             with open(AGENTS_PATH,'r') as f:a=json.load(f)
             result["agents_names"]=list(a.keys())
           except:pass
+        # Check API upload marker (issue #115)
+        if os.path.exists(MARKER_PATH):
+          result["api_uploaded"]=True
+          try:
+            with open(MARKER_PATH,'r') as f:result["api_uploaded_at"]=float(f.read().strip())
+          except:pass
+        else:
+          result["api_uploaded"]=False
         return result
 
       def trigger_config_apply():
@@ -572,6 +588,10 @@ write_files:
               if not result["ok"]:
                 self.send_json(500,{"ok":False,"error":f"Failed to write agents: {result.get('error')}"});return
               files_written.append(AGENTS_PATH)
+            
+            # Write upload marker if any files were written
+            if files_written:
+              write_upload_marker()
             
             # Apply if requested
             applied=False
