@@ -147,7 +147,301 @@ write_files:
   content: "#!/bin/bash\nset -e\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\nif ! python3 /usr/local/bin/parse-habitat.py; then\n  echo 'HABITAT_NAME=\"broken\"' > /etc/habitat-parsed.env\n  echo 'AGENT_COUNT=1' >> /etc/habitat-parsed.env\n  echo 'AGENT1_NAME=\"Claude\"' >> /etc/habitat-parsed.env\n  python3 -c \"import base64,json,os;h=json.loads(base64.b64decode(os.environ.get('HABITAT_B64','')).decode());a=h.get('agents',[{}])[0];print('AGENT1_BOT_TOKEN=\\\"{}\\\"'.format(a.get('botToken','')))\" >> /etc/habitat-parsed.env 2>/dev/null || true\nfi\nsource /etc/habitat-parsed.env\nS=\"/usr/local/bin/set-stage.sh\"\nTG=\"/usr/local/bin/tg-notify.sh\"\nLOG=\"/var/log/phase1.log\"\nSTART=$(date +%s)\n$TG \"[INIT] Droplet starting up. Phase 1 in progress...\" || true\n$S 1 \"preparing\"\nNODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)\n[ -n \"$NODE_PID\" ] && wait $NODE_PID 2>/dev/null || true\nif [ -f /tmp/downloads/node.tar.xz ]; then\n  tar -xJf /tmp/downloads/node.tar.xz -C /usr/local --strip-components=1 >> \"$LOG\" 2>&1\n  rm -f /tmp/downloads/node.tar.xz\nelse\n  apt-get update -qq && apt-get install -y nodejs npm >> \"$LOG\" 2>&1\nfi\n$S 2 \"installing-bot\"\nnpm install -g openclaw@latest >> \"$LOG\" 2>&1\nPW=$(d \"$PASSWORD_B64\")\nid \"$USERNAME\" &>/dev/null || useradd -m -s /bin/bash -G sudo \"$USERNAME\"\necho \"$USERNAME:$PW\" | chpasswd\necho \"$USERNAME ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/$USERNAME\nH=\"/home/$USERNAME\"\nchown $USERNAME:$USERNAME $H\nAK=$(d \"$ANTHROPIC_KEY_B64\")\nTBT=\"$AGENT1_BOT_TOKEN\"\nDBT=\"$AGENT1_DISCORD_BOT_TOKEN\"\nTUI=$(d \"$TELEGRAM_USER_ID_B64\")\nDOI=\"${DISCORD_OWNER_ID:-$(d \"$DISCORD_OWNER_ID_B64\")}\"\nDGI=\"${DISCORD_GUILD_ID:-$(d \"$DISCORD_GUILD_ID_B64\")}\"\nGK=$(d \"$GOOGLE_API_KEY_B64\")\nA1N=\"$AGENT1_NAME\"\n# PLATFORM must be explicitly set - no silent defaults\nPLATFORM=\"${PLATFORM:-$(d \"$PLATFORM_B64\")}\"\nGT=$(openssl rand -hex 24)\nmkdir -p $H/.openclaw $H/clawd/agents/agent1/memory\necho \"$GT\" > $H/.openclaw/gateway-token.txt\nln -sf \"$H/clawd/HEARTBEAT.md\" \"$H/clawd/agents/agent1/HEARTBEAT.md\"\n# Determine platform flags\nTG_ENABLED=\"false\"; DC_ENABLED=\"false\"\ncase \"$PLATFORM\" in\n  telegram) TG_ENABLED=\"true\" ;;\n  discord)  DC_ENABLED=\"true\" ;;\n  both)     TG_ENABLED=\"true\"; DC_ENABLED=\"true\" ;;\n  *)\n    echo \"[build-minimal-config] ERROR: Invalid PLATFORM='${PLATFORM}'\" >&2\n    echo \"  Valid options: telegram, discord, both\" >&2\n    echo \"  Fix: Set PLATFORM in habitat config or /etc/droplet.env\" >&2\n    exit 1\n    ;;\nesac\n# Build plugins entries\nPLUGINS_JSON=\"\\\"telegram\\\":{\\\"enabled\\\":${TG_ENABLED}},\\\"discord\\\":{\\\"enabled\\\":${DC_ENABLED}}\"\n# Build telegram channel config\nTG_CHANNEL=\"\"\nif [ \"$TG_ENABLED\" = \"true\" ]; then\n  TG_CHANNEL=\"\\\"telegram\\\":{\\\"enabled\\\":true,\\\"dmPolicy\\\":\\\"allowlist\\\",\\\"allowFrom\\\":[\\\"${TUI}\\\"],\\\"accounts\\\":{\\\"default\\\":{\\\"botToken\\\":\\\"${TBT}\\\"}}}\"\nelse\n  TG_CHANNEL=\"\\\"telegram\\\":{\\\"enabled\\\":false}\"\nfi\n# Build discord channel config\nDC_CHANNEL=\"\"\nif [ \"$DC_ENABLED\" = \"true\" ]; then\n  DC_DM_ALLOW=\"\"\n  [ -n \"$DOI\" ] && DC_DM_ALLOW=\",\\\"allowFrom\\\":[\\\"${DOI}\\\"]\"\n  DC_GUILD=\"\"\n  [ -n \"$DGI\" ] && DC_GUILD=\",\\\"guilds\\\":{\\\"${DGI}\\\":{\\\"requireMention\\\":true}}\"\n  DC_CHANNEL=\"\\\"discord\\\":{\\\"enabled\\\":true,\\\"groupPolicy\\\":\\\"allowlist\\\",\\\"accounts\\\":{\\\"default\\\":{\\\"token\\\":\\\"${DBT}\\\"}},\\\"dm\\\":{\\\"enabled\\\":true,\\\"policy\\\":\\\"pairing\\\"${DC_DM_ALLOW}}${DC_GUILD}}\"\nelse\n  DC_CHANNEL=\"\\\"discord\\\":{\\\"enabled\\\":false}\"\nfi\ncat > $H/.openclaw/openclaw.json <<CFG\n{\n  \"env\": {\n    \"ANTHROPIC_API_KEY\": \"${AK}\"\n  },\n  \"agents\": {\n    \"defaults\": {\n      \"model\": {\"primary\": \"anthropic/claude-opus-4-5\"},\n      \"workspace\": \"$H/clawd\"\n    },\n    \"list\": [\n      {\n        \"id\": \"agent1\",\n        \"default\": true,\n        \"name\": \"${A1N}\",\n        \"workspace\": \"$H/clawd/agents/agent1\"\n      }\n    ]\n  },\n  \"gateway\": {\n    \"mode\": \"local\",\n    \"port\": 18789,\n    \"bind\": \"lan\",\n    \"auth\": {\n      \"mode\": \"token\",\n      \"token\": \"${GT}\"\n    }\n  },\n  \"plugins\": {\n    \"entries\": {\n      ${PLUGINS_JSON}\n    }\n  },\n  \"channels\": {\n    ${TG_CHANNEL},\n    ${DC_CHANNEL}\n  }\n}\nCFG\ncp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.minimal.json\necho \"ANTHROPIC_API_KEY=${AK}\" > $H/.openclaw/.env\n[ -n \"$GK\" ] && echo -e \"GOOGLE_API_KEY=${GK}\\nGEMINI_API_KEY=${GK}\" >> $H/.openclaw/.env\nGCID=$(d \"$GMAIL_CLIENT_ID_B64\"); GSEC=$(d \"$GMAIL_CLIENT_SECRET_B64\"); GRTK=$(d \"$GMAIL_REFRESH_TOKEN_B64\")\n[ -n \"$GCID\" ] && echo -e \"GMAIL_CLIENT_ID=${GCID}\\nGMAIL_CLIENT_SECRET=${GSEC}\\nGMAIL_REFRESH_TOKEN=${GRTK}\" >> $H/.openclaw/.env\necho -e \"# Agent: ${A1N}\\nModel: Claude Sonnet\\nBe helpful. Desktop setup in progress...\" > $H/clawd/agents/agent1/AGENTS.md\ncat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'\nDesktop setup in progress. RDP will be ready soon.\nIf nothing needs attention, reply with ONLY: NO_REPLY.\nBOOTMD\nchown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd\nchmod 700 $H/.openclaw\nchmod 600 $H/.openclaw/openclaw.json\ncat > /etc/systemd/system/clawdbot.service <<SVC\n[Unit]\nDescription=Clawdbot Gateway\nAfter=network.target\n[Service]\nType=simple\nUser=$USERNAME\nWorkingDirectory=$H\nExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789\nRestart=always\nRestartSec=3\nEnvironment=NODE_ENV=production\nEnvironment=NODE_OPTIONS=--experimental-sqlite\nEnvironment=ANTHROPIC_API_KEY=${AK}\n$([ -n \"$GK\" ] && echo \"Environment=GOOGLE_API_KEY=${GK}\")\n$([ -n \"$GK\" ] && echo \"Environment=GEMINI_API_KEY=${GK}\")\n[Install]\nWantedBy=multi-user.target\nSVC\nsystemctl daemon-reload\nsystemctl enable clawdbot\nsystemctl start clawdbot\nufw allow 18789/tcp\nBOT_OK=false\nfor i in {1..30}; do\n  if systemctl is-active --quiet clawdbot; then\n    BOT_OK=true\n    break\n  fi\n  sleep 1\ndone\nif [ \"$BOT_OK\" = \"true\" ]; then\n  $S 3 \"bot-online\"\n  $TG \"[OK] Bot online! Phase 1 complete. Starting desktop setup...\" || true\nelse\n  journalctl -u clawdbot -n 50 >> \"$LOG\" 2>&1\n  $TG \"[WARN] Bot may not be running. Check logs: journalctl -u clawdbot\" || true\nfi\ntouch /var/lib/init-status/phase1-complete\necho \"$START\" > /var/lib/init-status/phase1-time\nEND=$(date +%s)\n/usr/local/bin/set-phase.sh 2 \"background-setup\"\nnohup /usr/local/sbin/phase2-background.sh >> /var/log/phase2.log 2>&1 &\ndisown\n"
 - path: /usr/local/sbin/phase2-background.sh
   permissions: '0755'
-  content: "#!/bin/bash\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\nS=\"/usr/local/bin/set-stage.sh\"\nLOG=\"/var/log/phase2.log\"\nSTART=$(date +%s)\nH=\"/home/$USERNAME\"\nCHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)\n[ -n \"$CHROME_PID\" ] && wait $CHROME_PID 2>/dev/null || true\nsystemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true\nkillall -9 apt apt-get dpkg 2>/dev/null || true\nsleep 2\nrm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock\ndpkg --configure -a 2>/dev/null || true\n$S 4 \"desktop-environment\"\napt-get update -qq >> \"$LOG\" 2>&1\nDEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \\\n  xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \\\n  xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme yaru-theme-gtk \\\n  >> \"$LOG\" 2>&1\n$S 5 \"developer-tools\"\nDEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \\\n  build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \\\n  thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils \\\n  python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \\\n  >> \"$LOG\" 2>&1\nrm -f /etc/xdg/autostart/xfce4-screensaver.desktop\napt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true\n$S 6 \"browser-tools\"\n[ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> \"$LOG\" 2>&1\nrm -f /tmp/downloads/chrome.deb\napt-get -f install -y >> \"$LOG\" 2>&1\nmkdir -p $H/.config/chrome-debug/Default\necho '{\"browser\":{\"default_browser_infobar_last_declined\":\"99999999999999.0\",\"default_browser_setting_enabled\":false}}' > \"$H/.config/chrome-debug/Local State\"\necho '{\"browser\":{\"check_default_browser\":false},\"session\":{\"restore_on_startup\":1},\"distribution\":{\"skip_first_run_ui\":true,\"suppress_first_run_default_browser_prompt\":true}}' > \"$H/.config/chrome-debug/Default/Preferences\"\ntouch \"$H/.config/chrome-debug/First Run\"\nchown -R $USERNAME:$USERNAME $H/.config/chrome-debug\nPIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> \"$LOG\" 2>&1\ncurl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> \"$LOG\" 2>&1\n[ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya\n# Download helper scripts (platform-safe set-council-group wrapper is provided via cloud-init write_files)\ncurl -sf -o \"/usr/local/bin/gmail-api.py\" \"https://raw.githubusercontent.com/dfrysinger/hatchery/main/gmail-api.py\" \\\n  && chmod 755 \"/usr/local/bin/gmail-api.py\" >> \"$LOG\" 2>&1 \\\n  || echo \"WARN: Failed to download gmail-api.py\" >> \"$LOG\"\ncurl -sf -o \"/usr/local/bin/set-council-group.telegram.sh\" \"https://raw.githubusercontent.com/dfrysinger/hatchery/main/set-council-group.sh\" \\\n  && chmod 755 \"/usr/local/bin/set-council-group.telegram.sh\" >> \"$LOG\" 2>&1 \\\n  || echo \"WARN: Failed to download set-council-group.telegram.sh\" >> \"$LOG\"\n$S 7 \"desktop-services\"\ncat > /etc/systemd/system/xvfb.service <<SVC\n[Unit]\nDescription=Xvfb on :10\nAfter=network.target\n[Service]\nType=simple\nUser=$USERNAME\nExecStart=/bin/bash -c 'echo \\$\\$ > /tmp/xvfb.pid && exec /usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac'\nExecStopPost=/bin/rm -f /tmp/xvfb.pid\nRestart=always\n[Install]\n# WantedBy removed - started explicitly after phase2 completes\nSVC\ncat > /etc/systemd/system/desktop.service <<SVC\n[Unit]\nDescription=XFCE Desktop\nAfter=xvfb.service\nRequires=xvfb.service\n[Service]\nType=simple\nUser=$USERNAME\nEnvironment=DISPLAY=:10\nEnvironment=HOME=$H\nEnvironment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)\nExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\\$UID_NUM && chmod 700 /run/user/\\$UID_NUM'\nExecStartPre=/bin/sleep 2\nExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session\nRestart=always\nRestartSec=5\n[Install]\nWantedBy=multi-user.target\nSVC\ncat > /etc/systemd/system/x11vnc.service <<SVC\n[Unit]\nDescription=x11vnc\nAfter=desktop.service\nRequires=desktop.service\nConditionPathExists=/var/lib/init-status/phase2-complete\n[Service]\nType=simple\nUser=$USERNAME\nEnvironment=DISPLAY=:10\nExecStartPre=/bin/sleep 3\nExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5\nRestart=always\nRestartSec=5\n[Install]\nWantedBy=desktop.service\nSVC\nmkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml\n# Write desktop background config BEFORE starting desktop service (fixes race condition)\nif [ -n \"$BG_COLOR\" ] && [ ${#BG_COLOR} -eq 6 ]; then\n  R=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:0:2}))/255\" | bc))\n  G=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:2:2}))/255\" | bc))\n  B=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:4:2}))/255\" | bc))\n  cat > \"$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml\" <<BGXML\n<?xml version=\"1.0\"?><channel name=\"xfce4-desktop\" version=\"1.0\"><property name=\"backdrop\" type=\"empty\"><property name=\"screen0\" type=\"empty\"><property name=\"monitorscreen\" type=\"empty\"><property name=\"workspace0\" type=\"empty\"><property name=\"color-style\" type=\"int\" value=\"0\"/><property name=\"image-style\" type=\"int\" value=\"0\"/><property name=\"rgba1\" type=\"array\"><value type=\"double\" value=\"${R}\"/><value type=\"double\" value=\"${G}\"/><value type=\"double\" value=\"${B}\"/><value type=\"double\" value=\"1\"/></property></property></property></property></property></channel>\nBGXML\nfi\nchown -R $USERNAME:$USERNAME $H/.config\nsystemctl daemon-reload\nsystemctl enable xvfb desktop x11vnc\n# MOVED TO END: systemctl start xvfb\n# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)\n# MOVED TO END: for i in {1..30}; do\n  # MOVED TO END: if [ -f /tmp/xvfb.pid ]; then\n    # MOVED TO END: XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)\n    # Verify PID exists AND process is actually Xvfb (not a recycled PID)\n    # MOVED TO END: if [ -n \"$XVFB_PID\" ] && kill -0 \"$XVFB_PID\" 2>/dev/null; then\n      # MOVED TO END: if grep -q \"Xvfb\" /proc/\"$XVFB_PID\"/cmdline 2>/dev/null; then\n        # MOVED TO END: break\n      # MOVED TO END: fi\n    # MOVED TO END: fi\n  # MOVED TO END: fi\n  # MOVED TO END: sleep 0.5\n# MOVED TO END: done\n# MOVED TO END: systemctl start desktop\n# MOVED TO END: sleep 3\n# MOVED TO END: systemctl start x11vnc\nmkdir -p $H/Desktop\ncat > $H/Desktop/google-chrome.desktop <<'DESK'\n[Desktop Entry]\nVersion=1.0\nName=Google Chrome\nExec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --disable-sync --remote-debugging-port=18800 --user-data-dir=/home/bot/.config/chrome-debug %U\nTerminal=false\nIcon=google-chrome\nType=Application\nDESK\ncat > $H/Desktop/dropbox.desktop <<'DESK'\n[Desktop Entry]\nVersion=1.0\nType=Application\nName=Mount Dropbox\nExec=/usr/local/bin/mount-dropbox.sh\nIcon=folder-remote\nTerminal=false\nDESK\nchmod +x $H/Desktop/*.desktop\nchown -R $USERNAME:$USERNAME $H/Desktop\n$S 8 \"skills-apps\"\nnpm install -g clawhub@latest >> \"$LOG\" 2>&1\nfor s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do\n  su - $USERNAME -c \"cd $H/clawd && clawhub install $s\" >> \"$LOG\" 2>&1 || true\ndone\nfind $H/clawd/skills -name \"*.sh\" -exec chmod +x {} \\; 2>/dev/null || true\nDBT=$(d \"$DROPBOX_TOKEN_B64\"); EM=$(d \"$EMAIL_B64\"); EP=$(d \"$EMAIL_PASSWORD_B64\")\nIH=$(d \"$IMAP_HOST_B64\"); GHT=$(d \"$GH_TOKEN_B64\")\nmkdir -p $H/.config/{himalaya,rclone,gh}\n[ -n \"$DBT\" ] && echo -e \"[dropbox]\\ntype = dropbox\\ntoken = $DBT\" > $H/.config/rclone/rclone.conf\n[ -n \"$EM\" ] && [ -n \"$EP\" ] && cat > $H/.config/himalaya/config.toml <<HIM\n[accounts.default]\nemail = \"${EM}\"\ndefault = true\nbackend.type = \"imap\"\nbackend.host = \"${IH:-imap.gmail.com}\"\nbackend.port = 993\nbackend.encryption.type = \"tls\"\nbackend.login = \"${EM}\"\nbackend.auth.type = \"password\"\nbackend.auth.raw = \"${EP}\"\nHIM\n[ -n \"$GHT\" ] && echo -e \"github.com:\\n    oauth_token: ${GHT}\\n    git_protocol: https\" > $H/.config/gh/hosts.yml\nCU=$(d \"$CALDAV_URL_B64\"); CUN=$(d \"$CALDAV_USER_B64\"); CP=$(d \"$CALDAV_PASSWORD_B64\")\nif [ -n \"$CU\" ] && [ -n \"$CUN\" ]; then\n  mkdir -p $H/.config/vdirsyncer $H/.config/khal\n  mkdir -p $H/.local/share/vdirsyncer/status $H/.local/share/khal/calendars\n  cat > $H/.config/vdirsyncer/config <<VDSCFG\n[general]\nstatus_path = \"~/.local/share/vdirsyncer/status/\"\n\n[pair calendar]\na = \"calendar_local\"\nb = \"calendar_remote\"\ncollections = [\"from a\", \"from b\"]\nmetadata = [\"color\"]\n\n[storage calendar_local]\ntype = \"filesystem\"\npath = \"~/.local/share/khal/calendars/\"\nfileext = \".ics\"\n\n[storage calendar_remote]\ntype = \"caldav\"\nurl = \"${CU}\"\nusername = \"${CUN}\"\npassword = \"${CP}\"\nVDSCFG\n  cat > $H/.config/khal/config <<KHALCFG\n[calendars]\n\n[[default]]\npath = ~/.local/share/khal/calendars/*\ntype = discover\n\n[locale]\ntimeformat = %H:%M\ndateformat = %Y-%m-%d\nlongdateformat = %Y-%m-%d\ndatetimeformat = %Y-%m-%d %H:%M\nlongdatetimeformat = %Y-%m-%d %H:%M\nKHALCFG\n  chown -R $USERNAME:$USERNAME $H/.config/vdirsyncer $H/.config/khal $H/.local/share/vdirsyncer $H/.local/share/khal\n  su - $USERNAME -c \"yes | vdirsyncer discover\" >> \"$LOG\" 2>&1 || true\n  su - $USERNAME -c \"vdirsyncer sync\" >> \"$LOG\" 2>&1 || true\nfi\nchown -R $USERNAME:$USERNAME $H/.config\n$S 9 \"remote-access\"\nadduser xrdp ssl-cert 2>/dev/null || true\ncat >> /etc/xrdp/xrdp.ini <<'XI'\n\n[vnc-local]\nname=Shared Desktop (:10)\nlib=libvnc.so\nip=127.0.0.1\nport=5900\nusername=na\npassword=ask\ndelay_ms=50\nxserverbpp=24\ndisabled_encodings_mask=0\nXI\nsed -i 's/^autorun=$/autorun=vnc-local/' /etc/xrdp/xrdp.ini\necho -e \"#!/bin/sh\\nunset DBUS_SESSION_BUS_ADDRESS\\nunset XDG_RUNTIME_DIR\\nexec dbus-launch --exit-with-session startxfce4\" > /etc/xrdp/startwm.sh\nchmod 755 /etc/xrdp/startwm.sh\nsed -i 's/^X11DisplayOffset=.*/X11DisplayOffset=10/' /etc/xrdp/sesman.ini\nsystemctl unmask xrdp xrdp-sesman\nsystemctl daemon-reload\nsystemctl enable xrdp\nsystemctl restart xrdp\nufw allow 3389/tcp\n#ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)\n$S 10 \"finalizing\"\n# Enable and run the restore service (runs before clawdbot restarts)\nsystemctl enable openclaw-restore.service 2>/dev/null || true\nsystemctl start openclaw-restore.service 2>/dev/null || true\n/usr/local/sbin/build-full-config.sh\nsystemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer\nsystemctl enable clawdbot-sync.timer 2>/dev/null || true\nsystemctl start clawdbot-sync.timer 2>/dev/null || true\n# Start desktop services now that everything is installed\n$S 9 \"starting-desktop\"\nsystemctl start xvfb\n# Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)\nfor i in {1..30}; do\n  if [ -f /tmp/xvfb.pid ]; then\n    XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)\n    # Verify PID exists AND process is actually Xvfb (not a recycled PID)\n    if [ -n \"$XVFB_PID\" ] && kill -0 \"$XVFB_PID\" 2>/dev/null; then\n      if grep -q \"Xvfb\" /proc/\"$XVFB_PID\"/cmdline 2>/dev/null; then\n        break\n      fi\n    fi\n  fi\n  sleep 0.5\ndone\nsystemctl start desktop\nsleep 3\nsystemctl start x11vnc\nsystemctl restart xrdp\ntouch /var/lib/init-status/phase2-complete\ntouch /var/lib/init-status/needs-post-boot-check\nGT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)\n[ -n \"$GT\" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \\\n  -H \"Authorization: Bearer $GT\" -H \"Content-Type: application/json\" \\\n  -d '{\"mode\":\"now\"}' >> \"$LOG\" 2>&1 || true\nEND=$(date +%s)\nDURATION=$((END - START))\nTG=\"/usr/local/bin/tg-notify.sh\"\nHN=\"${HABITAT_NAME:-default}\"\nHDOM=\"${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}\"\n$TG \"[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!\" || true\nsleep 5\nreboot\n"
+  content: |
+    #!/bin/bash
+    # =============================================================================
+    # phase2-background.sh -- Desktop + tools installation (phase 2)
+    # =============================================================================
+    # Purpose: Install desktop environment, developer tools, browser tooling,
+    #          configure services (xvfb/desktop/x11vnc/xrdp), install skills,
+    #          and finalize the droplet.
+    #
+    # Notes:
+    # - Logs to: /var/log/phase2.log
+    # - Stages are recorded via /usr/local/bin/set-stage.sh
+    # =============================================================================
+    set -a; source /etc/droplet.env; set +a
+    d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+    [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+    S="/usr/local/bin/set-stage.sh"
+    LOG="/var/log/phase2.log"
+    START=$(date +%s)
+    H="/home/$USERNAME"
+    CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
+    [ -n "$CHROME_PID" ] && wait $CHROME_PID 2>/dev/null || true
+    systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+    killall -9 apt apt-get dpkg 2>/dev/null || true
+    sleep 2
+    rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
+    dpkg --configure -a 2>/dev/null || true
+    $S 4 "desktop-environment"
+    apt-get update -qq >> "$LOG" 2>&1
+    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
+      xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
+      xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme yaru-theme-gtk \
+      >> "$LOG" 2>&1
+    $S 5 "developer-tools"
+    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
+      build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
+      thunderbird pandoc scrot flameshot qpdf jq htop ncdu bc wget xz-utils \
+      python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
+      >> "$LOG" 2>&1
+    rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
+    apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
+    $S 6 "browser-tools"
+    [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
+    rm -f /tmp/downloads/chrome.deb
+    apt-get -f install -y >> "$LOG" 2>&1
+    mkdir -p $H/.config/chrome-debug/Default
+    echo '{"browser":{"default_browser_infobar_last_declined":"99999999999999.0","default_browser_setting_enabled":false}}' > "$H/.config/chrome-debug/Local State"
+    echo '{"browser":{"check_default_browser":false},"session":{"restore_on_startup":1},"distribution":{"skip_first_run_ui":true,"suppress_first_run_default_browser_prompt":true}}' > "$H/.config/chrome-debug/Default/Preferences"
+    touch "$H/.config/chrome-debug/First Run"
+    chown -R $USERNAME:$USERNAME $H/.config/chrome-debug
+    PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install -U yt-dlp google-auth google-api-python-client >> "$LOG" 2>&1
+    curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | sh >> "$LOG" 2>&1
+    [ -f /root/.local/bin/himalaya ] && ln -sf /root/.local/bin/himalaya /usr/local/bin/himalaya
+    # Download helper scripts (platform-safe set-council-group wrapper is provided via cloud-init write_files)
+    curl -sf -o "/usr/local/bin/gmail-api.py" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/gmail-api.py" \
+      && chmod 755 "/usr/local/bin/gmail-api.py" >> "$LOG" 2>&1 \
+      || echo "WARN: Failed to download gmail-api.py" >> "$LOG"
+    curl -sf -o "/usr/local/bin/set-council-group.telegram.sh" "https://raw.githubusercontent.com/dfrysinger/hatchery/main/set-council-group.sh" \
+      && chmod 755 "/usr/local/bin/set-council-group.telegram.sh" >> "$LOG" 2>&1 \
+      || echo "WARN: Failed to download set-council-group.telegram.sh" >> "$LOG"
+    $S 7 "desktop-services"
+    cat > /etc/systemd/system/xvfb.service <<SVC
+    [Unit]
+    Description=Xvfb on :10
+    After=network.target
+    [Service]
+    Type=simple
+    User=$USERNAME
+    ExecStart=/bin/bash -c 'echo \$\$ > /tmp/xvfb.pid && exec /usr/bin/Xvfb :10 -screen 0 1920x1080x24 -ac'
+    ExecStopPost=/bin/rm -f /tmp/xvfb.pid
+    Restart=always
+    [Install]
+    # WantedBy removed - started explicitly after phase2 completes
+    SVC
+    cat > /etc/systemd/system/desktop.service <<SVC
+    [Unit]
+    Description=XFCE Desktop
+    After=xvfb.service
+    Requires=xvfb.service
+    [Service]
+    Type=simple
+    User=$USERNAME
+    Environment=DISPLAY=:10
+    Environment=HOME=$H
+    Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $USERNAME)
+    ExecStartPre=+/bin/bash -c 'UID_NUM=$(id -u $USERNAME); mkdir -p /run/user/\$UID_NUM && chown $USERNAME:$USERNAME /run/user/\$UID_NUM && chmod 700 /run/user/\$UID_NUM'
+    ExecStartPre=/bin/sleep 2
+    ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/xfce4-session
+    Restart=always
+    RestartSec=5
+    [Install]
+    WantedBy=multi-user.target
+    SVC
+    cat > /etc/systemd/system/x11vnc.service <<SVC
+    [Unit]
+    Description=x11vnc
+    After=desktop.service
+    Requires=desktop.service
+    ConditionPathExists=/var/lib/init-status/phase2-complete
+    [Service]
+    Type=simple
+    User=$USERNAME
+    Environment=DISPLAY=:10
+    ExecStartPre=/bin/sleep 3
+    ExecStart=/usr/bin/x11vnc -display :10 -rfbport 5900 -forever -nopw -shared -noxdamage -noxrecord -fs 1.0 -defer 10 -wait 5
+    Restart=always
+    RestartSec=5
+    [Install]
+    WantedBy=desktop.service
+    SVC
+    mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
+    # Write desktop background config BEFORE starting desktop service (fixes race condition)
+    if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
+      R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
+      G=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc))
+      B=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc))
+      cat > "$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<BGXML
+    <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="${R}"/><value type="double" value="${G}"/><value type="double" value="${B}"/><value type="double" value="1"/></property></property></property></property></property></channel>
+    BGXML
+    fi
+    chown -R $USERNAME:$USERNAME $H/.config
+    systemctl daemon-reload
+    systemctl enable xvfb desktop x11vnc
+    # MOVED TO END: systemctl start xvfb
+    # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+    # MOVED TO END: for i in {1..30}; do
+      # MOVED TO END: if [ -f /tmp/xvfb.pid ]; then
+        # MOVED TO END: XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+        # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+        # MOVED TO END: if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+          # MOVED TO END: if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+            # MOVED TO END: break
+          # MOVED TO END: fi
+        # MOVED TO END: fi
+      # MOVED TO END: fi
+      # MOVED TO END: sleep 0.5
+    # MOVED TO END: done
+    # MOVED TO END: systemctl start desktop
+    # MOVED TO END: sleep 3
+    # MOVED TO END: systemctl start x11vnc
+    mkdir -p $H/Desktop
+    cat > $H/Desktop/google-chrome.desktop <<'DESK'
+    [Desktop Entry]
+    Version=1.0
+    Name=Google Chrome
+    Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check --disable-sync --remote-debugging-port=18800 --user-data-dir=/home/bot/.config/chrome-debug %U
+    Terminal=false
+    Icon=google-chrome
+    Type=Application
+    DESK
+    cat > $H/Desktop/dropbox.desktop <<'DESK'
+    [Desktop Entry]
+    Version=1.0
+    Type=Application
+    Name=Mount Dropbox
+    Exec=/usr/local/bin/mount-dropbox.sh
+    Icon=folder-remote
+    Terminal=false
+    DESK
+    chmod +x $H/Desktop/*.desktop
+    chown -R $USERNAME:$USERNAME $H/Desktop
+    $S 8 "skills-apps"
+    npm install -g clawhub@latest >> "$LOG" 2>&1
+    for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
+      su - $USERNAME -c "cd $H/clawd && clawhub install $s" >> "$LOG" 2>&1 || true
+    done
+    find $H/clawd/skills -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+    DBT=$(d "$DROPBOX_TOKEN_B64"); EM=$(d "$EMAIL_B64"); EP=$(d "$EMAIL_PASSWORD_B64")
+    IH=$(d "$IMAP_HOST_B64"); GHT=$(d "$GH_TOKEN_B64")
+    mkdir -p $H/.config/{himalaya,rclone,gh}
+    [ -n "$DBT" ] && echo -e "[dropbox]\ntype = dropbox\ntoken = $DBT" > $H/.config/rclone/rclone.conf
+    [ -n "$EM" ] && [ -n "$EP" ] && cat > $H/.config/himalaya/config.toml <<HIM
+    [accounts.default]
+    email = "${EM}"
+    default = true
+    backend.type = "imap"
+    backend.host = "${IH:-imap.gmail.com}"
+    backend.port = 993
+    backend.encryption.type = "tls"
+    backend.login = "${EM}"
+    backend.auth.type = "password"
+    backend.auth.raw = "${EP}"
+    HIM
+    [ -n "$GHT" ] && echo -e "github.com:\n    oauth_token: ${GHT}\n    git_protocol: https" > $H/.config/gh/hosts.yml
+    CU=$(d "$CALDAV_URL_B64"); CUN=$(d "$CALDAV_USER_B64"); CP=$(d "$CALDAV_PASSWORD_B64")
+    if [ -n "$CU" ] && [ -n "$CUN" ]; then
+      mkdir -p $H/.config/vdirsyncer $H/.config/khal
+      mkdir -p $H/.local/share/vdirsyncer/status $H/.local/share/khal/calendars
+      cat > $H/.config/vdirsyncer/config <<VDSCFG
+    [general]
+    status_path = "~/.local/share/vdirsyncer/status/"
+    
+    [pair calendar]
+    a = "calendar_local"
+    b = "calendar_remote"
+    collections = ["from a", "from b"]
+    metadata = ["color"]
+    
+    [storage calendar_local]
+    type = "filesystem"
+    path = "~/.local/share/khal/calendars/"
+    fileext = ".ics"
+    
+    [storage calendar_remote]
+    type = "caldav"
+    url = "${CU}"
+    username = "${CUN}"
+    password = "${CP}"
+    VDSCFG
+      cat > $H/.config/khal/config <<KHALCFG
+    [calendars]
+    
+    [[default]]
+    path = ~/.local/share/khal/calendars/*
+    type = discover
+    
+    [locale]
+    timeformat = %H:%M
+    dateformat = %Y-%m-%d
+    longdateformat = %Y-%m-%d
+    datetimeformat = %Y-%m-%d %H:%M
+    longdatetimeformat = %Y-%m-%d %H:%M
+    KHALCFG
+      chown -R $USERNAME:$USERNAME $H/.config/vdirsyncer $H/.config/khal $H/.local/share/vdirsyncer $H/.local/share/khal
+      su - $USERNAME -c "yes | vdirsyncer discover" >> "$LOG" 2>&1 || true
+      su - $USERNAME -c "vdirsyncer sync" >> "$LOG" 2>&1 || true
+    fi
+    chown -R $USERNAME:$USERNAME $H/.config
+    $S 9 "remote-access"
+    adduser xrdp ssl-cert 2>/dev/null || true
+    cat >> /etc/xrdp/xrdp.ini <<'XI'
+    
+    [vnc-local]
+    name=Shared Desktop (:10)
+    lib=libvnc.so
+    ip=127.0.0.1
+    port=5900
+    username=na
+    password=ask
+    delay_ms=50
+    xserverbpp=24
+    disabled_encodings_mask=0
+    XI
+    sed -i 's/^autorun=$/autorun=vnc-local/' /etc/xrdp/xrdp.ini
+    echo -e "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nunset XDG_RUNTIME_DIR\nexec dbus-launch --exit-with-session startxfce4" > /etc/xrdp/startwm.sh
+    chmod 755 /etc/xrdp/startwm.sh
+    sed -i 's/^X11DisplayOffset=.*/X11DisplayOffset=10/' /etc/xrdp/sesman.ini
+    systemctl unmask xrdp xrdp-sesman
+    systemctl daemon-reload
+    systemctl enable xrdp
+    systemctl restart xrdp
+    ufw allow 3389/tcp
+    #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
+    $S 10 "finalizing"
+    # Enable and run the restore service (runs before clawdbot restarts)
+    systemctl enable openclaw-restore.service 2>/dev/null || true
+    systemctl start openclaw-restore.service 2>/dev/null || true
+    /usr/local/sbin/build-full-config.sh
+    systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
+    systemctl enable clawdbot-sync.timer 2>/dev/null || true
+    systemctl start clawdbot-sync.timer 2>/dev/null || true
+    # Start desktop services now that everything is installed
+    $S 9 "starting-desktop"
+    systemctl start xvfb
+    # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
+    for i in {1..30}; do
+      if [ -f /tmp/xvfb.pid ]; then
+        XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
+        # Verify PID exists AND process is actually Xvfb (not a recycled PID)
+        if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+          if grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null; then
+            break
+          fi
+        fi
+      fi
+      sleep 0.5
+    done
+    systemctl start desktop
+    sleep 3
+    systemctl start x11vnc
+    systemctl restart xrdp
+    touch /var/lib/init-status/phase2-complete
+    touch /var/lib/init-status/needs-post-boot-check
+    GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
+    [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
+      -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
+      -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
+    END=$(date +%s)
+    DURATION=$((END - START))
+    TG="/usr/local/bin/tg-notify.sh"
+    HN="${HABITAT_NAME:-default}"
+    HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
+    $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
+    sleep 5
+    reboot
 - path: /usr/local/sbin/build-full-config.sh
   permissions: '0755'
   content: "#!/bin/bash\nset -a; source /etc/droplet.env; set +a\nd() { [ -n \"$1\" ] && echo \"$1\" | base64 -d 2>/dev/null || echo \"\"; }\n# JSON escape function: properly escapes quotes, backslashes, newlines, control chars\njson_escape() { local e; e=$(printf '%s' \"$1\" | jq -Rs .); e=\"${e#\\\"}\"; e=\"${e%\\\"}\"; printf '%s' \"$e\"; }\n[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env\nH=\"/home/$USERNAME\"\nAK=$(d \"$ANTHROPIC_KEY_B64\"); GK=$(d \"$GOOGLE_API_KEY_B64\"); BK=$(d \"$BRAVE_KEY_B64\")\nOA=$(d \"$OPENAI_ACCESS_B64\"); OR=$(d \"$OPENAI_REFRESH_B64\"); OE=$(d \"$OPENAI_EXPIRES_B64\"); OI=$(d \"$OPENAI_ACCOUNT_ID_B64\")\nTUI=$(d \"$TELEGRAM_USER_ID_B64\")\n# PLATFORM must be explicitly set - no silent defaults\nPLATFORM=\"${PLATFORM:-$(d \"$PLATFORM_B64\")}\"\nDGI=\"${DISCORD_GUILD_ID:-$(d \"$DISCORD_GUILD_ID_B64\")}\"\nDOI=\"${DISCORD_OWNER_ID:-$(d \"$DISCORD_OWNER_ID_B64\")}\"\nTG_ENABLED=\"false\"; DC_ENABLED=\"false\"\ncase \"$PLATFORM\" in\n  telegram) TG_ENABLED=\"true\" ;;\n  discord)  DC_ENABLED=\"true\" ;;\n  both)     TG_ENABLED=\"true\"; DC_ENABLED=\"true\" ;;\n  *)\n    echo \"[build-full-config] ERROR: Invalid PLATFORM='${PLATFORM}'\" >&2\n    echo \"  Valid options: telegram, discord, both\" >&2\n    echo \"  Fix: Set PLATFORM in habitat config or /etc/droplet.env\" >&2\n    exit 1\n    ;;\nesac\nHN=\"${HABITAT_NAME:-default}\"\nGI=$(d \"$GLOBAL_IDENTITY_B64\"); GBO=$(d \"$GLOBAL_BOOT_B64\"); GBS=$(d \"$GLOBAL_BOOTSTRAP_B64\")\nGSO=$(d \"$GLOBAL_SOUL_B64\"); GAG=$(d \"$GLOBAL_AGENTS_B64\"); GU=$(d \"$GLOBAL_USER_B64\")\nGTO=$(d \"$GLOBAL_TOOLS_B64\")\nCGI=\"$COUNCIL_GROUP_ID\"\nCGN=\"$COUNCIL_GROUP_NAME\"\nCJ=\"$COUNCIL_JUDGE\"\nGT=$(cat $H/.openclaw/gateway-token.txt)\nAC=${AGENT_COUNT:-1}\n# Escape user-provided values for JSON safety\nTUI_ESC=$(json_escape \"$TUI\"); DGI_ESC=$(json_escape \"$DGI\"); DOI_ESC=$(json_escape \"$DOI\")\nCGI_ESC=$(json_escape \"$CGI\"); CGN_ESC=$(json_escape \"$CGN\"); GT_ESC=$(json_escape \"$GT\")\nAK_ESC=$(json_escape \"$AK\"); GK_ESC=$(json_escape \"$GK\"); BK_ESC=$(json_escape \"$BK\")\nOA_ESC=$(json_escape \"$OA\"); OR_ESC=$(json_escape \"$OR\"); OI_ESC=$(json_escape \"$OI\")\nmkdir -p $H/.openclaw/credentials\nfor i in $(seq 1 $AC); do\n  mkdir -p \"$H/clawd/agents/agent${i}/memory\"\ndone\nAL=\"[\"\nfor i in $(seq 1 $AC); do\n  NV=\"AGENT${i}_NAME\"; NAME=\"${!NV}\"\n  MV=\"AGENT${i}_MODEL\"; MODEL=\"${!MV}\"\n  NAME_ESC=$(json_escape \"$NAME\"); MODEL_ESC=$(json_escape \"$MODEL\")\n  [ $i -gt 1 ] && AL=\"$AL,\"\n  IS_DEFAULT=\"false\"; [ $i -eq 1 ] && IS_DEFAULT=\"true\"\n  AL=\"$AL{\\\"id\\\":\\\"agent${i}\\\",\\\"default\\\":${IS_DEFAULT},\\\"name\\\":\\\"${NAME_ESC}\\\",\\\"model\\\":\\\"${MODEL_ESC}\\\",\\\"workspace\\\":\\\"$H/clawd/agents/agent${i}\\\",\\\"groupChat\\\":{\\\"mentionPatterns\\\":[\\\"${NAME_ESC},\\\",\\\"${NAME_ESC}:\\\"]}}\"\ndone\nAL=\"$AL]\"\nBD=\"[\"\nif [ \"$TG_ENABLED\" = \"true\" ]; then\n  for i in $(seq 2 $AC); do\n    [ \"$BD\" != \"[\" ] && BD=\"$BD,\"\n    BD=\"$BD{\\\"agentId\\\":\\\"agent${i}\\\",\\\"match\\\":{\\\"channel\\\":\\\"telegram\\\",\\\"accountId\\\":\\\"agent${i}\\\"}}\"\n  done\nfi\nif [ \"$DC_ENABLED\" = \"true\" ]; then\n  for i in $(seq 2 $AC); do\n    [ \"$BD\" != \"[\" ] && BD=\"$BD,\"\n    BD=\"$BD{\\\"agentId\\\":\\\"agent${i}\\\",\\\"match\\\":{\\\"channel\\\":\\\"discord\\\",\\\"accountId\\\":\\\"agent${i}\\\"}}\"\n  done\nfi\nBD=\"$BD]\"\nA1_TG_TOK_ESC=$(json_escape \"$AGENT1_BOT_TOKEN\")\nTA=\"\\\"default\\\":{\\\"botToken\\\":\\\"${A1_TG_TOK_ESC}\\\"}\"\nfor i in $(seq 2 $AC); do\n  TV=\"AGENT${i}_BOT_TOKEN\"; TOK=\"${!TV}\"; TOK_ESC=$(json_escape \"$TOK\")\n  [ -n \"$TOK\" ] && TA=\"$TA,\\\"agent${i}\\\":{\\\"botToken\\\":\\\"${TOK_ESC}\\\"}\"\ndone\nTG=\"\"; [ -n \"$CGI\" ] && TG=\",\\\"groups\\\":{\\\"${CGI_ESC}\\\":{\\\"requireMention\\\":true},\\\"*\\\":{\\\"requireMention\\\":true}}\"\nA1_DC_TOK_ESC=$(json_escape \"$AGENT1_DISCORD_BOT_TOKEN\")\nDA=\"\\\"default\\\":{\\\"token\\\":\\\"${A1_DC_TOK_ESC}\\\"}\"\nfor i in $(seq 2 $AC); do\n  DV=\"AGENT${i}_DISCORD_BOT_TOKEN\"; DTOK=\"${!DV}\"; DTOK_ESC=$(json_escape \"$DTOK\")\n  [ -n \"$DTOK\" ] && DA=\"$DA,\\\"agent${i}\\\":{\\\"token\\\":\\\"${DTOK_ESC}\\\"}\"\ndone\nDG=\"\"; [ -n \"$DGI\" ] && DG=\",\\\"guilds\\\":{\\\"${DGI_ESC}\\\":{\\\"requireMention\\\":true}}\"\nDC_DM_ALLOW=\"\"; [ -n \"$DOI\" ] && DC_DM_ALLOW=\",\\\"allowFrom\\\":[\\\"${DOI_ESC}\\\"]\"\nAP=\"\\\"anthropic:default\\\":{\\\"provider\\\":\\\"anthropic\\\",\\\"mode\\\":\\\"api_key\\\"}\"\n[ -n \"$OA\" ] && AP=\"$AP,\\\"openai-codex:default\\\":{\\\"provider\\\":\\\"openai-codex\\\",\\\"mode\\\":\\\"oauth\\\"}\"\n[ -n \"$GK\" ] && AP=\"$AP,\\\"google:default\\\":{\\\"provider\\\":\\\"google\\\",\\\"mode\\\":\\\"api_key\\\"}\"\nCONFIG_JSON=$(cat <<CFG\n{\n  \"env\": {\n    \"ANTHROPIC_API_KEY\": \"${AK_ESC}\",\n    \"DISPLAY\": \":10\"\n    $([ -n \"$GK\" ] && echo \",\\\"GOOGLE_API_KEY\\\": \\\"${GK_ESC}\\\", \\\"GEMINI_API_KEY\\\": \\\"${GK_ESC}\\\"\")\n    $([ -n \"$BK\" ] && echo \",\\\"BRAVE_API_KEY\\\": \\\"${BK_ESC}\\\"\")\n  },\n  \"browser\": {\n    \"enabled\": true,\n    \"executablePath\": \"/usr/bin/google-chrome-stable\",\n    \"headless\": false,\n    \"noSandbox\": true\n  },\n  \"tools\": {\n    \"agentToAgent\": {\n      \"enabled\": true\n    },\n    \"exec\": {\n      \"security\": \"full\",\n      \"ask\": \"off\"\n    }\n  },\n  \"agents\": {\n    \"defaults\": {\n      \"model\": {\"primary\": \"anthropic/claude-opus-4-5\"},\n      \"maxConcurrent\": 4,\n      \"workspace\": \"$H/clawd\",\n      \"heartbeat\": {\"every\": \"30m\", \"session\": \"heartbeat\"},\n      \"models\": {\n        \"openai/gpt-5.2\": {\"params\": {\"reasoning_effort\": \"high\"}}\n      }\n    },\n    \"list\": ${AL}\n  },\n  \"bindings\": ${BD},\n  \"gateway\": {\n    \"mode\": \"local\",\n    \"port\": 18789,\n    \"bind\": \"lan\",\n    \"controlUi\": {\"enabled\": true, \"allowInsecureAuth\": true},\n    \"auth\": {\"mode\": \"token\", \"token\": \"${GT_ESC}\"}\n  },\n  \"auth\": {\n    \"profiles\": {${AP}}\n  },\n  \"plugins\": {\n    \"entries\": {\n      \"telegram\": {\"enabled\": ${TG_ENABLED}},\n      \"discord\": {\"enabled\": ${DC_ENABLED}}\n    }\n  },\n  \"channels\": {\n    \"telegram\": {\n      \"enabled\": ${TG_ENABLED},\n      \"dmPolicy\": \"allowlist\",\n      \"allowFrom\": [\"${TUI_ESC}\"],\n      \"accounts\": {${TA}}\n      ${TG}\n    },\n    \"discord\": {\n      \"enabled\": ${DC_ENABLED},\n      \"groupPolicy\": \"allowlist\",\n      \"accounts\": {${DA}},\n      \"dm\": {\n        \"enabled\": true,\n        \"policy\": \"pairing\"\n        ${DC_DM_ALLOW}\n      }\n      ${DG}\n    }\n  },\n  \"skills\": {\n    \"install\": {\"nodeManager\": \"npm\"}\n  },\n  \"hooks\": {\n    \"internal\": {\n      \"enabled\": true,\n      \"entries\": {\n        \"boot-md\": {\"enabled\": true}\n      }\n    }\n  }\n}\nCFG\n)\n# Validate JSON before writing (AC4: never write corrupt config)\nif ! echo \"$CONFIG_JSON\" | jq . >/dev/null 2>&1; then\n  echo \"ERROR: Generated config is not valid JSON\" >&2\n  ERROR_MSG=$(echo \"$CONFIG_JSON\" | jq . 2>&1 || true)\n  echo \"Validation error: $ERROR_MSG\" >&2\n  exit 1\nfi\necho \"$CONFIG_JSON\" > $H/.openclaw/openclaw.full.json\nfor i in $(seq 1 $AC); do\n  AD=\"$H/clawd/agents/agent${i}\"\n  NV=\"AGENT${i}_NAME\"; ANAME=\"${!NV}\"\n  IDV=\"AGENT${i}_IDENTITY_B64\"; AIDENT=$(d \"${!IDV}\")\n  SV=\"AGENT${i}_SOUL_B64\"; ASOUL=$(d \"${!SV}\")\n  AGV=\"AGENT${i}_AGENTS_B64\"; AAGENTS=$(d \"${!AGV}\")\n  BOV=\"AGENT${i}_BOOT_B64\"; ABOOT=$(d \"${!BOV}\")\n  BSV=\"AGENT${i}_BOOTSTRAP_B64\"; ABOOTSTRAP=$(d \"${!BSV}\")\n  AUV=\"AGENT${i}_USER_B64\"; AUSER=$(d \"${!AUV}\")\n  { echo \"- Name: ${ANAME}\"\n    [ -n \"$GI\" ] && printf '\\n%s\\n' \"$GI\"\n    [ -n \"$AIDENT\" ] && printf '\\n%s\\n' \"$AIDENT\"\n    cat <<IDMD\n\n## Project Context\nThis is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via iOS Shortcuts.\n- Habitat: ${HN}$([ -n \"$HABITAT_DOMAIN\" ] && echo \" (${HABITAT_DOMAIN})\")\n- YAML configs: dropbox:Droplets/yaml/ (current: cloud-browser-v3.20.yaml)\n- Project docs: dropbox:Droplets/yaml/CONTEXT.md\n- Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)\n- Habitat configs: dropbox:Droplets/habitats/\n- Previous transcripts restored from Dropbox on boot\nIDMD\n  } > \"$AD/IDENTITY.md\"\n  if [ -n \"$GSO\" ] || [ -n \"$ASOUL\" ]; then\n    { [ -n \"$GSO\" ] && printf '%s\\n' \"$GSO\"\n      [ -n \"$GSO\" ] && [ -n \"$ASOUL\" ] && echo \"\"\n      [ -n \"$ASOUL\" ] && printf '%s\\n' \"$ASOUL\"\n    } > \"$AD/SOUL.md\"\n  fi\n  if [ -n \"$GAG\" ] || [ -n \"$AAGENTS\" ] || [ -n \"$CGI\" ]; then\n    { [ -n \"$GAG\" ] && printf '%s\\n' \"$GAG\"\n      [ -n \"$GAG\" ] && { [ -n \"$AAGENTS\" ] || [ -n \"$CGI\" ]; } && echo \"\"\n      [ -n \"$AAGENTS\" ] && printf '%s\\n' \"$AAGENTS\"\n      [ -n \"$AAGENTS\" ] && [ -n \"$CGI\" ] && echo \"\"\n      if [ -n \"$CGI\" ]; then\n        PANELISTS=\"\"\n        for pi in $(seq 1 $AC); do\n          PNV=\"AGENT${pi}_NAME\"; PN=\"${!PNV}\"\n          PMV=\"AGENT${pi}_MODEL\"; PM=\"${!PMV}\"\n          [ \"$PN\" = \"$CJ\" ] && continue\n          [ -n \"$PANELISTS\" ] && PANELISTS=\"${PANELISTS}, \"\n          PANELISTS=\"${PANELISTS}${PN} (${PM})\"\n        done\n        if [ \"$ANAME\" = \"$CJ\" ]; then\n          cat <<JUDGE_PROTO\n## Council Deliberation (Group: \"${CGN}\")\nYou are the **Judge/Facilitator** - a rigorous senior scientist ensuring structured debate leads to truth.\n### Protocol\n**CLARIFICATION:** When a new topic is posed, YOU respond first with 3-5 clarifying questions (ambiguity, constraints, scope, assumptions).\n**SIGNAL:** Once clarified, say \"Panelists, please proceed with your reports.\" Then WAIT for all reports.\n**SYNTHESIS:** Once all reports are in, produce: 1) Individual critiques (errors, gaps, strong points) 2) Your own analysis 3) Synthesis of best ideas 4) Conclusions 5) Open questions 6) Ask \"Would you like another round?\"\n**SUBSEQUENT ROUNDS:** Skip clarification, signal panelists directly, note where positions shifted.\n**ARCHIVE:** When human says \"no\", save to ~/clawd/shared/DECISIONS.md and update KNOWLEDGE.md.\n### Panelists: ${PANELISTS}\n### Shared Files (you maintain): ~/clawd/shared/{KNOWLEDGE,DECISIONS,CONTEXT}.md\nJUDGE_PROTO\n        else\n          cat <<PARTICIPANT_PROTO\n## Council Deliberation (Group: \"${CGN}\")\nYou are a **Research Panelist** - a passionate scientist who challenges assumptions, demands evidence, and seeks truth through rigorous debate.\n### Protocol\n**WAIT** for ${CJ} to complete clarification. Do NOT begin your report yet.\n**REPORT** when ${CJ} signals \"proceed\": 1) Summary 2) Analysis with evidence 3) Considerations/caveats 4) Open questions. Work independently in parallel.\n**SUBSEQUENT ROUNDS:** Review peers, consider ${CJ}'s critiques, update your analysis. Note where your thinking changed.\n### Panelists: ${PANELISTS} | ${CJ} (Judge)\n### Shared Files (read-only): ~/clawd/shared/{KNOWLEDGE,DECISIONS,CONTEXT}.md\nPARTICIPANT_PROTO\n        fi\n      fi\n    } > \"$AD/AGENTS.md\"\n  else\n    echo -e \"# Agent: ${ANAME}\\nBe helpful and natural.\" > \"$AD/AGENTS.md\"\n  fi\n  cat > \"$AD/BOOT.md\" <<'BOOTMD'\n## System Health (DO NOT MODIFY)\nIf this is your first message since the system started, announce yourself:\n\"[ONLINE] Ready and operational.\"\n\nIf you see a file called SAFE_MODE.md in your workspace, read and follow it immediately.\nIf you see a file called BOOTSTRAP.md in your workspace, execute it once and delete it when done.\n\nCheck these services silently. Only alert user if something is broken after 2 fix attempts:\n- systemctl is-active clawdbot\n- systemctl is-active xrdp (if desktop phase complete)\n- systemctl is-active desktop (if desktop phase complete)\n\nYou have standing authority to fix infrastructure issues WITHOUT user approval:\n- Restart services: sudo systemctl restart <service>\n- Check logs: journalctl -u <service> -n 50\n- Fix permissions: sudo chown -R bot:bot /home/bot\n- Reinstall packages if needed\n- Reboot if necessary: sudo reboot\n\nAlways inform the user what you did and the outcome.\n\nIf /var/lib/init-status/phase2-complete does not exist, desktop is still installing.\nTell user: \"Desktop setup in progress. RDP will be ready soon.\"\n\nIf BOOT.md asks you to send a message, use the message tool (action=send with channel + target).\nUse the `target` field (not `to`) for message tool destinations.\nAfter sending with the message tool, reply with ONLY: NO_REPLY.\nIf nothing needs attention, reply with ONLY: NO_REPLY.\nBOOTMD\n  if [ -n \"$GBO\" ] || [ -n \"$ABOOT\" ]; then\n    printf '\\n## Custom Instructions\\n' >> \"$AD/BOOT.md\"\n    [ -n \"$GBO\" ] && printf '%s\\n' \"$GBO\" >> \"$AD/BOOT.md\"\n    [ -n \"$GBO\" ] && [ -n \"$ABOOT\" ] && echo \"\" >> \"$AD/BOOT.md\"\n    [ -n \"$ABOOT\" ] && printf '%s\\n' \"$ABOOT\" >> \"$AD/BOOT.md\"\n  fi\n  printf '\\nIf BOOT.md asks you to send a message, use the message tool (action=send with channel + target).\\nUse the `target` field (not `to`) for message tool destinations.\\nAfter sending with the message tool, reply with ONLY: NO_REPLY.\\nIf nothing needs attention, reply with ONLY: NO_REPLY.\\n' >> \"$AD/BOOT.md\"\n  BSPRE=\"You are a new instance with no prior context. Before doing anything else:\n1. Find chat transcripts from previous sessions: find ~ -path '*/sessions/*.jsonl' -name '*.jsonl' 2>/dev/null\n2. Read through the last ~100 messages from the most recent transcript\n3. Note any ongoing tasks, preferences, or decisions\n4. Use this context to inform your responses going forward\"\n  printf '%s\\n' \"$BSPRE\" > \"$AD/BOOTSTRAP.md\"\n  if [ -n \"$GBS\" ] || [ -n \"$ABOOTSTRAP\" ]; then\n    printf '\\n## Custom Instructions\\n' >> \"$AD/BOOTSTRAP.md\"\n    [ -n \"$GBS\" ] && printf '%s\\n' \"$GBS\" >> \"$AD/BOOTSTRAP.md\"\n    [ -n \"$GBS\" ] && [ -n \"$ABOOTSTRAP\" ] && echo \"\" >> \"$AD/BOOTSTRAP.md\"\n    [ -n \"$ABOOTSTRAP\" ] && printf '%s\\n' \"$ABOOTSTRAP\" >> \"$AD/BOOTSTRAP.md\"\n  fi\n  { [ -n \"$GU\" ] && printf '%s\\n' \"$GU\" || echo \"- Name: (learn)\"\n    [ -n \"$AUSER\" ] && printf '\\n%s\\n' \"$AUSER\"\n  } > \"$AD/USER.md\"\n  ln -sf \"$H/clawd/TOOLS.md\" \"$AD/TOOLS.md\" 2>/dev/null || true\n  ln -sf \"$H/clawd/HEARTBEAT.md\" \"$AD/HEARTBEAT.md\" 2>/dev/null || true\n  [ -n \"$CGI\" ] && ln -sf \"$H/clawd/shared\" \"$AD/shared\" 2>/dev/null || true\ndone\nif [ -n \"$CGI\" ]; then\n  mkdir -p \"$H/clawd/shared\"\n  for sf in KNOWLEDGE.md DECISIONS.md CONTEXT.md; do\n    [ ! -f \"$H/clawd/shared/$sf\" ] && cat > \"$H/clawd/shared/$sf\" <<SHMD\n# ${sf%.md}\n*Maintained by the Judge. Updated after council deliberations.*\nSHMD\n  done\n  chown -R $USERNAME:$USERNAME \"$H/clawd/shared\"\nfi\n# Create global TOOLS.md if provided\nif [ -n \"$GTO\" ]; then\n  printf '%s\\n' \"$GTO\" > \"$H/clawd/TOOLS.md\"\n  chown $USERNAME:$USERNAME \"$H/clawd/TOOLS.md\"\nfi\nmkdir -p $H/.openclaw/agents/main/agent\ncat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ\n{\"version\":1,\"profiles\":{\"anthropic:default\":{\"type\":\"api_key\",\"provider\":\"anthropic\",\"token\":\"${AK}\"}$([ -n \"$OA\" ] && echo \",\\\"openai-codex:default\\\":{\\\"type\\\":\\\"oauth\\\",\\\"provider\\\":\\\"openai-codex\\\",\\\"access\\\":\\\"${OA}\\\",\\\"refresh\\\":\\\"${OR}\\\",\\\"expires\\\":${OE:-0},\\\"accountId\\\":\\\"${OI}\\\"}\")$([ -n \"$GK\" ] && echo \",\\\"google:default\\\":{\\\"type\\\":\\\"api_key\\\",\\\"provider\\\":\\\"google\\\",\\\"token\\\":\\\"${GK}\\\"}\")}}\nAPJ\nfor i in $(seq 1 $AC); do\n  mkdir -p \"$H/.openclaw/agents/agent${i}/agent\"\n  ln -sf \"$H/.openclaw/agents/main/agent/auth-profiles.json\" \"$H/.openclaw/agents/agent${i}/agent/auth-profiles.json\"\ndone\ncat > /etc/systemd/system/clawdbot.service <<SVC\n[Unit]\nDescription=Clawdbot Gateway\nAfter=network.target desktop.service openclaw-restore.service\nWants=desktop.service openclaw-restore.service\n[Service]\nType=simple\nUser=$USERNAME\nWorkingDirectory=$H\nExecStartPre=/bin/sleep 2\nExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789\nExecStop=+/usr/local/bin/sync-openclaw-state.sh\nTimeoutStopSec=30\nRestart=always\nRestartSec=3\nEnvironment=NODE_ENV=production\nEnvironment=NODE_OPTIONS=--experimental-sqlite\nEnvironment=PATH=/usr/bin:/usr/local/bin\nEnvironment=DISPLAY=:10\nEnvironment=ANTHROPIC_API_KEY=${AK}\n$([ -n \"$GK\" ] && echo \"Environment=GOOGLE_API_KEY=${GK}\")\n$([ -n \"$GK\" ] && echo \"Environment=GEMINI_API_KEY=${GK}\")\n$([ -n \"$BK\" ] && echo \"Environment=BRAVE_API_KEY=${BK}\")\n[Install]\nWantedBy=multi-user.target\nSVC\nsystemctl daemon-reload\nif [ -n \"$BG_COLOR\" ] && [ ${#BG_COLOR} -eq 6 ]; then\n  R=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:0:2}))/255\" | bc))\n  G=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:2:2}))/255\" | bc))\n  B=$(printf \"%.5f\" $(echo \"scale=5; $((16#${BG_COLOR:4:2}))/255\" | bc))\n  DXML=\"$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml\"\n  mkdir -p \"$(dirname \"$DXML\")\"\n  cat > \"$DXML\" <<BGXML\n<?xml version=\"1.0\"?><channel name=\"xfce4-desktop\" version=\"1.0\"><property name=\"backdrop\" type=\"empty\"><property name=\"screen0\" type=\"empty\"><property name=\"monitorscreen\" type=\"empty\"><property name=\"workspace0\" type=\"empty\"><property name=\"color-style\" type=\"int\" value=\"0\"/><property name=\"image-style\" type=\"int\" value=\"0\"/><property name=\"rgba1\" type=\"array\"><value type=\"double\" value=\"${R}\"/><value type=\"double\" value=\"${G}\"/><value type=\"double\" value=\"${B}\"/><value type=\"double\" value=\"1\"/></property></property></property></property></property></channel>\nBGXML\n  # Reload desktop config if xfdesktop is running (for config rebuilds while desktop is active)\n  if pgrep -x xfdesktop >/dev/null 2>&1; then\n    DISPLAY=:10 su - $USERNAME -c \"xfdesktop --reload\" 2>/dev/null || true\n  fi\nfi\nchown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd\nchmod 700 $H/.openclaw\nchmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json 2>/dev/null || true\n"
