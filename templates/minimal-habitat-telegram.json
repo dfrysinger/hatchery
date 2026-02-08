@@ -1,0 +1,13 @@
+{
+  "name": "MyHabitat",
+  "platform": "telegram",
+  "telegram": {
+    "ownerId": "YOUR_TELEGRAM_USER_ID"
+  },
+  "agents": [
+    {
+      "agent": "claude",
+      "telegramBotToken": "YOUR_BOT_TOKEN"
+    }
+  ]
+}
