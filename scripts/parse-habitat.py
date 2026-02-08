@@ -71,6 +71,8 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     f.write('COUNCIL_GROUP_NAME="{}"\n'.format(council.get("groupName", "")))
     f.write('COUNCIL_JUDGE="{}"\n'.format(council.get("judge", "")))
     f.write('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
+    # API server bind address (default: 0.0.0.0 for iOS Shortcut remote access)
+    f.write('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "0.0.0.0")))
     f.write('GLOBAL_IDENTITY_B64="{}"\n'.format(b64(hab.get("globalIdentity", ""))))
     f.write('GLOBAL_BOOT_B64="{}"\n'.format(b64(hab.get("globalBoot", ""))))
     f.write('GLOBAL_BOOTSTRAP_B64="{}"\n'.format(b64(hab.get("globalBootstrap", ""))))
