@@ -1,16 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# restore-openclaw-state.sh -- Restore bot memory and transcripts from Dropbox
+# restore-openclaw-state.sh -- Restore bot workspace, memory and transcripts from Dropbox
 # =============================================================================
-# Purpose:  Restores MEMORY.md, USER.md, agent memory dirs, and session
-#           transcripts (*.jsonl) from Dropbox cloud storage on boot.
+# Purpose:  Restores workspace files (AGENTS.md, SOUL.md, etc.), memory dirs,
+#           and session transcripts (*.jsonl) from Dropbox cloud storage on boot.
 #           Retries once if initial restore gets zero transcripts.
 #           Includes path validation to prevent dangerous operations.
 #
 # Inputs:   /etc/droplet.env -- DROPBOX_TOKEN_B64
 #           /etc/habitat-parsed.env -- HABITAT_NAME, AGENT_COUNT, USERNAME
 #
-# Outputs:  $HOME/clawd/MEMORY.md, USER.md -- shared memory files
+# Outputs:  $HOME/clawd/MEMORY.md, USER.md, TOOLS.md, HEARTBEAT.md -- shared files
+#           $HOME/clawd/shared/ -- shared directory
+#           $HOME/clawd/agents/*/{AGENTS,SOUL,IDENTITY,BOOT,BOOTSTRAP,USER}.md -- workspace
 #           $HOME/clawd/agents/*/memory/ -- per-agent memory
 #           $HOME/.openclaw/agents/*/sessions/*.jsonl -- chat transcripts
 #
@@ -47,6 +49,12 @@ R="dropbox:clawdbot-memory/${HN}"
 AC=${AGENT_COUNT:-1}
 FAIL=0
 
+# Workspace files to restore per-agent
+WORKSPACE_FILES="AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md"
+
+# Shared files to restore (to clawd root)
+SHARED_FILES="TOOLS.md HEARTBEAT.md"
+
 # Validate remote path is not empty or dangerous
 if [ -z "$HN" ] || [ "$HN" = "/" ]; then
     echo "ERROR: HABITAT_NAME is empty or invalid - refusing to restore" >&2
@@ -55,12 +63,32 @@ fi
 
 echo "Restoring from $R"
 
-# Restore shared memory files
-for f in MEMORY.md USER.md; do
+# Restore shared memory and workspace files
+for f in MEMORY.md USER.md $SHARED_FILES; do
     SRC="$R/$f"
     DST="$H/clawd/"
-    echo "  memory: $f"
-    safe_rclone_su_copy "$USERNAME" "$SRC" "$DST" -v || { echo "  WARN: $f failed"; FAIL=$((FAIL+1)); }
+    echo "  shared: $f"
+    safe_rclone_su_copy "$USERNAME" "$SRC" "$DST" -v || { echo "  WARN: $f not found or failed"; }
+done
+
+# Restore shared directory
+echo "  shared: shared/"
+safe_rclone_su_copy "$USERNAME" "$R/shared/" "$H/clawd/shared/" -v || { echo "  WARN: shared/ not found or failed"; }
+
+# Restore per-agent workspace files
+for i in $(seq 1 $AC); do
+    a="agent${i}"
+    AD="$H/clawd/agents/$a"
+    [ -d "$AD" ] || continue
+    
+    for f in $WORKSPACE_FILES; do
+        SRC="$R/agents/${a}/$f"
+        DST="$AD/"
+        # Don't overwrite if destination is a symlink (shared files)
+        [ -L "$AD/$f" ] && continue
+        echo "  workspace: $a/$f"
+        safe_rclone_su_copy "$USERNAME" "$SRC" "$DST" -v || true
+    done
 done
 
 # Restore per-agent memory directories
@@ -87,8 +115,8 @@ done
 
 chown -R "$USERNAME:$USERNAME" "$H/clawd" "$H/.openclaw"
 TC=$(find "$H/.openclaw" -name '*.jsonl' 2>/dev/null | wc -l)
-echo "Restored $TC transcript files ($FAIL warnings)"
-MC=$(find "$H/clawd" -name 'MEMORY.md' -o -name 'USER.md' 2>/dev/null | xargs -I{} sh -c '[ -s "{}" ] && echo 1' | wc -l)
+WC=$(find "$H/clawd/agents" -maxdepth 2 -name '*.md' ! -type l 2>/dev/null | wc -l)
+echo "Restored $TC transcript files, $WC workspace files ($FAIL warnings)"
 
 # Retry logic for failed restores
 if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
@@ -108,7 +136,7 @@ if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
     TC=$TC2
 fi
 
-if [ "$TC" -eq 0 ] && [ "$MC" -eq 0 ]; then
-    echo "WARNING: Nothing restored - possible Dropbox token issue"
-    $TG "[WARN] Memory restore got 0 files. Dropbox token may be invalid. Bot starting with empty memory." || true
+if [ "$TC" -eq 0 ] && [ "$WC" -eq 0 ]; then
+    echo "WARNING: Nothing restored - possible Dropbox token issue or fresh habitat"
+    $TG "[WARN] Memory restore got 0 files. Dropbox token may be invalid or this is a fresh habitat." || true
 fi

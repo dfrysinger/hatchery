@@ -1,9 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# sync-openclaw-state.sh -- Sync bot memory and transcripts to Dropbox
+# sync-openclaw-state.sh -- Sync bot workspace, memory and transcripts to Dropbox
 # =============================================================================
-# Purpose:  Uploads MEMORY.md, USER.md, agent memory dirs, and session
-#           transcripts (*.jsonl) to Dropbox cloud storage for persistence.
+# Purpose:  Uploads workspace files (AGENTS.md, SOUL.md, etc.), memory dirs,
+#           and session transcripts (*.jsonl) to Dropbox cloud storage.
 #           Includes path validation to prevent dangerous operations.
 #
 # Inputs:   /etc/droplet.env -- DROPBOX_TOKEN_B64
@@ -36,15 +36,43 @@ H="/home/$USERNAME"
 R="dropbox:clawdbot-memory/${HN}"
 AC=${AGENT_COUNT:-1}
 
-# (prefix validation handled in rclone-validate.sh)
+# Workspace files to sync per-agent
+WORKSPACE_FILES="AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md"
 
-# Sync shared memory files
-for f in MEMORY.md USER.md; do
+# Shared files to sync (from clawd root)
+SHARED_FILES="TOOLS.md HEARTBEAT.md"
+
+# Sync shared workspace files
+for f in MEMORY.md USER.md $SHARED_FILES; do
     SRC="$H/clawd/$f"
     DST="$R/"
+    # Skip symlinks to avoid duplicating shared files
+    [ -L "$SRC" ] && continue
     if [ -f "$SRC" ]; then
         safe_rclone_su_copy "$USERNAME" "$SRC" "$DST" 2>/dev/null || true
     fi
+done
+
+# Sync shared directory
+if [ -d "$H/clawd/shared" ] && [ ! -L "$H/clawd/shared" ]; then
+    safe_rclone_su_copy "$USERNAME" "$H/clawd/shared/" "$R/shared/" 2>/dev/null || true
+fi
+
+# Sync per-agent workspace files
+for i in $(seq 1 $AC); do
+    a="agent${i}"
+    AD="$H/clawd/agents/$a"
+    [ -d "$AD" ] || continue
+    
+    for f in $WORKSPACE_FILES; do
+        SRC="$AD/$f"
+        DST="$R/agents/${a}/"
+        # Skip symlinks to avoid duplicating shared files
+        [ -L "$SRC" ] && continue
+        if [ -f "$SRC" ]; then
+            safe_rclone_su_copy "$USERNAME" "$SRC" "$DST" 2>/dev/null || true
+        fi
+    done
 done
 
 # Sync per-agent memory directories
