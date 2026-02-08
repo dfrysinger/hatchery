@@ -310,7 +310,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     ]
     
     # Completed
-    lines.append("### ✅ Completed Yesterday")
+    lines.append("### [DONE] Completed Yesterday")
     if completed:
         for task in completed[:MAX_COMPLETED_TASKS]:
             lines.append(format_task(task, show_details=False))
@@ -319,7 +319,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     lines.append("")
     
     # In Progress
-    lines.append("### 🏗️ In Progress")
+    lines.append("### [WIP] In Progress")
     if in_progress:
         for task in in_progress[:MAX_IN_PROGRESS_TASKS]:
             lines.append(format_task(task, show_details=True))
@@ -328,7 +328,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     lines.append("")
     
     # Blocked
-    lines.append("### ⏸️ Blocked")
+    lines.append("### [BLOCKED] Blocked")
     if blocked:
         for task in blocked[:MAX_BLOCKED_TASKS]:
             lines.append(format_task(task, show_details=True))
@@ -337,7 +337,7 @@ def format_standup(data: Dict[str, Any], date: str = None) -> str:
     lines.append("")
     
     # Up Next
-    lines.append("### 📋 Up Next")
+    lines.append("### [TODO] Up Next")
     if up_next:
         for task in up_next[:MAX_UP_NEXT_TASKS]:
             lines.append(format_task(task, show_details=False))
@@ -403,20 +403,20 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
     ]
     
     # Completed
-    lines.append("*✅ Completed Yesterday*")
+    lines.append("*[DONE] Completed Yesterday*")
     if completed:
         for task in completed[:MAX_COMPLETED_TASKS]:
             task_id = task.get('id', 'UNKNOWN')
             title = task.get('title', 'No title')[:50]
             assignee = task.get('assignee', '')
             assignee_text = f" ({assignee})" if assignee else ""
-            lines.append(f"• {task_id}: {title}{assignee_text}")
+            lines.append(f"- {task_id}: {title}{assignee_text}")
     else:
-        lines.append("• None")
+        lines.append("- None")
     lines.append("")
     
     # In Progress
-    lines.append("*🏗️ In Progress*")
+    lines.append("*[WIP] In Progress*")
     if in_progress:
         for task in in_progress[:MAX_IN_PROGRESS_TASKS]:
             task_id = task.get('id', 'UNKNOWN')
@@ -425,13 +425,13 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
             assignee_text = f" ({assignee})" if assignee else ""
             notes = task.get('notes', [])
             note_text = f" -- {notes[0]}" if notes else ""
-            lines.append(f"• {task_id}: {title}{assignee_text}{note_text}")
+            lines.append(f"- {task_id}: {title}{assignee_text}{note_text}")
     else:
-        lines.append("• None")
+        lines.append("- None")
     lines.append("")
     
     # Blocked
-    lines.append("*⏸️ Blocked*")
+    lines.append("*[BLOCKED] Blocked*")
     if blocked:
         for task in blocked[:MAX_BLOCKED_TASKS]:
             task_id = task.get('id', 'UNKNOWN')
@@ -446,20 +446,20 @@ def format_slack(data: Dict[str, Any], date: str = None) -> str:
                     blocker_text = f" -- {blocker.get('description', '')}"
                 else:
                     blocker_text = f" -- {blocker}"
-            lines.append(f"• {task_id}: {title}{assignee_text}{blocker_text}")
+            lines.append(f"- {task_id}: {title}{assignee_text}{blocker_text}")
     else:
-        lines.append("• None")
+        lines.append("- None")
     lines.append("")
     
     # Up Next
-    lines.append("*📋 Up Next*")
+    lines.append("*[TODO] Up Next*")
     if up_next:
         for task in up_next[:MAX_UP_NEXT_TASKS]:
             task_id = task.get('id', 'UNKNOWN')
             title = task.get('title', 'No title')[:50]
-            lines.append(f"• {task_id}: {title}")
+            lines.append(f"- {task_id}: {title}")
     else:
-        lines.append("• None")
+        lines.append("- None")
     
     return "\n".join(lines)
 
