@@ -325,7 +325,7 @@ class TestCLIInterface:
     """Test command-line interface"""
     
     def test_cli_default_usage(self, monkeypatch, capsys):
-        """AC3: Default usage with no args"""
+        """AC3: Default usage with state file path"""
         # Create a mock sprint-state.json
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "sprint-state.json"
@@ -338,8 +338,8 @@ class TestCLIInterface:
                 "tasks": []
             }))
             
-            monkeypatch.setattr(sys, 'argv', ['generate-standup.py'])
-            monkeypatch.setenv('SPRINT_STATE_FILE', str(state_file))
+            # Pass state file path via CLI arg (env var is read at import time)
+            monkeypatch.setattr(sys, 'argv', ['generate-standup.py', '--state-file', str(state_file)])
             
             # Should run and output to stdout
             gs.main()

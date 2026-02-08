@@ -1,4 +1,17 @@
 #!/bin/bash
+# =============================================================================
+# phase2-background.sh -- Background phase 2 provisioning (desktop/tools)
+# =============================================================================
+# Purpose:  Installs desktop environment, developer tools, browser, skills,
+#           and configures all services after phase 1 (bot) is complete.
+#
+# Runs:     As background job spawned by phase1-critical.sh
+# Stages:   4 (desktop-env) through 10 (finalizing)
+# Log:      /var/log/phase2.log
+# Marker:   Creates /var/lib/init-status/phase2-complete when done
+#
+# Original: /usr/local/sbin/phase2-background.sh (in hatch.yaml write_files)
+# =============================================================================
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env

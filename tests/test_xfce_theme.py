@@ -37,20 +37,30 @@ class TestXfceTheme:
         """yaru-theme-gtk should be installed with desktop environment packages."""
         content = read_hatch_yaml()
         
-        # Find the desktop-environment apt-get install block
-        # Look for the section between "desktop-environment" and the next section
+        # The YAML stores script content with escaped newlines.
+        # Look for the pattern in either raw or escaped format.
+        # The key is that yaru-theme-gtk appears in the apt-get install block
+        # that follows the "desktop-environment" stage marker.
+        
+        # Try escaped newline format first (YAML quoted strings)
         de_match = re.search(
-            r'\$S\s+\d+\s+"desktop-environment".*?apt-get install.*?xfce4.*?>>',
+            r'desktop-environment.*?apt-get install.*?xfce4.*?yaru-theme-gtk.*?>>',
             content,
             re.DOTALL
         )
         
-        assert de_match, "Could not find desktop-environment apt install block"
-        de_block = de_match.group(0)
+        if not de_match:
+            # Also try with literal newlines for different YAML formats
+            de_match = re.search(
+                r'\$S\s+\d+\s+"desktop-environment".*?apt-get install.*?xfce4.*?yaru-theme-gtk.*?>>',
+                content,
+                re.DOTALL
+            )
         
-        # Check yaru-theme-gtk is in this block
-        assert "yaru-theme-gtk" in de_block, \
-            "yaru-theme-gtk should be installed in desktop-environment section"
+        assert de_match, (
+            "Could not find desktop-environment apt install block with yaru-theme-gtk.\n"
+            "Expected: apt-get install block containing xfce4 and yaru-theme-gtk"
+        )
 
     def test_xfwm4_theme_config_exists(self):
         """Verify xfwm4 theme configuration is present."""
