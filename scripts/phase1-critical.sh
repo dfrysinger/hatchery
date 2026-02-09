@@ -170,6 +170,9 @@ $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")
 WantedBy=multi-user.target
 SVC
 systemctl daemon-reload
+# Enable restore service BEFORE clawdbot so Wants= dependency works
+# This ensures transcripts/memory are restored before bot starts
+systemctl enable openclaw-restore.service
 systemctl enable clawdbot
 systemctl start clawdbot
 ufw allow 18789/tcp
