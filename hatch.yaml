@@ -144,46 +144,357 @@ write_files:
     permissions: "0755"
     content: |
       #!/usr/bin/env python3
-      import http.server,socketserver,subprocess,json,os
+      # =============================================================================
+      # api-server.py -- Droplet Status API (HTTP server on port 8080)
+      # =============================================================================
+      # Purpose:  Lightweight HTTP API exposing droplet provisioning status.
+      #           Provides status, health, config endpoints for droplet management.
+      #
+      # Endpoints:
+      #   GET  /status  -- Full status JSON (phase, stage, services, safe_mode)
+      #   GET  /health  -- Health check (200 if bot online, 503 if not)
+      #   GET  /stages  -- Raw init-stages.log text
+      #   GET  /log     -- Last 8KB of bootstrap/phase logs
+      #   GET  /config  -- Config file status (no sensitive data)
+      #   GET  /config/status -- API upload status only (no auth required)
+      #   POST /sync    -- Trigger openclaw state sync to Dropbox
+      #   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown
+      #   POST /config/upload -- Upload habitat and/or agents JSON
+      #   POST /config/apply  -- Apply uploaded config and restart
+      #
+      # Dependencies: systemctl, /usr/local/bin/sync-openclaw-state.sh,
+      #               /usr/local/bin/apply-config.sh
+      #
+      # Original: /usr/local/bin/api-server.py (in hatch.yaml write_files)
+      # =============================================================================
+      import http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time
       PORT=8080
-      S1={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
-      S2={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
-      def ck(n):
-        try:return subprocess.run(["systemctl","is-active",n],capture_output=True,timeout=5).stdout.decode().strip()=="active"
+      API_SECRET=os.getenv('API_SECRET','')
+      API_BIND_ADDRESS=os.getenv('API_BIND_ADDRESS','127.0.0.1')
+      HABITAT_PATH='/etc/habitat.json'
+      AGENTS_PATH='/etc/agents.json'
+      MARKER_PATH='/etc/config-api-uploaded'
+      APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
+      P1_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
+      P2_STAGES={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
+      
+      def check_service(name):
+        try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
         except:return False
-      def st():
-        s=p=0
-        try:s=int(open('/var/lib/init-status/stage').read().strip());p=int(open('/var/lib/init-status/phase').read().strip())
-        except:p=1
-        ep=lambda f:os.path.exists(f'/var/lib/init-status/{f}')
-        p1=ep('phase1-complete');p2=ep('phase2-complete');sd=ep('setup-complete');bo=ck('clawdbot');sm=ep('safe-mode')
-        sv={s:ck(s) for s in ['clawdbot','xrdp','desktop','x11vnc']} if p2 or sd else None
-        return {"phase":p,"stage":s,"desc":S1.get(s) if p<=1 else S2.get(s,f"stage-{s}"),"bot_online":bo,"phase1_complete":p1,"phase2_complete":p2,"ready":sd and bo,"safe_mode":sm,"services":sv}
+      
+      def get_status():
+        s,p=0,1
+        try:
+          with open('/var/lib/init-status/stage','r') as f:s=int(f.read().strip())
+          with open('/var/lib/init-status/phase','r') as f:p=int(f.read().strip())
+        except:pass
+        p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
+        p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
+        setup_done=os.path.exists('/var/lib/init-status/setup-complete')
+        bot_online=check_service('clawdbot')
+        svc={}
+        if p2_done or setup_done:
+          for sv in ['clawdbot','xrdp','desktop','x11vnc']:svc[sv]=check_service(sv)
+        desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
+        safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
+        return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online,"safe_mode":safe_mode,"services":svc if svc else None}
+      
+      def validate_config_upload(data):
+        """Validate config upload request data."""
+        errors=[]
+        if "habitat" in data and not isinstance(data["habitat"],dict):errors.append("habitat must be an object")
+        if "agents" in data and not isinstance(data["agents"],dict):errors.append("agents must be an object")
+        if "apply" in data and not isinstance(data["apply"],bool):errors.append("apply must be a boolean")
+        return errors
+      
+      def write_config_file(path,data):
+        """Write config data to file with secure permissions."""
+        try:
+          with open(path,'w') as f:json.dump(data,f,indent=2)
+          os.chmod(path,0o600)
+          return {"ok":True,"path":path}
+        except Exception as e:return {"ok":False,"error":str(e)}
+      
+      def write_upload_marker():
+        """Write API upload marker with timestamp.
+        
+        Creates /etc/config-api-uploaded file with timestamp to indicate successful
+        config upload via POST /config/upload endpoint. Used by /config/status to
+        report upload state.
+        
+        Logs success/failure in structured format to stderr. Failures are non-fatal
+        since upload status can still be determined via API (file existence check).
+        
+        Returns:
+          dict: {"ok": bool, "path": str, "error": str (if failed)}
+        """
+        import sys
+        timestamp = time.time()
+        
+        try:
+          with open(MARKER_PATH, 'w') as f:
+            f.write(str(timestamp))
+          os.chmod(MARKER_PATH, 0o600)
+          
+          # Log success (structured format for parsing/monitoring)
+          log_entry = json.dumps({
+            "event": "upload_marker_written",
+            "path": MARKER_PATH,
+            "timestamp": timestamp,
+            "success": True
+          })
+          print(log_entry, file=sys.stderr)
+          
+          return {"ok": True, "path": MARKER_PATH}
+          
+        except PermissionError as e:
+          error_msg = f"Permission denied writing marker: {e}"
+          log_entry = json.dumps({
+            "event": "upload_marker_write_failed",
+            "path": MARKER_PATH,
+            "timestamp": timestamp,
+            "success": False,
+            "error": "PermissionError",
+            "details": str(e)
+          })
+          print(log_entry, file=sys.stderr)
+          return {"ok": False, "error": error_msg}
+          
+        except OSError as e:
+          # Covers: disk full, directory doesn't exist, filesystem errors
+          error_msg = f"OS error writing marker: {e}"
+          log_entry = json.dumps({
+            "event": "upload_marker_write_failed",
+            "path": MARKER_PATH,
+            "timestamp": timestamp,
+            "success": False,
+            "error": "OSError",
+            "details": str(e)
+          })
+          print(log_entry, file=sys.stderr)
+          return {"ok": False, "error": error_msg}
+          
+        except Exception as e:
+          # Catch-all for unexpected errors
+          error_msg = f"Unexpected error writing marker: {e}"
+          log_entry = json.dumps({
+            "event": "upload_marker_write_failed",
+            "path": MARKER_PATH,
+            "timestamp": timestamp,
+            "success": False,
+            "error": type(e).__name__,
+            "details": str(e)
+          })
+          print(log_entry, file=sys.stderr)
+          return {"ok": False, "error": error_msg}
+      
+      def get_config_status():
+        """Get current config file status without exposing sensitive data."""
+        result={"habitat_exists":os.path.exists(HABITAT_PATH),"agents_exists":os.path.exists(AGENTS_PATH)}
+        if result["habitat_exists"]:
+          stat=os.stat(HABITAT_PATH);result["habitat_modified"]=stat.st_mtime
+          try:
+            with open(HABITAT_PATH,'r') as f:h=json.load(f)
+            result["habitat_name"]=h.get("name","")
+            result["habitat_agent_count"]=len(h.get("agents",[]))
+          except:pass
+        if result["agents_exists"]:
+          stat=os.stat(AGENTS_PATH);result["agents_modified"]=stat.st_mtime
+          try:
+            with open(AGENTS_PATH,'r') as f:a=json.load(f)
+            result["agents_names"]=list(a.keys())
+          except:pass
+        # Check API upload marker (issue #115)
+        if os.path.exists(MARKER_PATH):
+          result["api_uploaded"]=True
+          try:
+            with open(MARKER_PATH,'r') as f:result["api_uploaded_at"]=float(f.read().strip())
+          except:pass
+        else:
+          result["api_uploaded"]=False
+        return result
+      
+      def get_config_upload_status():
+        """Get simple config upload status for unauthenticated endpoint (issue #130)."""
+        result={"api_uploaded":False,"api_uploaded_at":None}
+        if os.path.exists(MARKER_PATH):
+          result["api_uploaded"]=True
+          try:
+            with open(MARKER_PATH,'r') as f:result["api_uploaded_at"]=float(f.read().strip())
+          except:pass
+        return result
+      
+      def trigger_config_apply():
+        """Trigger config apply script asynchronously."""
+        try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
+        except Exception as e:return {"ok":False,"error":str(e)}
+      
+      def verify_hmac_auth(timestamp_header, signature_header, method, path, body):
+        """Verify HMAC-SHA256 signature for authenticated endpoints.
+      
+        Signature binds:
+        - timestamp (replay protection)
+        - HTTP method + path (prevents cross-endpoint replay/substitution)
+        - request body (integrity)
+      
+        Message format:
+          "{timestamp}.{method}.{path}.{body}" where body is UTF-8 JSON string.
+        """
+        if not API_SECRET:
+          return False
+        if not timestamp_header or not signature_header:
+          return False
+        try:
+          timestamp = int(timestamp_header)
+          now = int(time.time())
+          if abs(now - timestamp) > 300:
+            return False
+      
+          b = body.decode('utf-8') if isinstance(body, (bytes, bytearray)) else (body or '')
+          msg = f"{timestamp}.{method}.{path}.{b}"
+          expected_sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+          return hmac.compare_digest(signature_header, expected_sig)
+        except Exception:
+          return False
+      
       class H(http.server.BaseHTTPRequestHandler):
         def log_message(self,*a):pass
+        
+        def send_json(self,code,data):
+          self.send_response(code);self.send_header('Content-type','application/json');self.end_headers()
+          self.wfile.write(json.dumps(data).encode())
+        
         def do_GET(self):
-          if self.path=='/status':self._j(200,st())
-          elif self.path=='/health':s=st();self._j(200 if s['bot_online'] else 503,{"healthy":s['bot_online'],"phase":s['phase'],"desc":s['desc'],"safe_mode":s['safe_mode']})
-          elif self.path=='/stages':self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers();self.wfile.write(open('/var/log/init-stages.log').read().encode() if os.path.exists('/var/log/init-stages.log') else b"No log")
+          if self.path=='/status':
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(get_status()).encode())
+          elif self.path=='/health':
+            s=get_status();code=200 if s.get('bot_online') else 503;self.send_response(code);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps({"healthy":s.get('bot_online',False),"phase":s.get('phase'),"desc":s.get('desc'),"safe_mode":s.get('safe_mode',False)}).encode())
+          elif self.path=='/stages':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            # Require auth: stages/log/config may contain sensitive info
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
+            try:
+              with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
+            except:self.wfile.write(b"No log")
           elif self.path=='/log':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
             self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
             for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:
-              try:self.wfile.write(f"\n=== {lf} ===\n".encode());self.wfile.write(open(lf).read()[-8192:].encode())
+              try:
+                self.wfile.write(f"\n=== {lf} ===\n".encode())
+                with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
               except:self.wfile.write(f"  (not found)\n".encode())
+          elif self.path=='/config/status':
+            # Unauthenticated endpoint - returns only api_uploaded status (no sensitive data)
+            self.send_json(200,get_config_upload_status())
+          elif self.path=='/config':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            self.send_json(200,get_config_status())
           else:self.send_response(404);self.end_headers()
+        
         def do_POST(self):
+          content_length=int(self.headers.get('Content-Length',0))
+          body=self.rfile.read(content_length) if content_length else b'{}'
+          
           if self.path=='/sync':
-            try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self._j(200,{"ok":r.returncode==0})
-            except Exception as x:self._j(200,{"ok":False,"error":str(x)})
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+            try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
+            except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+          
           elif self.path=='/prepare-shutdown':
-            try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self._j(200,{"ok":True,"ready_for_shutdown":True})
-            except Exception as x:self._j(200,{"ok":False,"error":str(x)})
-          else:self.send_response(404);self.end_headers()
-        def _j(self,c,d):self.send_response(c);self.send_header('Content-type','application/json');self.end_headers();self.wfile.write(json.dumps(d).encode())
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            
+            self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
+            try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
+            except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+          
+          elif self.path=='/config/upload':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            
+            try:
+              data=json.loads(body)
+            except json.JSONDecodeError as e:
+              self.send_json(400,{"ok":False,"error":f"Invalid JSON: {e}"});return
+            
+            errors=validate_config_upload(data)
+            if errors:
+              self.send_json(400,{"ok":False,"errors":errors});return
+            
+            files_written=[]
+            
+            # Write habitat config
+            if "habitat" in data:
+              result=write_config_file(HABITAT_PATH,data["habitat"])
+              if not result["ok"]:
+                self.send_json(500,{"ok":False,"error":f"Failed to write habitat: {result.get('error')}"});return
+              files_written.append(HABITAT_PATH)
+            
+            # Write agents library
+            if "agents" in data:
+              result=write_config_file(AGENTS_PATH,data["agents"])
+              if not result["ok"]:
+                self.send_json(500,{"ok":False,"error":f"Failed to write agents: {result.get('error')}"});return
+              files_written.append(AGENTS_PATH)
+            
+            # Write upload marker if any files were written
+            if files_written:
+              write_upload_marker()
+            
+            # Apply if requested
+            applied=False
+            if data.get("apply"):
+              apply_result=trigger_config_apply()
+              if not apply_result["ok"]:
+                self.send_json(500,{"ok":False,"error":f"Failed to apply: {apply_result.get('error')}","files_written":files_written});return
+              applied=True
+            
+            self.send_json(200,{"ok":True,"files_written":files_written,"applied":applied})
+          
+          elif self.path=='/config/apply':
+            timestamp=self.headers.get('X-Timestamp')
+            signature=self.headers.get('X-Signature')
+            if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+              self.send_json(403,{"ok":False,"error":"Forbidden"});return
+            
+            result=trigger_config_apply()
+            self.send_json(200 if result["ok"] else 500,result)
+          
+          else:
+            self.send_response(404);self.end_headers()
+      
       class R(socketserver.TCPServer):allow_reuse_address=True
-      with R(("",PORT),H) as h:h.serve_forever()
-  # NOTE: api-server.service removed from write_files to fix race condition.
-  # Bootstrap.sh copies from systemd/api-server.service (single source of truth).
+      if __name__=='__main__':
+        # SECURITY MODEL:
+        # - Default: 127.0.0.1 (localhost only, secure-by-default)
+        # - Enable remote access: set remoteApi: true in habitat config
+        # - Advanced override: apiBindAddress in habitat (takes precedence)
+        # - /status, /health: Public (read-only, no secrets, needed for polling)
+        # - /stages, /log, /config: HMAC auth required (may contain sensitive info)
+        # - /config/upload, /config/apply: HMAC auth required (mutation endpoints)
+        bind_addr = API_BIND_ADDRESS if API_BIND_ADDRESS != '0.0.0.0' else ''
+        print(f"[api-server] Starting on {API_BIND_ADDRESS}:{PORT}")
+        with R((bind_addr,PORT),H) as h:h.serve_forever()
+      
   - path: /etc/systemd/system/post-boot-check.service
     permissions: "0644"
     content: |

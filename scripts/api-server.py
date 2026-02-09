@@ -261,11 +261,21 @@ class H(http.server.BaseHTTPRequestHandler):
     body=self.rfile.read(content_length) if content_length else b'{}'
     
     if self.path=='/sync':
+      timestamp=self.headers.get('X-Timestamp')
+      signature=self.headers.get('X-Signature')
+      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      
       self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
       try:r=subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
       except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
     
     elif self.path=='/prepare-shutdown':
+      timestamp=self.headers.get('X-Timestamp')
+      signature=self.headers.get('X-Signature')
+      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      
       self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
       try:subprocess.run("/usr/local/bin/sync-openclaw-state.sh",shell=True,timeout=60);subprocess.run("systemctl stop clawdbot",shell=True,timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
       except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
