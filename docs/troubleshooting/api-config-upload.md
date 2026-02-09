@@ -18,6 +18,8 @@ This guide helps diagnose issues with the **two-phase config** workflow (minimal
    - On the droplet:
      ```bash
      test -f /etc/config-api-uploaded && echo "Uploaded" || echo "Not uploaded"
+     ls -l /etc/config-api-uploaded 2>/dev/null || true
+     cat /etc/config-api-uploaded 2>/dev/null || true
      ```
 
 3. **Were the expected files written?**

@@ -89,6 +89,7 @@ Each droplet runs a lightweight HTTP API on port 8080:
 | `/health` | GET | Health check (200 if bot online) |
 | `/stages` | GET | Raw init-stages.log |
 | `/config` | GET | Config file status (no secrets) |
+| `/config/status` | GET | Upload marker status only (`api_uploaded`, `api_uploaded_at`) — unauthenticated |
 | `/config/upload` | POST | Upload habitat + agents JSON |
 | `/config/apply` | POST | Apply config and restart |
 | `/sync` | POST | Trigger state sync to Dropbox |
