@@ -77,3 +77,6 @@ curl -s http://<droplet-ip>:8080/config/status
 - Marker path constant: `MARKER_PATH='/etc/config-api-uploaded'`
 - Marker write: `write_upload_marker()`
 - Status endpoints: `/config` and `/config/status`
+
+## Related docs
+- Full marker details: [API Upload Marker File](../api-upload-marker.md)

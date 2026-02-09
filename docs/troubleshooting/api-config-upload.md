@@ -35,6 +35,8 @@ This guide helps diagnose issues with the **two-phase config** workflow (minimal
 - Written when: `POST /config/upload` successfully writes *any* config file(s)
 - Contents: Unix timestamp (float)
 
+For full details (format, logs, manual creation, and API examples), see: [API Upload Marker File](../api-upload-marker.md)
+
 ### Interpretations
 - Marker missing → upload never succeeded, or wrote nothing.
 - Marker exists but bots not updated → upload succeeded, but apply/restart failed or was never requested (`apply: true`).
