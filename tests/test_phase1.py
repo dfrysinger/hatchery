@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Tests for phase1-critical.sh platform-aware bootstrap config.
 
-Extracts the config-generation portion from phase1-critical.sh (embedded
-in hatch.yaml), runs it with various PLATFORM settings, and validates
-the generated minimal JSON config.
+Reads the config-generation portion from scripts/phase1-critical.sh
+(the source of truth with slim YAML approach), runs it with various
+PLATFORM settings, and validates the generated minimal JSON config.
 """
 
 import base64
@@ -14,7 +14,6 @@ import subprocess
 import tempfile
 
 import pytest
-import yaml
 
 
 def b64(s):
@@ -23,15 +22,10 @@ def b64(s):
 
 
 def extract_phase1_script():
-    """Extract phase1-critical.sh content from hatch.yaml."""
-    hatch_path = os.path.join(os.path.dirname(__file__), "..", "hatch.yaml")
-    with open(hatch_path) as f:
-        data = yaml.safe_load(f)
-
-    for entry in data.get("write_files", []):
-        if entry.get("path") == "/usr/local/sbin/phase1-critical.sh":
-            return entry["content"]
-    raise RuntimeError("phase1-critical.sh not found in hatch.yaml")
+    """Read phase1-critical.sh from scripts/ directory."""
+    script_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "phase1-critical.sh")
+    with open(script_path) as f:
+        return f.read()
 
 
 def make_phase1_stub(script_content, tmp_dir):

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Tests for rename-bots.sh platform-aware bot renaming.
 
-Extracts rename-bots.sh from hatch.yaml and tests its platform routing
-logic by stubbing out curl and python3 calls.
+Reads rename-bots.sh from scripts/ directory (the source of truth with
+slim YAML approach) and tests its platform routing logic by stubbing
+out curl and python3 calls.
 """
 
 import base64
@@ -11,7 +12,6 @@ import subprocess
 import tempfile
 
 import pytest
-import yaml
 
 
 def b64(s):
@@ -20,15 +20,10 @@ def b64(s):
 
 
 def extract_rename_script():
-    """Extract rename-bots.sh content from hatch.yaml."""
-    hatch_path = os.path.join(os.path.dirname(__file__), "..", "hatch.yaml")
-    with open(hatch_path) as f:
-        data = yaml.safe_load(f)
-
-    for entry in data.get("write_files", []):
-        if entry.get("path") == "/usr/local/bin/rename-bots.sh":
-            return entry["content"]
-    raise RuntimeError("rename-bots.sh not found in hatch.yaml")
+    """Read rename-bots.sh from scripts/ directory."""
+    script_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "rename-bots.sh")
+    with open(script_path) as f:
+        return f.read()
 
 
 def make_rename_stub(script_content, tmp_dir):

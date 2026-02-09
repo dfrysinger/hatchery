@@ -26,7 +26,7 @@ Make provisioning AI-powered cloud desktops as easy as tapping a button on your 
 - [x] `GET /config` — View config status
 - [x] `apply-config.sh` — Script to apply uploaded config
 - [x] Unit tests (23 tests)
-- [ ] Integration with hatch-slim.yaml
+- [ ] Integration with hatch.yaml
 
 **New Flow:**
 ```
@@ -99,7 +99,7 @@ As a user, I want to:
 ┌─────────────────────────────────────────────────────────────┐
 │                   LAUNCH DROPLET                            │
 │  1. Read saved config from storage                          │
-│  2. Create droplet with hatch-slim.yaml                     │
+│  2. Create droplet with hatch.yaml                     │
 │  3. Poll /health until ready                                │
 │  4. POST /config/upload with saved config                   │
 │  5. Notify user: "Habitat ready!"                           │

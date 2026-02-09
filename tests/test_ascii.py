@@ -11,7 +11,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # Scripts are fetched directly from GitHub and can contain emoji/Unicode
 ASCII_REQUIRED = [
     "hatch.yaml",
-    "hatch-slim.yaml",
+    "hatch.yaml",
 ]
 
 

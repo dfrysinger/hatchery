@@ -2,6 +2,9 @@
 """
 Tests for x11vnc.service systemd unit configuration.
 
+With slim YAML approach, x11vnc.service is defined via heredoc in
+scripts/phase2-background.sh (the source of truth).
+
 Validates that x11vnc.service:
 - AC1/AC3: Has ConditionPathExists for phase2-complete marker (won't start during provisioning)
 - AC2: Has WantedBy=desktop.service (starts automatically after reboot)
@@ -14,48 +17,30 @@ import re
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS_DIR = os.path.join(REPO_ROOT, "scripts")
 
 
-def read_hatch_yaml():
-    """Read hatch.yaml content."""
-    path = os.path.join(REPO_ROOT, "hatch.yaml")
+def read_phase2_script():
+    """Read phase2-background.sh content."""
+    path = os.path.join(SCRIPTS_DIR, "phase2-background.sh")
     with open(path, 'r') as f:
         return f.read()
 
 
 def extract_x11vnc_service_unit(content: str) -> str:
-    """Extract the x11vnc.service unit file content from hatch.yaml.
-    
-    The YAML stores script content as quoted strings with escaped newlines (\\n).
-    We need to handle both raw newlines and escaped newlines.
+    """Extract the x11vnc.service unit file content from phase2-background.sh.
     
     Looks for the heredoc pattern:
         cat > /etc/systemd/system/x11vnc.service <<SVC
         ... unit content ...
         SVC
     """
-    # First, try to find the phase2-background.sh content field
-    # The YAML uses escaped \\n for newlines in quoted strings
-    phase2_pattern = r'path:\s*/usr/local/sbin/phase2-background\.sh.*?content:\s*"(.*?)"(?=\s*-\s*path:|$)'
-    phase2_match = re.search(phase2_pattern, content, re.DOTALL)
-    
-    if phase2_match:
-        # Decode escaped newlines in the YAML string
-        script_content = phase2_match.group(1).replace('\\n', '\n')
-        
-        # Now search for the heredoc within the decoded content
-        pattern = r'cat\s*>\s*/etc/systemd/system/x11vnc\.service\s*<<\s*SVC\s*\n(.*?)\n\s*SVC'
-        match = re.search(pattern, script_content, re.DOTALL)
-        if match:
-            return match.group(1)
-    
-    # Fallback: try the original pattern for files with literal newlines
     pattern = r'cat\s*>\s*/etc/systemd/system/x11vnc\.service\s*<<\s*SVC\s*\n(.*?)\n\s*SVC'
     match = re.search(pattern, content, re.DOTALL)
     if match:
         return match.group(1)
     
-    pytest.fail("Could not find x11vnc.service heredoc in hatch.yaml")
+    pytest.fail("Could not find x11vnc.service heredoc in phase2-background.sh")
 
 
 class TestX11VNCServiceDependencies:
@@ -63,7 +48,7 @@ class TestX11VNCServiceDependencies:
 
     def test_requires_desktop_service(self):
         """x11vnc must require desktop.service to ensure display is ready."""
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         assert "Requires=desktop.service" in unit, (
@@ -72,7 +57,7 @@ class TestX11VNCServiceDependencies:
 
     def test_after_desktop_service(self):
         """x11vnc must start after desktop.service."""
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         assert "After=desktop.service" in unit, (
@@ -89,7 +74,7 @@ class TestX11VNCServicePhase2Guard:
         This is defense-in-depth: even if x11vnc is somehow triggered during
         phase2, the condition prevents it from starting until the marker exists.
         """
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         # Look for ConditionPathExists with the phase2-complete marker
@@ -108,7 +93,7 @@ class TestX11VNCServiceAutostart:
         This ensures x11vnc is pulled in when desktop.service starts,
         which happens automatically after the post-provisioning reboot.
         """
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         # Check [Install] section has WantedBy
@@ -124,7 +109,7 @@ class TestX11VNCServiceAutostart:
         PR #79 removed WantedBy=multi-user.target to prevent VNC from starting
         during provisioning. We must not reintroduce this.
         """
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         # Ensure WantedBy=multi-user.target is NOT present
@@ -141,7 +126,7 @@ class TestX11VNCServiceComplete:
 
     def test_unit_file_structure(self):
         """Validate complete unit file has all required sections."""
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         # Must have all three sections
@@ -151,21 +136,21 @@ class TestX11VNCServiceComplete:
 
     def test_service_type(self):
         """Validate service is Type=simple (x11vnc runs in foreground)."""
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         assert "Type=simple" in unit, "x11vnc.service should be Type=simple"
 
     def test_restart_policy(self):
         """Validate service has restart policy for resilience."""
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         assert "Restart=always" in unit, "x11vnc.service should have Restart=always"
 
     def test_display_environment(self):
         """Validate DISPLAY is set to match xvfb/desktop."""
-        content = read_hatch_yaml()
+        content = read_phase2_script()
         unit = extract_x11vnc_service_unit(content)
         
         # Should use :10 to match xvfb configuration
