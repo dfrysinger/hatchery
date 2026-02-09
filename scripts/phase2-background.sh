@@ -294,4 +294,3 @@ HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
 $TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
 sleep 5
 reboot
-
