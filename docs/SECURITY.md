@@ -31,7 +31,8 @@ The primary security layer is a **cloud firewall managed via iOS Shortcut**.
 │                         ▼                               │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │              Habitat Droplet                     │   │
-│  │  • API Server (0.0.0.0:8080)                    │   │
+│  │  • API Server (127.0.0.1:8080, default)         │   │
+│  │    OR 0.0.0.0:8080 (with remoteApi: true)       │   │
 │  │  • Clawdbot Gateway (:18789)                    │   │
 │  │  • RDP (:3389), SSH (:22)                       │   │
 │  └─────────────────────────────────────────────────┘   │
@@ -46,10 +47,14 @@ Your phone's IP changes frequently (cellular, WiFi, travel). The "Repair Habitat
 2. Calls DO API to update firewall rules
 3. New IP is immediately allowed
 
-**This means:**
-- API server can safely bind to `0.0.0.0` (all interfaces)
-- Only your phone can reach the droplet
+**When remote API access is enabled (`remoteApi: true`):**
+- API server binds to `0.0.0.0:8080` (all interfaces)
+- Only your phone can reach the droplet (DO Firewall blocks all other IPs)
 - No SSH tunnels or VPNs required
+
+**Default behavior (secure-by-default):**
+- API server binds to `127.0.0.1:8080` (localhost-only)
+- Use SSH tunnel or set `remoteApi: true` for remote access
 
 ### Why This Is Secure
 
