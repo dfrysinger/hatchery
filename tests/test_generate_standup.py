@@ -369,6 +369,32 @@ class TestCLIInterface:
         output_file = tmp_path / "standup.md"
         args = gs.parse_args(['--output', str(output_file)])
         assert args.output == str(output_file)
+    
+    def test_env_var_isolation(self, monkeypatch, tmp_path):
+        """BUG-125: Environment variable changes should affect default path at runtime"""
+        # Test 1: Set env var, verify it's picked up
+        custom_path_1 = str(tmp_path / "custom-state-1.json")
+        monkeypatch.setenv('SPRINT_STATE_FILE', custom_path_1)
+        args1 = gs.parse_args([])
+        assert args1.state_file == custom_path_1
+        
+        # Test 2: Change env var, verify new value is used (not cached from import)
+        custom_path_2 = str(tmp_path / "custom-state-2.json")
+        monkeypatch.setenv('SPRINT_STATE_FILE', custom_path_2)
+        args2 = gs.parse_args([])
+        assert args2.state_file == custom_path_2
+        
+        # Test 3: Unset env var, verify fallback to default
+        monkeypatch.delenv('SPRINT_STATE_FILE')
+        args3 = gs.parse_args([])
+        expected_default = str(Path.home() / 'clawd' / 'shared' / 'sprint-state.json')
+        assert args3.state_file == expected_default
+        
+        # Test 4: CLI arg should override env var
+        custom_path_4 = str(tmp_path / "cli-override.json")
+        monkeypatch.setenv('SPRINT_STATE_FILE', custom_path_1)
+        args4 = gs.parse_args(['--state-file', custom_path_4])
+        assert args4.state_file == custom_path_4
 
 
 class TestIntegration:
