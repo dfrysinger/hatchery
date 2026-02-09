@@ -91,6 +91,37 @@ cloud-init
 - **Outputs:** Telegram bot display names updated via `setMyName` API
 - **Dependencies:** curl, `parse-habitat.py`
 
+## Utility Scripts
+
+These are smaller helper scripts that require executable permissions but don't need full documentation headers (Issue #168).
+
+### kill-droplet.sh
+- **Purpose:** Destroys the DigitalOcean droplet via API (called by self-destruct timer)
+- **Original path:** `/usr/local/bin/kill-droplet.sh`
+- **Inputs:** `/etc/droplet.env` (DO_TOKEN_B64, HABITAT_NAME)
+- **Outputs:** DELETE API call to DigitalOcean to destroy droplet by tag
+- **Dependencies:** curl, `sync-openclaw-state.sh`
+
+### mount-dropbox.sh
+- **Purpose:** Mounts Dropbox folder in user's home directory using rclone FUSE
+- **Inputs:** Requires `dropbox:` remote configured in rclone
+- **Outputs:** `~/Dropbox` mounted, Thunar file manager opened
+- **Dependencies:** rclone, fusermount, thunar
+
+### schedule-destruct.sh
+- **Purpose:** Schedules automatic droplet destruction after N minutes if DESTRUCT_MINS is set
+- **Original path:** `/usr/local/bin/schedule-destruct.sh`
+- **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env` (DESTRUCT_MINS)
+- **Outputs:** systemd timer unit `self-destruct` that will call `kill-droplet.sh`
+- **Dependencies:** systemd-run, `parse-habitat.py`, `kill-droplet.sh`
+
+### verify-firewall.sh
+- **Purpose:** Runtime check to ensure UFW rules match security policy (no forbidden ports exposed)
+- **Original path:** `/usr/local/bin/verify-firewall.sh`
+- **Inputs:** UFW status output
+- **Outputs:** Exit code 0 (pass), 1 (forbidden port), or 2 (missing required port)
+- **Dependencies:** ufw
+
 ## Environment Files
 
 All scripts source one or both of these:

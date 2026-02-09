@@ -31,6 +31,15 @@ EXPECTED_SCRIPTS = {
     "rename-bots.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 40},
 }
 
+# Utility scripts that require executable permissions (Issue #168)
+# These scripts are smaller utilities that don't require full documentation
+UTILITY_SCRIPTS = [
+    "kill-droplet.sh",
+    "mount-dropbox.sh",
+    "schedule-destruct.sh",
+    "verify-firewall.sh",
+]
+
 BASH_SCRIPTS = [name for name, info in EXPECTED_SCRIPTS.items() if info["type"] == "bash"]
 PYTHON_SCRIPTS = [name for name, info in EXPECTED_SCRIPTS.items() if info["type"] == "python"]
 
@@ -366,6 +375,27 @@ class TestReadme:
         with open(path, "r") as f:
             content = f.read()
         assert "Boot Flow" in content or "boot flow" in content
+
+
+class TestUtilityScripts:
+    """Test utility scripts that need executable permissions (Issue #168)."""
+
+    @pytest.mark.parametrize("script_name", UTILITY_SCRIPTS)
+    def test_utility_script_exists(self, script_name):
+        """Each utility script must exist in scripts/."""
+        path = os.path.join(SCRIPTS_DIR, script_name)
+        assert os.path.isfile(path), f"Utility script {script_name} not found in scripts/"
+
+    @pytest.mark.parametrize("script_name", UTILITY_SCRIPTS)
+    def test_utility_script_is_executable(self, script_name):
+        """Each utility script must have the executable bit set (Issue #168)."""
+        path = os.path.join(SCRIPTS_DIR, script_name)
+        if not os.path.isfile(path):
+            pytest.skip(f"{script_name} does not exist")
+        mode = os.stat(path).st_mode
+        assert mode & stat.S_IXUSR, f"{script_name} is not executable (owner)"
+        assert mode & stat.S_IXGRP, f"{script_name} is not executable (group)"
+        assert mode & stat.S_IXOTH, f"{script_name} is not executable (other)"
 
 
 class TestSetCouncilGroup:
