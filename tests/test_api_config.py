@@ -461,5 +461,87 @@ def write_upload_marker(marker_path):
     os.chmod(marker_path, 0o600)
 
 
+def get_config_upload_status(marker_path):
+    """Get simple config upload status for unauthenticated endpoint.
+    
+    Returns only the api_uploaded boolean and timestamp - no sensitive data.
+    This is safe to expose without authentication.
+    
+    Args:
+        marker_path: Path to the config-api-uploaded marker file
+        
+    Returns:
+        dict with api_uploaded (bool) and api_uploaded_at (float timestamp or None)
+    """
+    result = {
+        "api_uploaded": False,
+        "api_uploaded_at": None
+    }
+    
+    if os.path.exists(marker_path):
+        result["api_uploaded"] = True
+        try:
+            with open(marker_path, 'r') as f:
+                result["api_uploaded_at"] = float(f.read().strip())
+        except (ValueError, IOError):
+            # Marker exists but can't read timestamp - still uploaded
+            pass
+    
+    return result
+
+
+class TestConfigStatusEndpoint(unittest.TestCase):
+    """Test GET /config/status endpoint (unauthenticated).
+    
+    This endpoint returns only api_uploaded status - safe without auth.
+    Issue #130.
+    """
+
+    def setUp(self):
+        """Create a temporary directory for test files."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.marker_path = os.path.join(self.temp_dir, "config-api-uploaded")
+
+    def tearDown(self):
+        """Clean up temporary files."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_no_marker_returns_false(self):
+        """When no marker file exists, api_uploaded is False."""
+        result = get_config_upload_status(self.marker_path)
+        
+        self.assertFalse(result["api_uploaded"])
+        self.assertIsNone(result["api_uploaded_at"])
+
+    def test_marker_exists_returns_true(self):
+        """When marker file exists, api_uploaded is True with timestamp."""
+        import time
+        timestamp = time.time()
+        with open(self.marker_path, 'w') as f:
+            f.write(str(timestamp))
+        
+        result = get_config_upload_status(self.marker_path)
+        
+        self.assertTrue(result["api_uploaded"])
+        self.assertAlmostEqual(result["api_uploaded_at"], timestamp, places=2)
+
+    def test_marker_with_invalid_content(self):
+        """Marker with invalid content still returns api_uploaded=True."""
+        with open(self.marker_path, 'w') as f:
+            f.write("not a timestamp")
+        
+        result = get_config_upload_status(self.marker_path)
+        
+        self.assertTrue(result["api_uploaded"])
+        self.assertIsNone(result["api_uploaded_at"])
+
+    def test_response_contains_only_expected_keys(self):
+        """Response should only contain api_uploaded and api_uploaded_at."""
+        result = get_config_upload_status(self.marker_path)
+        
+        self.assertEqual(set(result.keys()), {"api_uploaded", "api_uploaded_at"})
+
+
 if __name__ == '__main__':
     unittest.main()

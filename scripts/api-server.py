@@ -11,6 +11,7 @@
 #   GET  /stages  -- Raw init-stages.log text
 #   GET  /log     -- Last 8KB of bootstrap/phase logs
 #   GET  /config  -- Config file status (no sensitive data)
+#   GET  /config/status -- API upload status only (no auth required)
 #   POST /sync    -- Trigger openclaw state sync to Dropbox
 #   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown
 #   POST /config/upload -- Upload habitat and/or agents JSON
@@ -102,6 +103,16 @@ def get_config_status():
     result["api_uploaded"]=False
   return result
 
+def get_config_upload_status():
+  """Get simple config upload status for unauthenticated endpoint (issue #130)."""
+  result={"api_uploaded":False,"api_uploaded_at":None}
+  if os.path.exists(MARKER_PATH):
+    result["api_uploaded"]=True
+    try:
+      with open(MARKER_PATH,'r') as f:result["api_uploaded_at"]=float(f.read().strip())
+    except:pass
+  return result
+
 def trigger_config_apply():
   """Trigger config apply script asynchronously."""
   try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
@@ -168,6 +179,9 @@ class H(http.server.BaseHTTPRequestHandler):
           self.wfile.write(f"\n=== {lf} ===\n".encode())
           with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
         except:self.wfile.write(f"  (not found)\n".encode())
+    elif self.path=='/config/status':
+      # Unauthenticated endpoint - returns only api_uploaded status (no sensitive data)
+      self.send_json(200,get_config_upload_status())
     elif self.path=='/config':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
