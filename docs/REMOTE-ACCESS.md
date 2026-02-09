@@ -36,15 +36,23 @@ Add `apiBindAddress` to your `habitat.json`:
 
 ### 2. Firewall Configuration
 
-Ensure your firewall allows inbound traffic on port 8080:
+**Security Notice:** Only allow access from trusted IP addresses. Do NOT open port 8080 to the entire internet.
 
 ```bash
 # Check current firewall rules
 sudo ufw status
 
-# Allow port 8080 (if not already allowed)
-sudo ufw allow 8080/tcp
+# Allow port 8080 from your trusted IP (RECOMMENDED)
+sudo ufw allow from YOUR_IP_ADDRESS/32 to any port 8080 proto tcp
+
+# Or, for iOS Shortcut from cellular/roaming (less secure)
+# Use IP allowlist or VPN (Tailscale/WireGuard) instead
 ```
+
+**Alternatives to public exposure:**
+- **DigitalOcean Cloud Firewall:** Create allowlist of trusted IPs
+- **VPN:** Use Tailscale or WireGuard for secure roaming access
+- **SSH Tunnel:** See "SSH Tunnel (Secure Alternative)" section below
 
 ### 3. DNS/IP Configuration
 
