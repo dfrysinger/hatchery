@@ -140,9 +140,9 @@ write_files:
 users:
   - default
 runcmd:
+  - [bash, -lc, "/usr/local/bin/bootstrap.sh>>/var/log/bootstrap.log 2>&1"]
+  - [bash, -lc, "set -a;source /etc/droplet.env;set +a;python3 /usr/local/bin/parse-habitat.py"]
   - [bash, -lc, "systemctl daemon-reload;systemctl enable --now api-server;ufw allow 8080/tcp"]
   - [bash, -lc, "systemctl enable post-boot-check.service"]
-  - [bash, -lc, "set -a;source /etc/droplet.env;set +a;python3 /usr/local/bin/parse-habitat.py"]
-  - [bash, -lc, "/usr/local/bin/bootstrap.sh>>/var/log/bootstrap.log 2>&1"]
   - [bash, -lc, "/usr/local/bin/schedule-destruct.sh"]
   - [bash, -lc, "/usr/local/bin/rename-bots.sh"]
