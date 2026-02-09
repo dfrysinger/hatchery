@@ -62,13 +62,25 @@ http://habitat.yourdomain.com:8080/status
 
 ## Authentication
 
-All API endpoints require HMAC-SHA256 authentication when `API_SECRET` is set:
+All API endpoints require HMAC-SHA256 authentication when `API_SECRET` is set.
+
+### Signature Format
+
+The signature binds:
+- **Timestamp** (Unix seconds, replay protection)
+- **HTTP method** (GET, POST, etc.)
+- **Path** (e.g., `/config/status`)
+- **Body** (request body as UTF-8 string)
+
+**Message format:** `"{timestamp}.{method}.{path}.{body}"`
+
+**Replay window:** 5 minutes (300 seconds)
 
 ### Request Headers
 
 ```
-X-Signature: <HMAC-SHA256(request_body, API_SECRET)>
-X-Timestamp: <unix_timestamp_ms>
+X-Timestamp: <unix_timestamp_seconds>
+X-Signature: <HMAC-SHA256("{timestamp}.{method}.{path}.{body}", API_SECRET)>
 ```
 
 ### Example (Python)
@@ -80,19 +92,24 @@ import time
 import requests
 
 API_SECRET = "your-secret-here"
-url = "http://YOUR_IP:8080/status"
-timestamp = str(int(time.time() * 1000))
+url = "http://YOUR_IP:8080/config/status"
+method = "GET"
+path = "/config/status"
 body = ""  # Empty for GET requests
+timestamp = str(int(time.time()))  # Unix seconds
+
+# Construct message: "{timestamp}.{method}.{path}.{body}"
+message = f"{timestamp}.{method}.{path}.{body}"
 
 signature = hmac.new(
     API_SECRET.encode(),
-    body.encode(),
+    message.encode(),
     hashlib.sha256
 ).hexdigest()
 
 headers = {
-    "X-Signature": signature,
-    "X-Timestamp": timestamp
+    "X-Timestamp": timestamp,
+    "X-Signature": signature
 }
 
 response = requests.get(url, headers=headers)
