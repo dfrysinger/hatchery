@@ -112,8 +112,8 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
 
     lines.append('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
 
-    # API server bind address
-    lines.append('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "0.0.0.0")))
+    # API server bind address (default: 127.0.0.1 for security; set to 0.0.0.0 for remote access)
+    lines.append('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "127.0.0.1")))
 
     lines.append('GLOBAL_IDENTITY_B64="{}"\n'.format(_b64(hab.get("globalIdentity", ""))))
     lines.append('GLOBAL_BOOT_B64="{}"\n'.format(_b64(hab.get("globalBoot", ""))))
@@ -683,23 +683,26 @@ class TestEdgeCases:
         assert env["AGENT_COUNT"] == "0"
 
     def test_api_bind_address_default(self):
+        """Default API bind address should be 127.0.0.1 (localhost only, secure-by-default)"""
         hab = {
             "name": "NoApiAddr",
             "platforms": {"telegram": {"ownerId": "123"}},
             "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
         }
         env = run_parse_habitat(hab)
-        assert env["API_BIND_ADDRESS"] == "0.0.0.0"
+        assert env["API_BIND_ADDRESS"] == "127.0.0.1"
 
     def test_api_bind_address_custom(self):
+        """Custom API bind address (opt-in for remote access)"""
         hab = {
             "name": "CustomApiAddr",
-            "apiBindAddress": "127.0.0.1",
+            "apiBindAddress": "0.0.0.0",
             "platforms": {"telegram": {"ownerId": "123"}},
             "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
         }
         env = run_parse_habitat(hab)
-        assert env["API_BIND_ADDRESS"] == "127.0.0.1"
+        # Explicit override should be respected
+        assert env["API_BIND_ADDRESS"] == "0.0.0.0"
 
 
 class TestAgentStringShorthand:

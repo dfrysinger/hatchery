@@ -25,7 +25,7 @@
 import http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time
 PORT=8080
 API_SECRET=os.getenv('API_SECRET','')
-API_BIND_ADDRESS=os.getenv('API_BIND_ADDRESS','0.0.0.0')
+API_BIND_ADDRESS=os.getenv('API_BIND_ADDRESS','127.0.0.1')
 HABITAT_PATH='/etc/habitat.json'
 AGENTS_PATH='/etc/agents.json'
 MARKER_PATH='/etc/config-api-uploaded'
