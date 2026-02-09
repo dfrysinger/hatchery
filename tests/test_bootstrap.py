@@ -54,12 +54,12 @@ def test_no_self_overwrite():
     assert re.search(r'bootstrap\.sh\)', SRC), \
         "bootstrap.sh copy loop must have a case to skip 'bootstrap.sh)'"
 
-    # Also verify the inline version in hatch-slim.yaml
-    slim = pathlib.Path(__file__).resolve().parent.parent / "hatch-slim.yaml"
-    if slim.exists():
-        slim_src = slim.read_text()
-        assert "bootstrap.sh)" in slim_src, \
-            "hatch-slim.yaml inline bootstrap must skip copying bootstrap.sh"
+    # Also verify the inline version in hatch.yaml
+    hatch_yaml = pathlib.Path(__file__).resolve().parent.parent / "hatch.yaml"
+    if hatch_yaml.exists():
+        hatch_src = hatch_yaml.read_text()
+        assert "bootstrap.sh)" in hatch_src, \
+            "hatch.yaml inline bootstrap must skip copying bootstrap.sh"
 
 
 def test_scripts_copy_loop_exists():
