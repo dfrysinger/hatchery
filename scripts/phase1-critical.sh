@@ -192,6 +192,21 @@ fi
 
 systemctl daemon-reload
 
+# Create API_SECRET if not already set (moved from runcmd which runs before service file exists)
+if [ ! -f /etc/api-server.env ]; then
+  source /etc/droplet.env 2>/dev/null || true
+  if [ -n "$API_SECRET_B64" ] && [ "$API_SECRET_B64" != "[[API_SECRET_B64]]" ]; then
+    API_SECRET=$(echo "$API_SECRET_B64" | base64 -d)
+    echo "[api-server] Using provided API_SECRET"
+  else
+    API_SECRET=$(openssl rand -hex 32)
+    echo "[api-server] Generated random API_SECRET"
+  fi
+  umask 077
+  printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env
+  chmod 600 /etc/api-server.env
+fi
+
 # Enable and start api-server (created above if it didn't exist)
 systemctl enable api-server
 systemctl start api-server || true
