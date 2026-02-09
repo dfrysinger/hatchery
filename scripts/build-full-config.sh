@@ -310,7 +310,6 @@ BOOTMD
     [ -n "$GBO" ] && [ -n "$ABOOT" ] && echo "" >> "$AD/BOOT.md"
     [ -n "$ABOOT" ] && printf '%s\n' "$ABOOT" >> "$AD/BOOT.md"
   fi
-  printf '\nIf BOOT.md asks you to send a message, use the message tool (action=send with channel + target).\nUse the `target` field (not `to`) for message tool destinations.\nAfter sending with the message tool, reply with ONLY: NO_REPLY.\nIf nothing needs attention, reply with ONLY: NO_REPLY.\n' >> "$AD/BOOT.md"
   BSPRE="You are a new instance with no prior context. Before doing anything else:
 1. Find chat transcripts from previous sessions: find ~ -path '*/sessions/*.jsonl' -name '*.jsonl' 2>/dev/null
 2. Read through the last ~100 messages from the most recent transcript
