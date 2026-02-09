@@ -49,7 +49,11 @@ Add API endpoints that accept JSON config uploads after the droplet boots, then 
 - [ ] Returns current config status (files exist, last modified times)
 - [ ] Does NOT expose sensitive data (tokens, keys)
 
-### AC6: Tests
+### AC6: GET /config/status endpoint (unauthenticated)
+- [ ] Returns only `api_uploaded` and `api_uploaded_at`
+- [ ] Safe for polling (no secrets)
+
+### AC7: Tests
 - [ ] Unit tests for JSON parsing and validation
 - [ ] Unit tests for file writing logic
 - [ ] Unit tests for response formatting
@@ -65,6 +69,18 @@ Add API endpoints that accept JSON config uploads after the droplet boots, then 
 2. `scripts/apply-config.sh` - New script
 3. `hatch.yaml` - Include apply-config.sh in write_files
 4. `tests/test_api_config.py` - Unit tests
+
+## Upload Marker (`api_uploaded`)
+
+After a successful `POST /config/upload` that writes at least one file, the API server writes a marker file:
+
+- Path: **`/etc/config-api-uploaded`**
+- Permissions: `0600`
+- Contents: Unix timestamp (float)
+
+This enables safe, unauthenticated polling via:
+
+- `GET /config/status` → `{"api_uploaded": <bool>, "api_uploaded_at": <float|null>}`
 
 ## Usage Example
 
