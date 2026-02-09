@@ -153,11 +153,14 @@ Hatchery uses **defense-in-depth** with multiple layers:
 2. **HMAC Authentication** — Sensitive API endpoints require signed requests.
 3. **UFW** (optional) — Host-level backup firewall.
 
-**Why the API binds to 0.0.0.0:**
-- iOS Shortcuts need direct HTTP access (can't use localhost)
-- DO Firewall blocks all traffic except from your allowlisted IP
-- HMAC protects sensitive endpoints (`/sync`, `/prepare-shutdown`, `/config/*`)
-- Info-only endpoints (`/status`, `/health`) are safe even if exposed
+**API Binding (Secure by Default):**
+- **Default:** API binds to `127.0.0.1` (localhost only) for security
+- **Remote Access:** Set `apiBindAddress: "0.0.0.0"` in habitat config to enable iOS Shortcut access
+- **Protection:** HMAC protects sensitive endpoints (`/sync`, `/prepare-shutdown`, `/config/*`)
+- **Firewall:** When remote access is enabled, DO Firewall blocks all traffic except from your allowlisted IP
+
+**Remote Access Setup:**
+See [docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md) for complete configuration guide including HMAC authentication setup.
 
 **Dynamic IP Handling:**
 Your phone's IP changes often. The "Repair Habitat Firewall" Shortcut updates DO Firewall rules instantly when your IP changes.

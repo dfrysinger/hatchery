@@ -31,7 +31,8 @@ The primary security layer is a **cloud firewall managed via iOS Shortcut**.
 │                         ▼                               │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │              Habitat Droplet                     │   │
-│  │  • API Server (0.0.0.0:8080)                    │   │
+│  │  • API Server (127.0.0.1:8080 default)          │   │
+│  │    or (0.0.0.0:8080 with apiBindAddress)        │   │
 │  │  • Clawdbot Gateway (:18789)                    │   │
 │  │  • RDP (:3389), SSH (:22)                       │   │
 │  └─────────────────────────────────────────────────┘   │
@@ -90,17 +91,32 @@ curl -X POST http://$HOST:8080/sync \
 | `/config/upload` | **Yes (HMAC)** | Upload configuration |
 | `/config/apply` | **Yes (HMAC)** | Apply config (restart) |
 
-## Binding to 0.0.0.0
+## API Server Binding (Secure by Default)
 
-The API server binds to all interfaces (`0.0.0.0:8080`) rather than localhost only.
+**Default Behavior:**
+The API server binds to `127.0.0.1:8080` (localhost only) for security. This prevents any network access to the API by default.
 
-**Why this is acceptable:**
-1. DO Firewall blocks all traffic except from your IP
-2. HMAC protects sensitive endpoints
-3. iOS Shortcuts need direct access (can't use localhost)
-4. `/status` and `/health` leak minimal info even if exposed
+**Enabling Remote Access (iOS Shortcuts):**
+To enable iOS Shortcut access, set `apiBindAddress` in your habitat configuration:
 
-**If you're paranoid:** Use the Cloudflare Tunnel alternative (see below).
+```json
+{
+  "apiBindAddress": "0.0.0.0",
+  ...
+}
+```
+
+**Security Model with Remote Access:**
+When `apiBindAddress: "0.0.0.0"` is set:
+1. **DO Firewall** blocks all traffic except from your allowlisted IP
+2. **HMAC authentication** protects sensitive endpoints
+3. **Info-only endpoints** (`/status`, `/health`) are safe even if exposed
+4. **Firewall updates** via "Repair Habitat Firewall" Shortcut handle IP changes
+
+**Remote Access Setup Guide:**
+See [docs/REMOTE-ACCESS.md](../docs/REMOTE-ACCESS.md) for complete configuration including HMAC authentication setup and security best practices.
+
+**Alternative (Most Secure):** Use SSH tunneling or Cloudflare Tunnel (see below) to keep `apiBindAddress: "127.0.0.1"` while still enabling remote access.
 
 ## Alternative: Cloudflare Tunnel
 
