@@ -3,7 +3,7 @@ Description=Droplet Status API
 After=network.target
 
 [Service]
-EnvironmentFile=/etc/api-server.env
+EnvironmentFile=-/etc/api-server.env
 EnvironmentFile=-/etc/habitat-parsed.env
 ExecStart=/usr/local/bin/api-server.py
 Restart=always
