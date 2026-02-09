@@ -71,11 +71,77 @@ def write_config_file(path,data):
   except Exception as e:return {"ok":False,"error":str(e)}
 
 def write_upload_marker():
-  """Write API upload marker with timestamp."""
+  """Write API upload marker with timestamp.
+  
+  Creates /etc/config-api-uploaded file with timestamp to indicate successful
+  config upload via POST /config/upload endpoint. Used by /config/status to
+  report upload state.
+  
+  Logs success/failure in structured format to stderr. Failures are non-fatal
+  since upload status can still be determined via API (file existence check).
+  
+  Returns:
+    dict: {"ok": bool, "path": str, "error": str (if failed)}
+  """
+  import sys
+  timestamp = time.time()
+  
   try:
-    with open(MARKER_PATH,'w') as f:f.write(str(time.time()))
-    os.chmod(MARKER_PATH,0o600)
-  except:pass
+    with open(MARKER_PATH, 'w') as f:
+      f.write(str(timestamp))
+    os.chmod(MARKER_PATH, 0o600)
+    
+    # Log success (structured format for parsing/monitoring)
+    log_entry = json.dumps({
+      "event": "upload_marker_written",
+      "path": MARKER_PATH,
+      "timestamp": timestamp,
+      "success": True
+    })
+    print(log_entry, file=sys.stderr)
+    
+    return {"ok": True, "path": MARKER_PATH}
+    
+  except PermissionError as e:
+    error_msg = f"Permission denied writing marker: {e}"
+    log_entry = json.dumps({
+      "event": "upload_marker_write_failed",
+      "path": MARKER_PATH,
+      "timestamp": timestamp,
+      "success": False,
+      "error": "PermissionError",
+      "details": str(e)
+    })
+    print(log_entry, file=sys.stderr)
+    return {"ok": False, "error": error_msg}
+    
+  except OSError as e:
+    # Covers: disk full, directory doesn't exist, filesystem errors
+    error_msg = f"OS error writing marker: {e}"
+    log_entry = json.dumps({
+      "event": "upload_marker_write_failed",
+      "path": MARKER_PATH,
+      "timestamp": timestamp,
+      "success": False,
+      "error": "OSError",
+      "details": str(e)
+    })
+    print(log_entry, file=sys.stderr)
+    return {"ok": False, "error": error_msg}
+    
+  except Exception as e:
+    # Catch-all for unexpected errors
+    error_msg = f"Unexpected error writing marker: {e}"
+    log_entry = json.dumps({
+      "event": "upload_marker_write_failed",
+      "path": MARKER_PATH,
+      "timestamp": timestamp,
+      "success": False,
+      "error": type(e).__name__,
+      "details": str(e)
+    })
+    print(log_entry, file=sys.stderr)
+    return {"ok": False, "error": error_msg}
 
 def get_config_status():
   """Get current config file status without exposing sensitive data."""
