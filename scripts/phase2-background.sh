@@ -261,7 +261,6 @@ systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 systemctl enable clawdbot-sync.timer 2>/dev/null || true
 systemctl start clawdbot-sync.timer 2>/dev/null || true
 # Start desktop services now that everything is installed
-$S 9 "starting-desktop"
 systemctl start xvfb
 # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
 for i in {1..30}; do
