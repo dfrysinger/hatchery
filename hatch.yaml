@@ -376,21 +376,9 @@ write_files:
         exit 0
       fi
       exec /usr/local/bin/set-council-group.telegram.sh "$@"
-  - path: /etc/systemd/system/api-server.service
-    permissions: "0644"
-    content: |
-      [Unit]
-      Description=Droplet Status API
-      After=network.target
-      [Service]
-      EnvironmentFile=/etc/api-server.env
-      EnvironmentFile=-/etc/habitat-parsed.env
-      ExecStart=/usr/local/bin/api-server.py
-      Restart=always
-      RestartSec=3
-      User=root
-      [Install]
-      WantedBy=multi-user.target
+  # NOTE: api-server.service removed from write_files to fix race condition.
+  # Bootstrap.sh copies from systemd/api-server.service (single source of truth).
+  # See: https://github.com/dfrysinger/hatchery/issues/XXX
   - path: /usr/local/bin/apply-config.sh
     permissions: "0755"
     content: |
