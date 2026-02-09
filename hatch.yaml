@@ -948,6 +948,12 @@ write_files:
       fi
       
       systemctl daemon-reload
+      
+      # Enable and start api-server (created above if it didn't exist)
+      systemctl enable api-server
+      systemctl start api-server || true
+      ufw allow 8080/tcp
+      
       # Enable and START restore service BEFORE clawdbot (if service file exists)
       # clawdbot has After=openclaw-restore.service, so it waits for restore to complete
       if [ -f /etc/systemd/system/openclaw-restore.service ]; then
