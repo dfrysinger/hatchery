@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Tests for build-full-config.sh dual-platform support.
 
-Extracts build-full-config.sh from hatch.yaml, runs it with various
-PLATFORM settings, and validates the generated JSON config.
+Reads build-full-config.sh from scripts/ directory (the source of truth
+with slim YAML approach), runs it with various PLATFORM settings, and
+validates the generated JSON config.
 """
 
 import base64
@@ -13,7 +14,6 @@ import subprocess
 import tempfile
 
 import pytest
-import yaml
 
 
 def b64(s):
@@ -22,15 +22,10 @@ def b64(s):
 
 
 def extract_build_script():
-    """Extract build-full-config.sh content from hatch.yaml."""
-    hatch_path = os.path.join(os.path.dirname(__file__), "..", "hatch.yaml")
-    with open(hatch_path) as f:
-        data = yaml.safe_load(f)
-
-    for entry in data.get("write_files", []):
-        if entry.get("path") == "/usr/local/sbin/build-full-config.sh":
-            return entry["content"]
-    raise RuntimeError("build-full-config.sh not found in hatch.yaml")
+    """Read build-full-config.sh from scripts/ directory."""
+    script_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "build-full-config.sh")
+    with open(script_path) as f:
+        return f.read()
 
 
 def make_stub_script(build_script_content, tmp_dir):

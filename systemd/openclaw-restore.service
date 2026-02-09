@@ -1,0 +1,14 @@
+[Unit]
+Description=Restore openclaw state from Dropbox
+After=network-online.target
+Wants=network-online.target
+Before=clawdbot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/restore-openclaw-state.sh
+TimeoutStartSec=60
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

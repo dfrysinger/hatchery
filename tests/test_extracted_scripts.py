@@ -1,8 +1,10 @@
 """
-Tests for extracted scripts in scripts/ directory.
+Tests for scripts in the scripts/ directory.
 
-Validates that all scripts extracted from hatch.yaml exist, are executable,
-have proper shebangs, and can be parsed without syntax errors.
+With the slim YAML approach, scripts/ is the source of truth. The scripts
+are fetched from GitHub by bootstrap.sh during provisioning. This file
+validates that all scripts exist, are executable, have proper shebangs,
+and can be parsed without syntax errors.
 """
 
 import os
@@ -487,64 +489,6 @@ class TestSetCouncilGroup:
         )
 
 
-class TestScriptsMatchYaml:
-    """Verify extracted scripts contain the same logic as hatch.yaml originals."""
-
-    @pytest.fixture
-    def yaml_scripts(self):
-        """Extract script contents from hatch.yaml for comparison."""
-        try:
-            import yaml
-        except ImportError:
-            pytest.skip("PyYAML not installed")
-        yaml_path = os.path.join(REPO_ROOT, "hatch.yaml")
-        with open(yaml_path) as f:
-            data = yaml.safe_load(f)
-        scripts = {}
-        for entry in data.get("write_files", []):
-            path = entry.get("path", "")
-            content = entry.get("content", "")
-            scripts[path] = content
-        return scripts
-
-    # NOTE: restore-openclaw-state.sh is excluded from line-by-line comparison
-    # because standalone uses expanded formatting while hatch.yaml uses compact.
-    # Functional equivalence is verified in test_rclone_validation.py.
-    YAML_PATH_MAP = {
-        "parse-habitat.py": "/usr/local/bin/parse-habitat.py",
-        "tg-notify.sh": "/usr/local/bin/tg-notify.sh",
-        "api-server.py": "/usr/local/bin/api-server.py",
-        "phase1-critical.sh": "/usr/local/sbin/phase1-critical.sh",
-        "phase2-background.sh": "/usr/local/sbin/phase2-background.sh",
-        "build-full-config.sh": "/usr/local/sbin/build-full-config.sh",
-        "post-boot-check.sh": "/usr/local/bin/post-boot-check.sh",
-        "try-full-config.sh": "/usr/local/bin/try-full-config.sh",
-        "rename-bots.sh": "/usr/local/bin/rename-bots.sh",
-    }
-
-    @pytest.mark.parametrize("script_name", list(YAML_PATH_MAP.keys()))
-    def test_script_contains_yaml_content(self, script_name, yaml_scripts):
-        """Extracted script should contain all functional lines from YAML original."""
-        yaml_path = self.YAML_PATH_MAP[script_name]
-        yaml_content = yaml_scripts.get(yaml_path, "")
-        if not yaml_content:
-            pytest.skip(f"Could not find {yaml_path} in hatch.yaml")
-
-        script_path = os.path.join(SCRIPTS_DIR, script_name)
-        if not os.path.isfile(script_path):
-            pytest.skip(f"{script_name} does not exist")
-
-        with open(script_path, "r") as f:
-            extracted_content = f.read()
-
-        # Compare functional lines (skip comments and blank lines)
-        yaml_lines = [
-            line.strip()
-            for line in yaml_content.strip().split("\n")
-            if line.strip()
-            and not line.strip().startswith("#")
-        ]
-        for line in yaml_lines:
-            assert line in extracted_content, (
-                f"{script_name}: missing YAML line: {line[:80]}..."
-            )
+# NOTE: TestScriptsMatchYaml removed -- with slim YAML approach, scripts are 
+# fetched from GitHub by bootstrap.sh, not embedded in hatch.yaml.
+# The scripts/ directory IS the source of truth now.

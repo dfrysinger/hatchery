@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Tests for tg-notify.sh platform-aware notifications.
 
-Extracts tg-notify.sh from hatch.yaml and tests its platform routing
-logic by stubbing out curl and python3 calls.
+Reads tg-notify.sh from scripts/ directory (the source of truth with
+slim YAML approach) and tests its platform routing logic by stubbing
+out curl and python3 calls.
 """
 
 import base64
@@ -12,7 +13,6 @@ import subprocess
 import tempfile
 
 import pytest
-import yaml
 
 
 def b64(s):
@@ -21,15 +21,10 @@ def b64(s):
 
 
 def extract_notify_script():
-    """Extract tg-notify.sh content from hatch.yaml."""
-    hatch_path = os.path.join(os.path.dirname(__file__), "..", "hatch.yaml")
-    with open(hatch_path) as f:
-        data = yaml.safe_load(f)
-
-    for entry in data.get("write_files", []):
-        if entry.get("path") == "/usr/local/bin/tg-notify.sh":
-            return entry["content"]
-    raise RuntimeError("tg-notify.sh not found in hatch.yaml")
+    """Read tg-notify.sh from scripts/ directory."""
+    script_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "tg-notify.sh")
+    with open(script_path) as f:
+        return f.read()
 
 
 def make_notify_stub(script_content, tmp_dir, curl_behavior="success"):

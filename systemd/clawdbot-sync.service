@@ -1,0 +1,7 @@
+[Unit]
+Description=Sync Clawdbot memory to Dropbox
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sync-openclaw-state.sh
+User=root

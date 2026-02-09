@@ -11,7 +11,6 @@ import re
 import pytest
 
 SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'scripts')
-HATCH_YAML = os.path.join(os.path.dirname(__file__), '..', 'hatch.yaml')
 
 # Workspace files that must be synced per-agent
 WORKSPACE_FILES = [
@@ -34,12 +33,6 @@ def read_script(name):
     """Read a script file from the scripts directory."""
     path = os.path.join(SCRIPTS_DIR, name)
     with open(path, 'r') as f:
-        return f.read()
-
-
-def read_hatch_yaml():
-    """Read the hatch.yaml file."""
-    with open(HATCH_YAML, 'r') as f:
         return f.read()
 
 
@@ -148,22 +141,8 @@ class TestRestoreWorkspaceFiles:
         assert 'chown' in content, "Restore must set file ownership"
 
 
-class TestYamlInlineScripts:
-    """Tests that hatch.yaml inline scripts match extracted scripts."""
-
-    def test_yaml_sync_includes_workspace_files(self):
-        """Inline sync script in hatch.yaml should include workspace files."""
-        content = read_hatch_yaml()
-        # Find the sync script section
-        assert 'AGENTS.md' in content, "YAML sync must include AGENTS.md"
-        assert 'SOUL.md' in content, "YAML sync must include SOUL.md"
-
-    def test_yaml_restore_includes_workspace_files(self):
-        """Inline restore script in hatch.yaml should include workspace files."""
-        content = read_hatch_yaml()
-        # The restore script content should include workspace files
-        assert 'AGENTS.md' in content, "YAML restore must include AGENTS.md"
-        assert 'SOUL.md' in content, "YAML restore must include SOUL.md"
+# NOTE: TestYamlInlineScripts removed - with slim YAML approach, sync/restore
+# scripts are in scripts/ directory (tested above), not embedded in hatch.yaml.
 
 
 class TestSafetyChecks:
