@@ -113,6 +113,17 @@ curl -X POST http://$DROPLET_IP:8080/config/upload \
   }'
 ```
 
+**Upload Marker File (`api_uploaded`):**
+
+After a successful `/config/upload`, the droplet writes a marker file at:
+
+- `/etc/config-api-uploaded`
+
+The file contains a Unix timestamp (seconds) and is created with `0600` permissions.
+
+- `GET /config` includes `api_uploaded` + `api_uploaded_at`
+- `GET /config/status` is a minimal, unauthenticated endpoint that returns only `api_uploaded` + `api_uploaded_at`
+
 ## Shortcut Configuration Wizard *(Coming Soon)*
 
 Configure habitats through an interactive iOS Shortcut wizard:
