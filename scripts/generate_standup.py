@@ -84,10 +84,20 @@ STATUS_ALIASES = {
     "code_review": "code-review"
 }
 
-DEFAULT_STATE_FILE = os.environ.get(
-    'SPRINT_STATE_FILE',
-    str(Path.home() / 'clawd' / 'shared' / 'sprint-state.json')
-)
+
+def get_default_state_file() -> str:
+    """
+    Get default sprint-state.json path.
+    
+    Evaluated at runtime (not import time) for test environment isolation.
+    
+    Returns:
+        Path from SPRINT_STATE_FILE env var or default location
+    """
+    return os.environ.get(
+        'SPRINT_STATE_FILE',
+        str(Path.home() / 'clawd' / 'shared' / 'sprint-state.json')
+    )
 
 
 def load_sprint_state(filepath: str) -> Dict[str, Any]:
@@ -484,10 +494,11 @@ def parse_args(args=None):
         '--output',
         help='Output file (default: stdout)'
     )
+    default_state_file = get_default_state_file()
     parser.add_argument(
         '--state-file',
-        default=DEFAULT_STATE_FILE,
-        help=f'Path to sprint-state.json (default: {DEFAULT_STATE_FILE})'
+        default=default_state_file,
+        help=f'Path to sprint-state.json (default: {default_state_file})'
     )
     
     return parser.parse_args(args)

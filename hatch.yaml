@@ -67,66 +67,121 @@ write_files:
     permissions: "0755"
     content: |
       #!/usr/bin/env python3
-      # Supports v2 (platforms.X, tokens.X) and v1 (top-level X, XBotToken) schemas
+      # =============================================================================
+      # parse-habitat.py -- Parse HABITAT_B64 JSON into /etc/habitat-parsed.env
+      # =============================================================================
+      # Purpose:  Decodes the base64-encoded habitat JSON from the environment,
+      #           writes /etc/habitat.json and /etc/habitat-parsed.env with all
+      #           agent configs, platform settings, council config, and global
+      #           identity/soul/boot fields as shell-sourceable env vars.
+      #
+      # Inputs:   HABITAT_B64 (required) -- base64-encoded habitat JSON
+      #           AGENT_LIB_B64 (optional) -- base64-encoded agent library JSON
+      #
+      # Outputs:  /etc/habitat.json -- raw habitat JSON
+      #           /etc/habitat-parsed.env -- shell-sourceable env vars
+      #
+      # Schema:   Supports both v2 (new) and v1 (legacy) formats:
+      #
+      #   v2 (preferred):
+      #     {
+      #       "platforms": { "discord": { "ownerId": "..." } },
+      #       "agents": [{ "tokens": { "discord": "..." } }]
+      #     }
+      #
+      #   v1 (legacy, deprecated - see issue #112):
+      #     {
+      #       "discord": { "ownerId": "..." },
+      #       "agents": [{ "discordBotToken": "..." }]
+      #     }
+      #
+      # Original: /usr/local/bin/parse-habitat.py (in hatch.yaml write_files)
+      # =============================================================================
       import json, base64, os, sys
+
       def d(val):
           try: return base64.b64decode(val).decode()
           except: return ""
+
       def b64(s):
           return base64.b64encode((s or "").encode()).decode()
-      def get_platform_config(hab, platform_name):
-          platforms = hab.get("platforms", {})
-          if platform_name in platforms:
-              return platforms[platform_name]
-          return hab.get(platform_name, {})
-      def normalize_agent_ref(agent_ref):
-          if isinstance(agent_ref, str):
-              return {"agent": agent_ref}
-          return agent_ref
-      def get_agent_token(agent_ref, platform_name):
-          tokens = agent_ref.get("tokens", {})
-          if platform_name in tokens:
-              return tokens[platform_name]
-          if platform_name == "discord":
-              return agent_ref.get("discordBotToken", "")
-          elif platform_name == "telegram":
-              return agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
-          return ""
+
       hab_raw = os.environ.get('HABITAT_B64', '')
       lib_raw = os.environ.get('AGENT_LIB_B64', '')
+
       if not hab_raw:
           print("ERROR: HABITAT_B64 not set", file=sys.stderr)
           sys.exit(1)
+
       try:
           hab = json.loads(d(hab_raw))
       except (json.JSONDecodeError, Exception) as e:
           print("ERROR: Failed to parse HABITAT_B64: {}".format(e), file=sys.stderr)
           sys.exit(1)
+
       lib = {}
       if lib_raw:
           try:
               lib = json.loads(d(lib_raw))
           except (json.JSONDecodeError, Exception):
               print("WARN: Failed to parse AGENT_LIB_B64, using empty library", file=sys.stderr)
+
       with open('/etc/habitat.json', 'w') as f:
           json.dump(hab, f, indent=2)
       os.chmod('/etc/habitat.json', 0o600)
+
+      # Helper: get platform config with v2/v1 fallback
+      def get_platform_config(hab, platform_name):
+          """Get platform config: v2 (platforms.X) or v1 (X) format."""
+          platforms = hab.get("platforms", {})
+          if platform_name in platforms:
+              return platforms[platform_name]
+          # v1 fallback: top-level discord/telegram
+          return hab.get(platform_name, {})
+
+      # Helper: normalize agent reference (string shorthand to dict)
+      def normalize_agent_ref(agent_ref):
+          """Normalize agent reference to dict format.
+          
+          Converts string shorthand ("Claude") to dict format ({"agent": "Claude"}).
+          Dict refs are returned unchanged.
+          """
+          if isinstance(agent_ref, str):
+              return {"agent": agent_ref}
+          return agent_ref
+
+      # Helper: get agent token with v2/v1 fallback
+      def get_agent_token(agent_ref, platform_name):
+          """Get agent token: v2 (tokens.X) or v1 (XBotToken) format."""
+          tokens = agent_ref.get("tokens", {})
+          if platform_name in tokens:
+              return tokens[platform_name]
+          # v1 fallback: discordBotToken, telegramBotToken, botToken
+          if platform_name == "discord":
+              return agent_ref.get("discordBotToken", "")
+          elif platform_name == "telegram":
+              return agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
+          return ""
+
       with open('/etc/habitat-parsed.env', 'w') as f:
           f.write('HABITAT_NAME="{}"\n'.format(hab["name"]))
           f.write('HABITAT_NAME_B64="{}"\n'.format(b64(hab["name"])))
           f.write('DESTRUCT_MINS="{}"\n'.format(hab.get("destructMinutes", 0)))
           f.write('DESTRUCT_MINS_B64="{}"\n'.format(b64(str(hab.get("destructMinutes", 0)))))
           f.write('BG_COLOR="{}"\n'.format(hab.get("bgColor", "2D3748")))
+
           # Platform (default: "telegram" for backward compat)
           platform = hab.get("platform", "telegram")
           f.write('PLATFORM="{}"\n'.format(platform))
           f.write('PLATFORM_B64="{}"\n'.format(b64(platform)))
+
           # Discord config (v2: platforms.discord, v1: discord)
           discord_cfg = get_platform_config(hab, "discord")
           f.write('DISCORD_GUILD_ID="{}"\n'.format(discord_cfg.get("serverId", "")))
           f.write('DISCORD_GUILD_ID_B64="{}"\n'.format(b64(discord_cfg.get("serverId", ""))))
           f.write('DISCORD_OWNER_ID="{}"\n'.format(discord_cfg.get("ownerId", "")))
           f.write('DISCORD_OWNER_ID_B64="{}"\n'.format(b64(discord_cfg.get("ownerId", ""))))
+
           # Telegram config (v2: platforms.telegram, v1: telegram)
           telegram_cfg = get_platform_config(hab, "telegram")
           telegram_owner_id = telegram_cfg.get("ownerId", "")
@@ -134,6 +189,7 @@ write_files:
           f.write('TELEGRAM_OWNER_ID_B64="{}"\n'.format(b64(telegram_owner_id)))
           # Backward compat: keep TELEGRAM_USER_ID_B64 as alias
           f.write('TELEGRAM_USER_ID_B64="{}"\n'.format(b64(telegram_owner_id)))
+
           # Council config (supports nested telegram.groupId and legacy groupId)
           council = hab.get("council", {})
           council_tg = council.get("telegram", {})
@@ -142,8 +198,10 @@ write_files:
           f.write('COUNCIL_GROUP_NAME="{}"\n'.format(council.get("groupName", "")))
           f.write('COUNCIL_JUDGE="{}"\n'.format(council.get("judge", "")))
           f.write('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
+
           # API server bind address (default: 127.0.0.1 for security; set to 0.0.0.0 for remote access)
           f.write('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "127.0.0.1")))
+
           f.write('GLOBAL_IDENTITY_B64="{}"\n'.format(b64(hab.get("globalIdentity", ""))))
           f.write('GLOBAL_BOOT_B64="{}"\n'.format(b64(hab.get("globalBoot", ""))))
           f.write('GLOBAL_BOOTSTRAP_B64="{}"\n'.format(b64(hab.get("globalBootstrap", ""))))
@@ -151,8 +209,10 @@ write_files:
           f.write('GLOBAL_AGENTS_B64="{}"\n'.format(b64(hab.get("globalAgents", ""))))
           f.write('GLOBAL_USER_B64="{}"\n'.format(b64(hab.get("globalUser", ""))))
           f.write('GLOBAL_TOOLS_B64="{}"\n'.format(b64(hab.get("globalTools", ""))))
+
           agents = hab.get("agents", [])
           f.write('AGENT_COUNT={}\n'.format(len(agents)))
+
           for i, raw_agent_ref in enumerate(agents):
               n = i + 1
               agent_ref = normalize_agent_ref(raw_agent_ref)
@@ -165,9 +225,11 @@ write_files:
               boot = lib_entry.get("boot", "")
               bootstrap = lib_entry.get("bootstrap", "")
               user = lib_entry.get("user", "")
+
               # Get tokens (v2: tokens.X, v1: XBotToken)
               tg_bot_token = get_agent_token(agent_ref, "telegram")
               dc_bot_token = get_agent_token(agent_ref, "discord")
+
               f.write('AGENT{}_NAME="{}"\n'.format(n, name))
               f.write('AGENT{}_NAME_B64="{}"\n'.format(n, b64(name)))
               # Backward compat: BOT_TOKEN = telegram bot token
@@ -185,6 +247,7 @@ write_files:
               f.write('AGENT{}_BOOT_B64="{}"\n'.format(n, b64(boot)))
               f.write('AGENT{}_BOOTSTRAP_B64="{}"\n'.format(n, b64(bootstrap)))
               f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
+
       os.chmod('/etc/habitat-parsed.env', 0o600)
       print("Parsed habitat '{}' with {} agents (platform: {})".format(hab['name'], len(agents), platform))
   - path: /usr/local/bin/tg-notify.sh
