@@ -90,17 +90,27 @@ curl -X POST http://$HOST:8080/sync \
 | `/config/upload` | **Yes (HMAC)** | Upload configuration |
 | `/config/apply` | **Yes (HMAC)** | Apply config (restart) |
 
-## Binding to 0.0.0.0
+## API Bind Address (Secure-by-Default)
 
-The API server binds to all interfaces (`0.0.0.0:8080`) rather than localhost only.
+The API server defaults to **127.0.0.1:8080** (localhost-only) for security.
 
-**Why this is acceptable:**
-1. DO Firewall blocks all traffic except from your IP
-2. HMAC protects sensitive endpoints
-3. iOS Shortcuts need direct access (can't use localhost)
-4. `/status` and `/health` leak minimal info even if exposed
+**Default behavior:**
+- API is **not** exposed to the internet
+- Only local processes can access it
+- Suitable for SSH tunnel or reverse proxy access
 
-**If you're paranoid:** Use the Cloudflare Tunnel alternative (see below).
+**Opt-in for iOS Shortcut remote access:**
+1. Set `apiBindAddress: "0.0.0.0"` in your habitat JSON
+2. Configure DO Firewall to allowlist your IP (see `docs/REMOTE-ACCESS.md`)
+3. HMAC authentication protects sensitive endpoints
+
+**Why remote binding is acceptable when properly configured:**
+- DO Firewall blocks all traffic except from your allowlisted IP
+- HMAC protects mutation endpoints (`/sync`, `/config/upload`, etc.)
+- iOS Shortcuts need direct HTTP access (can't use localhost)
+- Read-only endpoints (`/status`, `/health`) leak minimal info
+
+**For zero-port-exposure:** Use SSH tunnels or Cloudflare Tunnel (see below).
 
 ## Alternative: Cloudflare Tunnel
 
