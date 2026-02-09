@@ -31,7 +31,7 @@ The primary security layer is a **cloud firewall managed via iOS Shortcut**.
 │                         ▼                               │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │              Habitat Droplet                     │   │
-│  │  • API Server (0.0.0.0:8080)                    │   │
+│  │  • API Server (127.0.0.1:8080 default)          │   │
 │  │  • Clawdbot Gateway (:18789)                    │   │
 │  │  • RDP (:3389), SSH (:22)                       │   │
 │  └─────────────────────────────────────────────────┘   │
@@ -46,12 +46,16 @@ Your phone's IP changes frequently (cellular, WiFi, travel). The "Repair Habitat
 2. Calls DO API to update firewall rules
 3. New IP is immediately allowed
 
-**This means:**
-- API server can safely bind to `0.0.0.0` (all interfaces)
-- Only your phone can reach the droplet
-- No SSH tunnels or VPNs required
+**When remote API access is enabled (`remoteApi: true`):**
+- API server binds to `0.0.0.0` (all interfaces) for iOS Shortcut access
+- DO Firewall ensures only your phone can reach the droplet
+- No SSH tunnels or VPNs required for remote management
 
 ### Why This Is Secure
+
+**Note:** By default, the API server binds to `127.0.0.1` (localhost-only), preventing any external access. Remote API access via `0.0.0.0` binding is opt-in only (see "API Bind Address" section below).
+
+When remote API access is enabled with DO Firewall protection:
 
 | Attack Vector | Mitigation |
 |---------------|------------|
@@ -92,8 +96,10 @@ curl -X POST http://$HOST:8080/sync \
 |----------|---------------|-------|
 | `/status` | No | Read-only status (safe to expose) |
 | `/health` | No | Simple health check |
-| `/stages` | No | Boot progress log |
-| `/config` | No | Config status (no secrets) |
+| `/config/status` | No | Upload status only (no secrets) |
+| `/stages` | **Yes (HMAC)** | Boot progress log (may contain sensitive info) |
+| `/log` | **Yes (HMAC)** | Boot logs (may contain sensitive info) |
+| `/config` | **Yes (HMAC)** | Config file status (may leak structure) |
 | `/sync` | **Yes (HMAC)** | Triggers Dropbox sync |
 | `/prepare-shutdown` | **Yes (HMAC)** | Graceful shutdown |
 | `/config/upload` | **Yes (HMAC)** | Upload configuration |
@@ -132,11 +138,13 @@ After enabling remote access:
 
 **Priority:** `apiBindAddress` (if set) > `remoteApi` (if true) > default (127.0.0.1)
 
-**Why remote binding is acceptable when properly configured:**
+**Why remote binding (`0.0.0.0`) is acceptable when opted-in and properly configured:**
 - DO Firewall blocks all traffic except from your allowlisted IP
-- HMAC protects mutation endpoints (`/sync`, `/config/upload`, etc.)
+- HMAC protects sensitive endpoints (`/sync`, `/config`, `/stages`, etc.)
 - iOS Shortcuts need direct HTTP access (can't use localhost)
-- Read-only endpoints (`/status`, `/health`) leak minimal info
+- Only `/status`, `/health`, and `/config/status` are unauthenticated (minimal info)
+
+**Important:** Remote binding is **opt-in only**. The API defaults to localhost-only (`127.0.0.1`) for security. Enable remote access only when using iOS Shortcuts or similar remote management tools.
 
 **For zero-port-exposure:** Use SSH tunnels or Cloudflare Tunnel (see below).
 
