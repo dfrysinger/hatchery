@@ -124,6 +124,8 @@ The file contains a Unix timestamp (seconds) and is created with `0600` permissi
 - `GET /config` includes `api_uploaded` + `api_uploaded_at`
 - `GET /config/status` is a minimal, unauthenticated endpoint that returns only `api_uploaded` + `api_uploaded_at`
 
+See [docs/api-upload-marker.md](docs/api-upload-marker.md) for details and troubleshooting.
+
 ## Shortcut Configuration Wizard *(Coming Soon)*
 
 Configure habitats through an interactive iOS Shortcut wizard:
