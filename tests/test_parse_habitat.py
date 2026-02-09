@@ -701,7 +701,8 @@ class TestEdgeCases:
             "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
         }
         env = run_parse_habitat(hab)
-        assert env["API_BIND_ADDRESS"] == "127.0.0.1"
+        # Explicit override should be respected
+        assert env["API_BIND_ADDRESS"] == "0.0.0.0"
 
 
 class TestAgentStringShorthand:
