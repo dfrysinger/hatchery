@@ -99,6 +99,21 @@ for f in "$INSTALL_DIR"/scripts/*.py; do
   [ -f "$f" ] && cp "$f" /usr/local/bin/ && chmod 755 "/usr/local/bin/$(basename "$f")"
 done
 
+# ---------------------------------------------------------------------------
+# Install systemd service files (fixes #139: service/script mismatch)
+# ---------------------------------------------------------------------------
+if [ -d "$INSTALL_DIR/systemd" ]; then
+  for f in "$INSTALL_DIR"/systemd/*.service; do
+    [ -f "$f" ] || continue
+    bn=$(basename "$f")
+    cp "$f" /etc/systemd/system/
+    log "Updated systemd service: $bn"
+  done
+  systemctl daemon-reload
+  # Restart api-server if its service file was updated
+  [ -f "$INSTALL_DIR/systemd/api-server.service" ] && systemctl restart api-server || true
+fi
+
 [ -f "$INSTALL_DIR/gmail-api.py" ] && cp "$INSTALL_DIR/gmail-api.py" /usr/local/bin/gmail-api.py && chmod 755 /usr/local/bin/gmail-api.py
 [ -f "$INSTALL_DIR/set-council-group.sh" ] && cp "$INSTALL_DIR/set-council-group.sh" /usr/local/bin/set-council-group.telegram.sh && chmod 755 /usr/local/bin/set-council-group.telegram.sh
 
