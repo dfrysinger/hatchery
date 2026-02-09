@@ -250,6 +250,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. PRs welcome!
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| R5 | 2026-02-09 | Code review fixes: security hardening (shell=True removal), 40 new auth tests, script permissions, documentation corrections |
+| R4 | 2026-02-09 | Code quality & documentation: API secure-by-default, drift detection, v1 schema compatibility, upload marker logging |
 | v4.3 | 2024-02 | Config upload API, agent library support |
 | v4.2 | 2024-02 | x11vnc fix, memory restore before boot |
 | v4.1 | 2024-01 | Discord multi-bot support |
