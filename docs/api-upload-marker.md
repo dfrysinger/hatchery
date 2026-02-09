@@ -179,6 +179,6 @@ sudo chmod 600 /etc/config-api-uploaded
 
 ## See Also
 
-- [API Server Documentation](./api-server.md)
-- [Config Upload Endpoint](./api-config-upload.md)
-- [HMAC Authentication](./api-auth.md)
+- [Architecture: API Config Upload + `api_uploaded` Marker](./architecture/api-config-upload.md)
+- [Troubleshooting: API Config Upload](./troubleshooting/api-config-upload.md)
+- [Task Spec: API Config Upload](./TASK-api-config-upload.md)
