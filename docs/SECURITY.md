@@ -97,8 +97,10 @@ curl -X POST http://$HOST:8080/sync \
 |----------|---------------|-------|
 | `/status` | No | Read-only status (safe to expose) |
 | `/health` | No | Simple health check |
-| `/stages` | No | Boot progress log |
-| `/config` | No | Config status (no secrets) |
+| `/config/status` | No | Upload status only (no secrets) |
+| `/stages` | **Yes (HMAC)** | Boot progress log (may contain sensitive info) |
+| `/log` | **Yes (HMAC)** | Boot logs (may contain sensitive info) |
+| `/config` | **Yes (HMAC)** | Config file status (may leak structure) |
 | `/sync` | **Yes (HMAC)** | Triggers Dropbox sync |
 | `/prepare-shutdown` | **Yes (HMAC)** | Graceful shutdown |
 | `/config/upload` | **Yes (HMAC)** | Upload configuration |
