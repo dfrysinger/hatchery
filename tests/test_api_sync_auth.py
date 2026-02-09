@@ -122,6 +122,89 @@ class TestSyncEndpointAuth(unittest.TestCase):
             body=body
         )
         self.assertFalse(result, "/sync should reject cross-endpoint replay attacks")
+    
+    def test_sync_rejects_stale_timestamp(self):
+        """TASK-173 AC1: /sync rejects requests with stale timestamps (>300s old)."""
+        secret = 'test-secret-key'
+        
+        # Set module's API_SECRET directly
+        original_secret = self.api_module.API_SECRET
+        self.api_module.API_SECRET = secret
+        
+        try:
+            # Create stale timestamp (400 seconds ago, beyond 300s window)
+            stale_timestamp = int(time.time()) - 400
+            body = b'{}'
+            
+            # Generate valid signature for the stale timestamp
+            signature = compute_hmac_signature(secret, stale_timestamp, 'POST', '/sync', body)
+            
+            # Should reject due to stale timestamp
+            result = self.api_module.verify_hmac_auth(
+                timestamp_header=str(stale_timestamp),
+                signature_header=signature,
+                method='POST',
+                path='/sync',
+                body=body
+            )
+            self.assertFalse(result, "/sync should reject requests with stale timestamps (>300s old)")
+        finally:
+            self.api_module.API_SECRET = original_secret
+    
+    def test_sync_accepts_timestamp_within_window(self):
+        """TASK-173 AC3: /sync accepts requests with timestamps within ±300s window."""
+        secret = 'test-secret-key'
+        
+        # Set module's API_SECRET directly
+        original_secret = self.api_module.API_SECRET
+        self.api_module.API_SECRET = secret
+        
+        try:
+            # Test timestamps at the edge of acceptable window
+            # 290 seconds ago (within 300s window)
+            recent_timestamp = int(time.time()) - 290
+            body = b'{}'
+            
+            signature = compute_hmac_signature(secret, recent_timestamp, 'POST', '/sync', body)
+            
+            result = self.api_module.verify_hmac_auth(
+                timestamp_header=str(recent_timestamp),
+                signature_header=signature,
+                method='POST',
+                path='/sync',
+                body=body
+            )
+            self.assertTrue(result, "/sync should accept timestamps within ±300s window")
+        finally:
+            self.api_module.API_SECRET = original_secret
+    
+    def test_sync_rejects_future_timestamp(self):
+        """TASK-173 AC4: /sync rejects requests with timestamps too far in future (>300s)."""
+        secret = 'test-secret-key'
+        
+        # Set module's API_SECRET directly
+        original_secret = self.api_module.API_SECRET
+        self.api_module.API_SECRET = secret
+        
+        try:
+            # Create future timestamp (400 seconds ahead, beyond 300s window)
+            future_timestamp = int(time.time()) + 400
+            body = b'{}'
+            
+            # Generate valid signature for the future timestamp
+            signature = compute_hmac_signature(secret, future_timestamp, 'POST', '/sync', body)
+            
+            # Should reject due to future timestamp
+            result = self.api_module.verify_hmac_auth(
+                timestamp_header=str(future_timestamp),
+                signature_header=signature,
+                method='POST',
+                path='/sync',
+                body=body
+            )
+            self.assertFalse(result, "/sync should reject requests with future timestamps (>300s ahead)")
+        finally:
+            self.api_module.API_SECRET = original_secret
 
 
 class TestPrepareShutdownAuth(unittest.TestCase):
@@ -219,6 +302,89 @@ class TestPrepareShutdownAuth(unittest.TestCase):
             body=b'{}'
         )
         self.assertFalse(result, "DoS attack should be prevented by authentication")
+    
+    def test_prepare_shutdown_rejects_stale_timestamp(self):
+        """TASK-173 AC2: /prepare-shutdown rejects requests with stale timestamps (>300s old)."""
+        secret = 'test-secret-key'
+        
+        # Set module's API_SECRET directly
+        original_secret = self.api_module.API_SECRET
+        self.api_module.API_SECRET = secret
+        
+        try:
+            # Create stale timestamp (400 seconds ago, beyond 300s window)
+            stale_timestamp = int(time.time()) - 400
+            body = b'{}'
+            
+            # Generate valid signature for the stale timestamp
+            signature = compute_hmac_signature(secret, stale_timestamp, 'POST', '/prepare-shutdown', body)
+            
+            # Should reject due to stale timestamp
+            result = self.api_module.verify_hmac_auth(
+                timestamp_header=str(stale_timestamp),
+                signature_header=signature,
+                method='POST',
+                path='/prepare-shutdown',
+                body=body
+            )
+            self.assertFalse(result, "/prepare-shutdown should reject requests with stale timestamps (>300s old)")
+        finally:
+            self.api_module.API_SECRET = original_secret
+    
+    def test_prepare_shutdown_accepts_timestamp_within_window(self):
+        """TASK-173 AC3: /prepare-shutdown accepts requests with timestamps within ±300s window."""
+        secret = 'test-secret-key'
+        
+        # Set module's API_SECRET directly
+        original_secret = self.api_module.API_SECRET
+        self.api_module.API_SECRET = secret
+        
+        try:
+            # Test timestamps at the edge of acceptable window
+            # 290 seconds ago (within 300s window)
+            recent_timestamp = int(time.time()) - 290
+            body = b'{}'
+            
+            signature = compute_hmac_signature(secret, recent_timestamp, 'POST', '/prepare-shutdown', body)
+            
+            result = self.api_module.verify_hmac_auth(
+                timestamp_header=str(recent_timestamp),
+                signature_header=signature,
+                method='POST',
+                path='/prepare-shutdown',
+                body=body
+            )
+            self.assertTrue(result, "/prepare-shutdown should accept timestamps within ±300s window")
+        finally:
+            self.api_module.API_SECRET = original_secret
+    
+    def test_prepare_shutdown_rejects_future_timestamp(self):
+        """TASK-173 AC4: /prepare-shutdown rejects requests with timestamps too far in future (>300s)."""
+        secret = 'test-secret-key'
+        
+        # Set module's API_SECRET directly
+        original_secret = self.api_module.API_SECRET
+        self.api_module.API_SECRET = secret
+        
+        try:
+            # Create future timestamp (400 seconds ahead, beyond 300s window)
+            future_timestamp = int(time.time()) + 400
+            body = b'{}'
+            
+            # Generate valid signature for the future timestamp
+            signature = compute_hmac_signature(secret, future_timestamp, 'POST', '/prepare-shutdown', body)
+            
+            # Should reject due to future timestamp
+            result = self.api_module.verify_hmac_auth(
+                timestamp_header=str(future_timestamp),
+                signature_header=signature,
+                method='POST',
+                path='/prepare-shutdown',
+                body=body
+            )
+            self.assertFalse(result, "/prepare-shutdown should reject requests with future timestamps (>300s ahead)")
+        finally:
+            self.api_module.API_SECRET = original_secret
 
 
 class TestAuthCoverage(unittest.TestCase):
