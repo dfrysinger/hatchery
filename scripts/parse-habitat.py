@@ -131,8 +131,17 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     f.write('COUNCIL_JUDGE="{}"\n'.format(council.get("judge", "")))
     f.write('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
 
-    # API server bind address (default: 127.0.0.1 for security; set to 0.0.0.0 for remote access)
-    f.write('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "127.0.0.1")))
+    # API server bind address
+    # Priority: 1. apiBindAddress (explicit override)
+    #           2. remoteApi boolean (user-friendly flag)
+    #           3. Default: 127.0.0.1 (secure-by-default)
+    if "apiBindAddress" in hab:
+        api_bind = hab["apiBindAddress"]
+    elif hab.get("remoteApi", False):
+        api_bind = "0.0.0.0"  # Remote access enabled
+    else:
+        api_bind = "127.0.0.1"  # Secure default
+    f.write('API_BIND_ADDRESS="{}"\n'.format(api_bind))
 
     f.write('GLOBAL_IDENTITY_B64="{}"\n'.format(b64(hab.get("globalIdentity", ""))))
     f.write('GLOBAL_BOOT_B64="{}"\n'.format(b64(hab.get("globalBoot", ""))))

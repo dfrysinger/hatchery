@@ -54,7 +54,8 @@ This documents the **v2 schema** (recommended). The v1 schema is deprecated but 
 |-------|---------|-------------|
 | `destructMinutes` | `0` | Auto-destruct timer (0 = disabled) |
 | `bgColor` | `2D3748` | Desktop background color |
-| `apiBindAddress` | `0.0.0.0` | API server bind address |
+| `remoteApi` | `false` | Enable remote API access for iOS Shortcuts |
+| `apiBindAddress` | `127.0.0.1` | API bind address (overrides remoteApi if set) |
 | `domain` | (empty) | Custom domain for the droplet |
 | `globalIdentity` | (empty) | Shared IDENTITY.md content |
 | `globalSoul` | (empty) | Shared SOUL.md content |
