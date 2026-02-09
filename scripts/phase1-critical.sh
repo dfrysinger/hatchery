@@ -152,7 +152,8 @@ chmod 600 $H/.openclaw/openclaw.json
 cat > /etc/systemd/system/clawdbot.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
-After=network.target
+After=network.target openclaw-restore.service
+Wants=openclaw-restore.service
 [Service]
 Type=simple
 User=$USERNAME
