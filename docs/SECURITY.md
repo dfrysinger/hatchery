@@ -66,14 +66,23 @@ Even with the firewall, API endpoints use HMAC request signing:
 
 ```bash
 # Generate signature
+# Message format: "{timestamp}.{method}.{path}.{body}"
 TIMESTAMP=$(date +%s)
-SIGNATURE=$(echo -n "${TIMESTAMP}${BODY}" | openssl dgst -sha256 -hmac "${API_SECRET}" | cut -d' ' -f2)
+METHOD="POST"
+PATH="/sync"
+BODY="{}"  # Empty JSON for sync
+MESSAGE="${TIMESTAMP}.${METHOD}.${PATH}.${BODY}"
+SIGNATURE=$(echo -n "${MESSAGE}" | openssl dgst -sha256 -hmac "${API_SECRET}" | cut -d' ' -f2)
 
 # Include in request
 curl -X POST http://$HOST:8080/sync \
   -H "X-Timestamp: ${TIMESTAMP}" \
-  -H "X-Signature: ${SIGNATURE}"
+  -H "X-Signature: ${SIGNATURE}" \
+  -H "Content-Type: application/json" \
+  -d "${BODY}"
 ```
+
+**Message format:** `{timestamp}.{method}.{path}.{body}` — all four components dot-separated.
 
 **Purpose:** Defense-in-depth. If firewall is misconfigured, HMAC still protects.
 
