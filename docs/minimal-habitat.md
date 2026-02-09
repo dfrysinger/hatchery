@@ -139,7 +139,7 @@ Everything not needed for boot notifications:
 - Council configuration
 - Complex model settings
 
-See [API Config Upload](./api-config-upload.md) for the upload endpoint spec.
+See [API Config Upload](./TASK-api-config-upload.md) for the endpoint spec, and [Architecture: API Config Upload](./architecture/api-config-upload.md) for implementation details.
 
 ---
 
