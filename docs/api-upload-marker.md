@@ -84,11 +84,9 @@ curl http://localhost:8080/config \
 
 ## Logging and Error Handling
 
-As of TASK-21, the marker write operation includes:
+The marker write operation logs to `stderr` in structured JSON format.
 
 ### Structured Logging
-
-All marker write operations log to `stderr` in structured JSON format:
 
 **Success log:**
 ```json
@@ -160,7 +158,9 @@ sudo chmod 600 /etc/config-api-uploaded
 
 ## Implementation Details
 
-**Function:** `write_upload_marker()` in `scripts/api-server.py`
+**Function:** `write_upload_marker()` (Python) embedded in `hatch.yaml`'s `api-server` service.
+
+**Constant:** `MARKER_PATH='/etc/config-api-uploaded'`
 
 **Returns:** `{"ok": bool, "path": str, "error": str (optional)}`
 
@@ -170,12 +170,10 @@ sudo chmod 600 /etc/config-api-uploaded
 - Logs success/failure to stderr in JSON format
 - Returns success/error dict without raising exceptions
 
-**Tests:** `tests/test_upload_marker.py`
-- Success case with logging
-- Permission denied error
-- OSError (disk full, directory missing)
-- Unexpected errors
-- Structured log format validation
+**Tests:** `tests/test_api_config.py`
+- Marker written -> `api_uploaded=true`
+- Timestamp parsing -> `api_uploaded_at`
+- Invalid content behavior
 
 ## See Also
 
