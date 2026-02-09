@@ -100,9 +100,28 @@ The API server defaults to **127.0.0.1:8080** (localhost-only) for security.
 - Suitable for SSH tunnel or reverse proxy access
 
 **Opt-in for iOS Shortcut remote access:**
-1. Set `apiBindAddress: "0.0.0.0"` in your habitat JSON
-2. Configure DO Firewall to allowlist your IP (see `docs/REMOTE-ACCESS.md`)
-3. HMAC authentication protects sensitive endpoints
+
+**Option 1: Simple (recommended)**
+```json
+{
+  "name": "MyHabitat",
+  "remoteApi": true,
+  ...
+}
+```
+
+**Option 2: Advanced override**
+```json
+{
+  "apiBindAddress": "0.0.0.0"
+}
+```
+
+After enabling remote access:
+1. Configure DO Firewall to allowlist your IP (see `docs/REMOTE-ACCESS.md`)
+2. HMAC authentication protects sensitive endpoints
+
+**Priority:** `apiBindAddress` (if set) > `remoteApi` (if true) > default (127.0.0.1)
 
 **Why remote binding is acceptable when properly configured:**
 - DO Firewall blocks all traffic except from your allowlisted IP

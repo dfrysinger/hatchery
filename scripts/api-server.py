@@ -330,12 +330,12 @@ class H(http.server.BaseHTTPRequestHandler):
 class R(socketserver.TCPServer):allow_reuse_address=True
 if __name__=='__main__':
   # SECURITY MODEL:
-  # - Default: 0.0.0.0 (all interfaces) for iOS Shortcut remote access
-  # - Configurable via API_BIND_ADDRESS env var or habitat.apiBindAddress
+  # - Default: 127.0.0.1 (localhost only, secure-by-default)
+  # - Enable remote access: set remoteApi: true in habitat config
+  # - Advanced override: apiBindAddress in habitat (takes precedence)
   # - /status, /health: Public (read-only, no secrets, needed for polling)
   # - /stages, /log, /config: HMAC auth required (may contain sensitive info)
   # - /config/upload, /config/apply: HMAC auth required (mutation endpoints)
-  # - Ephemeral droplets (~hours lifetime) limit exposure window
   bind_addr = API_BIND_ADDRESS if API_BIND_ADDRESS != '0.0.0.0' else ''
   print(f"[api-server] Starting on {API_BIND_ADDRESS}:{PORT}")
   with R((bind_addr,PORT),H) as h:h.serve_forever()

@@ -112,8 +112,17 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
 
     lines.append('HABITAT_DOMAIN="{}"\n'.format(hab.get("domain", "")))
 
-    # API server bind address (default: 127.0.0.1 for security; set to 0.0.0.0 for remote access)
-    lines.append('API_BIND_ADDRESS="{}"\n'.format(hab.get("apiBindAddress", "127.0.0.1")))
+    # API server bind address
+    # Priority: 1. apiBindAddress (explicit override)
+    #           2. remoteApi boolean (user-friendly flag)
+    #           3. Default: 127.0.0.1 (secure-by-default)
+    if "apiBindAddress" in hab:
+        api_bind = hab["apiBindAddress"]
+    elif hab.get("remoteApi", False):
+        api_bind = "0.0.0.0"  # Remote access enabled
+    else:
+        api_bind = "127.0.0.1"  # Secure default
+    lines.append('API_BIND_ADDRESS="{}"\n'.format(api_bind))
 
     lines.append('GLOBAL_IDENTITY_B64="{}"\n'.format(_b64(hab.get("globalIdentity", ""))))
     lines.append('GLOBAL_BOOT_B64="{}"\n'.format(_b64(hab.get("globalBoot", ""))))
@@ -833,6 +842,75 @@ class TestEdgeCases:
         }
         env = run_parse_habitat(hab)
         # Explicit override should be respected
+        assert env["API_BIND_ADDRESS"] == "0.0.0.0"
+
+
+class TestRemoteApiFlag:
+    """Test remoteApi boolean flag for simplified remote access configuration.
+    
+    The remoteApi flag provides a user-friendly way to enable iOS Shortcut access
+    without needing to know about apiBindAddress details.
+    
+    Priority (highest to lowest):
+    1. apiBindAddress (explicit override)
+    2. remoteApi boolean
+    3. Default (127.0.0.1, secure)
+    """
+
+    def test_remote_api_true_binds_all_interfaces(self):
+        """remoteApi: true should bind to 0.0.0.0 for iOS Shortcut access."""
+        hab = {
+            "name": "RemoteEnabled",
+            "remoteApi": True,
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["API_BIND_ADDRESS"] == "0.0.0.0"
+
+    def test_remote_api_false_binds_localhost(self):
+        """remoteApi: false should bind to 127.0.0.1 (secure)."""
+        hab = {
+            "name": "RemoteDisabled",
+            "remoteApi": False,
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["API_BIND_ADDRESS"] == "127.0.0.1"
+
+    def test_remote_api_omitted_defaults_localhost(self):
+        """Missing remoteApi should default to 127.0.0.1 (secure-by-default)."""
+        hab = {
+            "name": "NoRemoteApi",
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["API_BIND_ADDRESS"] == "127.0.0.1"
+
+    def test_api_bind_address_overrides_remote_api(self):
+        """Explicit apiBindAddress should take precedence over remoteApi."""
+        hab = {
+            "name": "ExplicitOverride",
+            "remoteApi": True,  # Would set 0.0.0.0
+            "apiBindAddress": "192.168.1.100",  # But this overrides
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
+        }
+        env = run_parse_habitat(hab)
+        assert env["API_BIND_ADDRESS"] == "192.168.1.100"
+
+    def test_api_bind_address_overrides_remote_api_false(self):
+        """Explicit apiBindAddress should override even when remoteApi: false."""
+        hab = {
+            "name": "ExplicitOverride2",
+            "remoteApi": False,  # Would set 127.0.0.1
+            "apiBindAddress": "0.0.0.0",  # But this overrides
+            "platforms": {"telegram": {"ownerId": "123"}},
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok"}}],
+        }
+        env = run_parse_habitat(hab)
         assert env["API_BIND_ADDRESS"] == "0.0.0.0"
 
 
