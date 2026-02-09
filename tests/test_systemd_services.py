@@ -28,9 +28,9 @@ class TestApiServerService:
         assert os.path.exists(service_path), "systemd/api-server.service not found"
 
     def test_has_environment_file_api_server_env(self, service_content):
-        """Service should load /etc/api-server.env for API_SECRET."""
-        assert "EnvironmentFile=/etc/api-server.env" in service_content, \
-            "Missing EnvironmentFile=/etc/api-server.env"
+        """Service should load /etc/api-server.env for API_SECRET (optional)."""
+        assert "EnvironmentFile=-/etc/api-server.env" in service_content, \
+            "Missing EnvironmentFile=-/etc/api-server.env (with - prefix for optional)"
 
     def test_has_environment_file_habitat_parsed(self, service_content):
         """Service should load /etc/habitat-parsed.env (optional, with -)."""
