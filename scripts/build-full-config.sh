@@ -200,6 +200,8 @@ if ! echo "$CONFIG_JSON" | jq . >/dev/null 2>&1; then
   exit 1
 fi
 echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
+# Copy full config to openclaw.json so OpenClaw uses all agents (not minimal single-agent)
+cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
 for i in $(seq 1 $AC); do
   AD="$H/clawd/agents/agent${i}"
   NV="AGENT${i}_NAME"; ANAME="${!NV}"
