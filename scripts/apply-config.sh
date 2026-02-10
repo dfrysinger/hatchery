@@ -62,7 +62,7 @@ echo "Loaded updated /etc/habitat-parsed.env"
 
 # Re-run build-full-config to regenerate OpenClaw config
 echo "Running build-full-config.sh..."
-/usr/local/bin/build-full-config.sh
+/usr/local/sbin/build-full-config.sh
 echo "build-full-config.sh complete"
 
 # Restart clawdbot service
