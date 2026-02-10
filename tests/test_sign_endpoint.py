@@ -250,20 +250,5 @@ class TestSignEndpointEdgeCases(unittest.TestCase):
         self.assertEqual(json.loads(decoded), large_config)
 
 
-# Helper function module - this would be extracted from api-server.py
-# For testing, we'll mock the imports or create a helper module
-
-def validate_config_upload(data):
-    """Validate config upload request data."""
-    errors = []
-    if "habitat" in data and not isinstance(data["habitat"], dict):
-        errors.append("habitat must be an object")
-    if "agents" in data and not isinstance(data["agents"], dict):
-        errors.append("agents must be an object")
-    if "apply" in data and not isinstance(data["apply"], bool):
-        errors.append("apply must be a boolean")
-    return errors
-
-
 if __name__ == '__main__':
     unittest.main()

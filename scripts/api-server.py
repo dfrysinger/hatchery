@@ -23,7 +23,14 @@
 #
 # Original: /usr/local/bin/api-server.py (in hatch.yaml write_files)
 # =============================================================================
-import http.server,socketserver,subprocess,json,os,base64,hmac,hashlib,time
+import http.server,socketserver,subprocess,json,os,base64,time
+from api_server_helpers import (
+    normalize_json,
+    generate_signature,
+    verify_hmac_auth,
+    validate_config_upload,
+    decode_base64_body,
+)
 PORT=8080
 API_SECRET=os.getenv('API_SECRET','')
 API_BIND_ADDRESS=os.getenv('API_BIND_ADDRESS','127.0.0.1')
@@ -54,14 +61,6 @@ def get_status():
   desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
   safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
   return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online,"safe_mode":safe_mode,"services":svc if svc else None}
-
-def validate_config_upload(data):
-  """Validate config upload request data."""
-  errors=[]
-  if "habitat" in data and not isinstance(data["habitat"],dict):errors.append("habitat must be an object")
-  if "agents" in data and not isinstance(data["agents"],dict):errors.append("agents must be an object")
-  if "apply" in data and not isinstance(data["apply"],bool):errors.append("apply must be a boolean")
-  return errors
 
 def write_config_file(path,data):
   """Write config data to file with secure permissions."""
@@ -184,58 +183,6 @@ def trigger_config_apply():
   """Trigger config apply script asynchronously."""
   try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
   except Exception as e:return {"ok":False,"error":str(e)}
-
-def normalize_json(s):
-  """Normalize JSON string for consistent HMAC signing."""
-  try:
-    return json.dumps(json.loads(s), separators=(',', ':'))
-  except (json.JSONDecodeError, TypeError):
-    return s
-
-def generate_signature(body_str, path, method):
-  """Generate HMAC-SHA256 signature for /sign endpoint.
-  
-  Returns dict with 'ok', 'timestamp', 'signature' on success.
-  """
-  if not API_SECRET:
-    return {"ok": False, "error": "API_SECRET not configured"}
-  timestamp = str(int(time.time()))
-  msg = f"{timestamp}.{method}.{path}.{body_str}"
-  sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-  return {"ok": True, "timestamp": timestamp, "signature": sig}
-
-def verify_hmac_auth(timestamp_header, signature_header, method, path, body, normalize=False):
-  """Verify HMAC-SHA256 signature for authenticated endpoints.
-
-  Signature binds:
-  - timestamp (replay protection)
-  - HTTP method + path (prevents cross-endpoint replay/substitution)
-  - request body (integrity)
-
-  Message format:
-    "{timestamp}.{method}.{path}.{body}" where body is UTF-8 JSON string.
-    
-  Args:
-    normalize: If True, normalize body as JSON before verification
-  """
-  if not API_SECRET:
-    return False
-  if not timestamp_header or not signature_header:
-    return False
-  try:
-    timestamp = int(timestamp_header)
-    now = int(time.time())
-    if abs(now - timestamp) > 300:
-      return False
-
-    b = body.decode('utf-8') if isinstance(body, (bytes, bytearray)) else (body or '')
-    if normalize:
-      b = normalize_json(b)
-    msg = f"{timestamp}.{method}.{path}.{b}"
-    expected_sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature_header, expected_sig)
-  except Exception:
-    return False
 
 class H(http.server.BaseHTTPRequestHandler):
   def log_message(self,*a):pass

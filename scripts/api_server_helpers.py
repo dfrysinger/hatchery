@@ -5,6 +5,7 @@ Extracted for testability. These functions handle:
 - JSON normalization for consistent HMAC signing
 - Signature generation for /sign endpoint
 - Base64 body decoding for /config/upload
+- HMAC authentication verification
 """
 import base64
 import hashlib
@@ -32,7 +33,7 @@ def normalize_json(s):
         return s
 
 
-def generate_signature(body_str, path, method):
+def generate_signature(body_str, path, method, api_secret=None):
     """Generate HMAC-SHA256 signature for API authentication.
     
     Creates a signature using the format: {timestamp}.{method}.{path}.{body}
@@ -41,12 +42,14 @@ def generate_signature(body_str, path, method):
         body_str: Request body string (should be normalized JSON)
         path: API endpoint path (e.g., '/config/upload')
         method: HTTP method (e.g., 'POST')
+        api_secret: Optional API secret (defaults to API_SECRET env var)
         
     Returns:
         dict with 'ok', 'timestamp', 'signature' on success
         dict with 'ok': False, 'error' on failure
     """
-    api_secret = os.getenv('API_SECRET', '')
+    if api_secret is None:
+        api_secret = os.getenv('API_SECRET', '')
     
     if not api_secret:
         return {"ok": False, "error": "API_SECRET not configured"}
@@ -84,33 +87,55 @@ def decode_base64_body(raw_body):
         return None, f"Invalid base64: {e}"
 
 
-def verify_hmac_auth(timestamp, signature, method, path, body, normalize=False):
-    """Verify HMAC authentication for protected endpoints.
+def verify_hmac_auth(timestamp_header, signature_header, method, path, body, 
+                     normalize=False, api_secret=None, max_age=300):
+    """Verify HMAC-SHA256 signature for authenticated endpoints.
+
+    Signature binds:
+    - timestamp (replay protection)
+    - HTTP method + path (prevents cross-endpoint replay/substitution)
+    - request body (integrity)
+
+    Message format:
+        "{timestamp}.{method}.{path}.{body}" where body is UTF-8 JSON string.
     
     Args:
-        timestamp: X-Timestamp header value
-        signature: X-Signature header value
+        timestamp_header: X-Timestamp header value
+        signature_header: X-Signature header value
         method: HTTP method
         path: Request path
-        body: Request body string
+        body: Request body (string or bytes)
         normalize: If True, normalize body as JSON before verification
+        api_secret: Optional API secret (defaults to API_SECRET env var)
+        max_age: Maximum age of signature in seconds (default 300 = 5 min)
         
     Returns:
         True if signature is valid, False otherwise
     """
-    api_secret = os.getenv('API_SECRET', '')
+    if api_secret is None:
+        api_secret = os.getenv('API_SECRET', '')
     
-    if not api_secret or not timestamp or not signature:
+    if not api_secret:
+        return False
+    if not timestamp_header or not signature_header:
         return False
     
-    # Optionally normalize body for consistent verification
-    if normalize:
-        body = normalize_json(body)
-    
-    msg = f"{timestamp}.{method}.{path}.{body}"
-    expected = hmac.new(api_secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
-    
-    return hmac.compare_digest(signature, expected)
+    try:
+        timestamp = int(timestamp_header)
+        now = int(time.time())
+        if abs(now - timestamp) > max_age:
+            return False
+
+        # Handle bytes or string body
+        b = body.decode('utf-8') if isinstance(body, (bytes, bytearray)) else (body or '')
+        if normalize:
+            b = normalize_json(b)
+        
+        msg = f"{timestamp}.{method}.{path}.{b}"
+        expected_sig = hmac.new(api_secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(signature_header, expected_sig)
+    except Exception:
+        return False
 
 
 def validate_config_upload(data):
