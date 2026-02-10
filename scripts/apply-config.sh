@@ -65,6 +65,11 @@ echo "Running build-full-config.sh..."
 /usr/local/sbin/build-full-config.sh
 echo "build-full-config.sh complete"
 
+# Rename Telegram bots to match config
+echo "Renaming Telegram bots..."
+/usr/local/bin/rename-bots.sh || echo "Warning: rename-bots.sh failed (non-fatal)"
+echo "Bot renaming complete"
+
 # Restart clawdbot service
 echo "Restarting clawdbot service..."
 systemctl restart clawdbot
