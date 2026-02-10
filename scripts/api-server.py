@@ -12,9 +12,10 @@
 #   GET  /log     -- Last 8KB of bootstrap/phase logs
 #   GET  /config  -- Config file status (no sensitive data)
 #   GET  /config/status -- API upload status only (no auth required)
+#   POST /sign    -- Generate HMAC signature (for iOS Shortcuts, no auth)
 #   POST /sync    -- Trigger openclaw state sync to Dropbox
 #   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown
-#   POST /config/upload -- Upload habitat and/or agents JSON
+#   POST /config/upload -- Upload habitat and/or agents JSON (base64 body)
 #   POST /config/apply  -- Apply uploaded config and restart
 #
 # Dependencies: systemctl, /usr/local/bin/sync-openclaw-state.sh,
@@ -184,7 +185,26 @@ def trigger_config_apply():
   try:subprocess.Popen([APPLY_SCRIPT]);return {"ok":True,"restarting":True}
   except Exception as e:return {"ok":False,"error":str(e)}
 
-def verify_hmac_auth(timestamp_header, signature_header, method, path, body):
+def normalize_json(s):
+  """Normalize JSON string for consistent HMAC signing."""
+  try:
+    return json.dumps(json.loads(s), separators=(',', ':'))
+  except (json.JSONDecodeError, TypeError):
+    return s
+
+def generate_signature(body_str, path, method):
+  """Generate HMAC-SHA256 signature for /sign endpoint.
+  
+  Returns dict with 'ok', 'timestamp', 'signature' on success.
+  """
+  if not API_SECRET:
+    return {"ok": False, "error": "API_SECRET not configured"}
+  timestamp = str(int(time.time()))
+  msg = f"{timestamp}.{method}.{path}.{body_str}"
+  sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+  return {"ok": True, "timestamp": timestamp, "signature": sig}
+
+def verify_hmac_auth(timestamp_header, signature_header, method, path, body, normalize=False):
   """Verify HMAC-SHA256 signature for authenticated endpoints.
 
   Signature binds:
@@ -194,6 +214,9 @@ def verify_hmac_auth(timestamp_header, signature_header, method, path, body):
 
   Message format:
     "{timestamp}.{method}.{path}.{body}" where body is UTF-8 JSON string.
+    
+  Args:
+    normalize: If True, normalize body as JSON before verification
   """
   if not API_SECRET:
     return False
@@ -206,6 +229,8 @@ def verify_hmac_auth(timestamp_header, signature_header, method, path, body):
       return False
 
     b = body.decode('utf-8') if isinstance(body, (bytes, bytearray)) else (body or '')
+    if normalize:
+      b = normalize_json(b)
     msg = f"{timestamp}.{method}.{path}.{b}"
     expected_sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature_header, expected_sig)
@@ -259,6 +284,29 @@ class H(http.server.BaseHTTPRequestHandler):
   def do_POST(self):
     content_length=int(self.headers.get('Content-Length',0))
     body=self.rfile.read(content_length) if content_length else b'{}'
+
+    # /sign endpoint - no auth required (for iOS Shortcuts HMAC signing)
+    if self.path=='/sign':
+      try:
+        data=json.loads(body.decode('utf-8') if body else '{}')
+      except json.JSONDecodeError as e:
+        self.send_json(400,{"ok":False,"error":f"Invalid JSON: {e}"});return
+      
+      method=data.get('method','POST')
+      path_to_sign=data.get('path','/config/upload')
+      body_b64=data.get('body','')
+      
+      # Decode base64 body if provided
+      try:
+        sign_body=base64.b64decode(body_b64).decode('utf-8') if body_b64 else ''
+      except Exception as e:
+        self.send_json(400,{"ok":False,"error":f"Invalid base64 in body: {e}"});return
+      
+      # Normalize JSON for consistent signing
+      sign_body=normalize_json(sign_body)
+      result=generate_signature(sign_body, path_to_sign, method)
+      self.send_json(200 if result.get('ok') else 500, result);return
+    
     
     if self.path=='/sync':
       timestamp=self.headers.get('X-Timestamp')
@@ -283,11 +331,19 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/config/upload':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
+      
+      # Decode base64 body (strip whitespace that iOS Shortcuts may add)
+      try:
+        decoded_body=base64.b64decode(body.replace(b'\n',b'').replace(b'\r',b'').replace(b' ',b'')).decode('utf-8')
+      except Exception as e:
+        self.send_json(400,{"ok":False,"error":f"Invalid base64: {e}"});return
+      
+      # Verify signature on decoded body (normalize for comparison)
+      if not verify_hmac_auth(timestamp, signature, self.command, self.path, decoded_body, normalize=True):
         self.send_json(403,{"ok":False,"error":"Forbidden"});return
       
       try:
-        data=json.loads(body)
+        data=json.loads(decoded_body)
       except json.JSONDecodeError as e:
         self.send_json(400,{"ok":False,"error":f"Invalid JSON: {e}"});return
       
