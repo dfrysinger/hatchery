@@ -14,7 +14,7 @@
 #   GET  /config/status -- API upload status only (no auth required)
 #   POST /sync    -- Trigger openclaw state sync to Dropbox
 #   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown
-#   POST /config/upload -- Upload habitat and/or agents JSON
+#   POST /config/upload -- Upload habitat and/or agents JSON (base64 supported)
 #   POST /config/apply  -- Apply uploaded config and restart
 #
 # Dependencies: systemctl, /usr/local/bin/sync-openclaw-state.sh,
@@ -283,6 +283,16 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/config/upload':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
+      content_type=self.headers.get('Content-Type','')
+      
+      # Support base64-encoded body (for iOS Shortcuts - avoids shell escaping issues)
+      if 'base64' in content_type.lower():
+        try:
+          # Strip whitespace (iOS may line-wrap at 76 chars)
+          body=base64.b64decode(body.replace(b'\n',b'').replace(b'\r',b'').replace(b' ',b''))
+        except Exception as e:
+          self.send_json(400,{"ok":False,"error":f"Invalid base64: {e}"});return
+      
       if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
         self.send_json(403,{"ok":False,"error":"Forbidden"});return
       
