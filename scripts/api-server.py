@@ -194,23 +194,51 @@ def verify_hmac_auth(timestamp_header, signature_header, method, path, body):
 
   Message format:
     "{timestamp}.{method}.{path}.{body}" where body is UTF-8 JSON string.
+
+  Returns:
+    (bool, str|None): (success, error_message)
+    - (True, None) on success
+    - (False, error_message) on failure with reason
   """
   if not API_SECRET:
-    return False
-  if not timestamp_header or not signature_header:
-    return False
+    return False, "API_SECRET not configured"
+  if not timestamp_header:
+    return False, "Missing X-Timestamp header"
+  if not signature_header:
+    return False, "Missing X-Signature header"
+
+  # Parse and validate timestamp
   try:
     timestamp = int(timestamp_header)
-    now = int(time.time())
-    if abs(now - timestamp) > 300:
-      return False
+  except ValueError:
+    # Provide clear error for non-integer timestamps
+    if '.' in str(timestamp_header):
+      return False, f"Invalid timestamp format: '{timestamp_header}' (must be integer Unix epoch, not float)"
+    else:
+      return False, f"Invalid timestamp format: '{timestamp_header}' (expected integer Unix epoch, e.g., 1707676800)"
 
+  # Check timestamp freshness (replay protection)
+  now = int(time.time())
+  age = now - timestamp
+  if abs(age) > 300:
+    if age > 0:
+      return False, f"Timestamp expired: {abs(age)}s old (max 300s allowed)"
+    else:
+      return False, f"Timestamp from future: {abs(age)}s ahead (max 300s drift allowed)"
+
+  # Verify signature
+  try:
     b = body.decode('utf-8') if isinstance(body, (bytes, bytearray)) else (body or '')
     msg = f"{timestamp}.{method}.{path}.{b}"
     expected_sig = hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature_header, expected_sig)
-  except Exception:
-    return False
+    if hmac.compare_digest(signature_header, expected_sig):
+      return True, None
+    else:
+      return False, "Signature mismatch (check API_SECRET and message format)"
+  except UnicodeDecodeError as e:
+    return False, f"Body encoding error: {e}"
+  except Exception as e:
+    return False, f"Signature verification failed: {e}"
 
 class H(http.server.BaseHTTPRequestHandler):
   def log_message(self,*a):pass
@@ -228,8 +256,9 @@ class H(http.server.BaseHTTPRequestHandler):
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
       # Require auth: stages/log/config may contain sensitive info
-      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
-        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      ok,err=verify_hmac_auth(timestamp, signature, self.command, self.path, b'')
+      if not ok:
+        self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
       try:
         with open('/var/log/init-stages.log','r') as f:self.wfile.write(f.read().encode())
@@ -237,8 +266,9 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/log':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
-        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      ok,err=verify_hmac_auth(timestamp, signature, self.command, self.path, b'')
+      if not ok:
+        self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
       for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:
         try:
@@ -251,8 +281,9 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/config':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp, signature, self.command, self.path, b''):
-        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      ok,err=verify_hmac_auth(timestamp, signature, self.command, self.path, b'')
+      if not ok:
+        self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       self.send_json(200,get_config_status())
     else:self.send_response(404);self.end_headers()
   
@@ -263,8 +294,9 @@ class H(http.server.BaseHTTPRequestHandler):
     if self.path=='/sync':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
-        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      ok,err=verify_hmac_auth(timestamp, signature, self.command, self.path, body)
+      if not ok:
+        self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       
       self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
       try:r=subprocess.run(["/usr/local/bin/sync-openclaw-state.sh"],capture_output=True,timeout=60);self.wfile.write(json.dumps({"ok":r.returncode==0}).encode())
@@ -273,8 +305,9 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/prepare-shutdown':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
-        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      ok,err=verify_hmac_auth(timestamp, signature, self.command, self.path, body)
+      if not ok:
+        self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       
       self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
       try:subprocess.run(["/usr/local/bin/sync-openclaw-state.sh"],timeout=60);subprocess.run(["systemctl","stop","clawdbot"],timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
@@ -293,8 +326,9 @@ class H(http.server.BaseHTTPRequestHandler):
         except Exception as e:
           self.send_json(400,{"ok":False,"error":f"Invalid base64: {e}"});return
       
-      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
-        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      ok,err=verify_hmac_auth(timestamp, signature, self.command, self.path, body)
+      if not ok:
+        self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       
       try:
         data=json.loads(body)
@@ -338,8 +372,9 @@ class H(http.server.BaseHTTPRequestHandler):
     elif self.path=='/config/apply':
       timestamp=self.headers.get('X-Timestamp')
       signature=self.headers.get('X-Signature')
-      if not verify_hmac_auth(timestamp, signature, self.command, self.path, body):
-        self.send_json(403,{"ok":False,"error":"Forbidden"});return
+      ok,err=verify_hmac_auth(timestamp, signature, self.command, self.path, body)
+      if not ok:
+        self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       
       result=trigger_config_apply()
       self.send_json(200 if result["ok"] else 500,result)
