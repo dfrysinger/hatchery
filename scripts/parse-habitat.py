@@ -151,18 +151,6 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     f.write('GLOBAL_USER_B64="{}"\n'.format(b64(hab.get("globalUser", ""))))
     f.write('GLOBAL_TOOLS_B64="{}"\n'.format(b64(hab.get("globalTools", ""))))
 
-    # v3 schema: isolation support
-    # Top-level isolation defaults
-    isolation_default = hab.get("isolation", "none")
-    shared_paths = hab.get("sharedPaths", [])
-    # If isolation is "none" and no sharedPaths specified, default to /clawd/shared
-    if isolation_default == "none" and not shared_paths:
-        shared_paths = ["/clawd/shared"]
-    
-    f.write('ISOLATION_DEFAULT="{}\n".format(isolation_default))
-    f.write('SHARED_PATHS="{}\n".format(",".join(shared_paths)))
-
-
     agents = hab.get("agents", [])
     f.write('AGENT_COUNT={}\n'.format(len(agents)))
 
@@ -200,22 +188,6 @@ with open('/etc/habitat-parsed.env', 'w') as f:
         f.write('AGENT{}_BOOT_B64="{}"\n'.format(n, b64(boot)))
         f.write('AGENT{}_BOOTSTRAP_B64="{}"\n'.format(n, b64(bootstrap)))
         f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
-
-        # v3 schema: per-agent isolation fields
-        agent_isolation = agent_ref.get("isolation", isolation_default)
-        isolation_group = agent_ref.get("isolationGroup", name)  # Default to agent name
-        network = agent_ref.get("network", "host")
-        capabilities = agent_ref.get("capabilities", [])
-        resources = agent_ref.get("resources", {})
-        
-        f.write('AGENT{}_ISOLATION="{}\n".format(n, agent_isolation))
-        f.write('AGENT{}_ISOLATION_GROUP="{}\n".format(n, isolation_group))
-        f.write('AGENT{}_NETWORK="{}\n".format(n, network))
-        f.write('AGENT{}_CAPABILITIES="{}\n".format(n, ",".join(capabilities)))
-        if resources:
-            f.write('AGENT{}_RESOURCES_MEMORY="{}\n".format(n, resources.get("memory", "")))
-            f.write('AGENT{}_RESOURCES_CPU="{}\n".format(n, resources.get("cpu", "")))
-
 
 os.chmod('/etc/habitat-parsed.env', 0o600)
 print("Parsed habitat '{}' with {} agents (platform: {})".format(hab['name'], len(agents), platform))
