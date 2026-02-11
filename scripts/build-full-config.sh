@@ -413,3 +413,9 @@ fi
 chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
 chmod 700 $H/.openclaw
 chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json 2>/dev/null || true
+
+# v3 schema: Generate docker-compose.yaml if container mode is used
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -x "$SCRIPT_DIR/generate-docker-compose.sh" ]; then
+  cd "$H" && "$SCRIPT_DIR/generate-docker-compose.sh" || true  # Non-fatal if it fails
+fi
