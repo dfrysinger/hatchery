@@ -95,6 +95,39 @@ def get_agent_token(agent_ref, platform_name):
         return agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
     return ""
 
+
+# Validation helpers
+def validate_isolation(value, context=""):
+    """Validate isolation value. Returns True if valid, logs warning if not."""
+    valid_values = ["none", "session", "container", "droplet"]
+    if value not in valid_values:
+        print(f"WARN: Invalid isolation value '{value}' {context}. Valid: {', '.join(valid_values)}. Using 'none'.", file=sys.stderr)
+        return False
+    return True
+
+def validate_network(value, context=""):
+    """Validate network value. Returns True if valid, logs warning if not."""
+    valid_values = ["host", "internal", "none"]
+    if value not in valid_values:
+        print(f"WARN: Invalid network value '{value}' {context}. Valid: {', '.join(valid_values)}. Using 'host'.", file=sys.stderr)
+        return False
+    return True
+
+def validate_isolation_group(value, context=""):
+    """Validate isolationGroup format. Returns True if valid, logs warning if not."""
+    if not value:
+        return True  # Empty is OK (will use agent name default)
+    if not re.match(r'^[a-zA-Z0-9-]+$', value):
+        print(f"WARN: Invalid isolationGroup '{value}' {context}. Must be alphanumeric + hyphens only.", file=sys.stderr)
+        return False
+    return True
+
+def warn_network_without_isolation(network, isolation, context=""):
+    """Warn if network is set but isolation doesn't support it."""
+    if network and network != "host" and isolation not in ["container", "droplet"]:
+        print(f"WARN: network='{network}' {context} has no effect with isolation='{isolation}'. network only applies to container/droplet modes.", file=sys.stderr)
+
+
 with open('/etc/habitat-parsed.env', 'w') as f:
     f.write('HABITAT_NAME="{}"\n'.format(hab["name"]))
     f.write('HABITAT_NAME_B64="{}"\n'.format(b64(hab["name"])))
@@ -154,6 +187,8 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     # v3 schema: isolation support
     # Top-level isolation defaults
     isolation_default = hab.get("isolation", "none")
+    if not validate_isolation(isolation_default, "at top-level"):
+        isolation_default = "none"  # Fallback to safe default
     shared_paths = hab.get("sharedPaths", [])
     # If isolation is "none" and no sharedPaths specified, default to /clawd/shared
     if isolation_default == "none" and not shared_paths:
@@ -203,8 +238,19 @@ with open('/etc/habitat-parsed.env', 'w') as f:
 
         # v3 schema: per-agent isolation fields
         agent_isolation = agent_ref.get("isolation", isolation_default)
+        if "isolation" in agent_ref and not validate_isolation(agent_isolation, f"for agent {name}"):
+            agent_isolation = isolation_default  # Fallback to global default
+        
         isolation_group = agent_ref.get("isolationGroup", name)  # Default to agent name
+        validate_isolation_group(isolation_group, f"for agent {name}")
+        
         network = agent_ref.get("network", "host")
+        if network and not validate_network(network, f"for agent {name}"):
+            network = "host"  # Fallback to safe default
+        
+        # Warn if network is set inappropriately
+        if "network" in agent_ref:
+            warn_network_without_isolation(network, agent_isolation, f"for agent {name}")
         capabilities = agent_ref.get("capabilities", [])
         resources = agent_ref.get("resources", {})
         
