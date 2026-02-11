@@ -1,0 +1,8 @@
+{
+  "name": "MultiBot",
+  "platform": "discord",
+  "agents": [
+    {"agent": "Claude"},
+    {"agent": "ChatGPT"}
+  ]
+}
