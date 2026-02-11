@@ -55,21 +55,6 @@ CGN="$COUNCIL_GROUP_NAME"
 CJ="$COUNCIL_JUDGE"
 GT=$(cat $H/.openclaw/gateway-token.txt)
 AC=${AGENT_COUNT:-1}
-
-# v3 schema: Build list of unique isolation groups
-ISOLATION_GROUPS=""
-for i in $(seq 1 $AC); do
-  GV="AGENT${i}_ISOLATION_GROUP"
-  GROUP="${!GV}"
-  if [ -n "$GROUP" ]; then
-    # Check if group already in list
-    if [[ ",$ISOLATION_GROUPS," != *",$GROUP,"* ]]; then
-      [ -n "$ISOLATION_GROUPS" ] && ISOLATION_GROUPS="$ISOLATION_GROUPS,"
-      ISOLATION_GROUPS="$ISOLATION_GROUPS$GROUP"
-    fi
-  fi
-done
-
 # Escape user-provided values for JSON safety
 TUI_ESC=$(json_escape "$TUI"); DGI_ESC=$(json_escape "$DGI"); DOI_ESC=$(json_escape "$DOI")
 CGI_ESC=$(json_escape "$CGI"); CGN_ESC=$(json_escape "$CGN"); GT_ESC=$(json_escape "$GT")
