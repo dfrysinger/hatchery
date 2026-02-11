@@ -1,8 +1,8 @@
-# Hatchery Release Roadmap — v1.2
+# Hatchery Release Roadmap — v1.3
 
 > **Prepared by:** Judge (Opus)  
-> **Date:** 2026-02-05 (Updated: 2026-02-07)  
-> **Status:** R3 In Progress
+> **Date:** 2026-02-05 (Updated: 2026-02-11)  
+> **Status:** R6 In Progress
 
 ---
 
@@ -40,12 +40,78 @@
 - PR #82: Memory restore before bot starts
 - PR #83: x11vnc dependency chain fix
 
+**R4: Code Quality & Documentation (2026-02-08 – 2026-02-09)**  
+**Theme:** Address exec code review findings
+
+| Task | Description | PR |
+|------|-------------|:--:|
+| TASK-28 | Revert API default to 127.0.0.1 (secure-by-default) | #132 |
+| TASK-22 | Add drift detection CI for parse-habitat.py | #133 |
+| TASK-27 | Document API_BIND_ADDRESS security model | #135 |
+| TASK-25 | Fix DEFAULT_STATE_FILE test environment bug | #137 |
+| TASK-23 | Document api_uploaded marker file location | #138, #141 |
+| TASK-26 | Fix phase2-background.sh YAML drift | #143 |
+| TASK-24 | Add v1 schema backward compatibility test | #144 |
+| TASK-21 | Add logging/error handling to write_upload_marker() | #145 |
+
+**Exit Criteria:** ✅ All criteria met
+- Security: API defaults to localhost-only
+- CI: Drift detection prevents config sync issues
+- Documentation: API security model clarified
+- Tests: v1 backward compatibility verified
+
+**R5: Code Review Fixes (2026-02-09)**  
+**Theme:** Address findings from deep code review
+
+| Task | Description | PR |
+|------|-------------|:--:|
+| TASK-171 | Remove shell=True from api-server.py | #175, #177 |
+| TASK-168 | Fix missing executable permissions | #176 |
+| TASK-166 | Fix stage 9 duplicate in phase2-background.sh | #177 |
+| TASK-169 | Fix SECURITY.md contradictions | #178 |
+| TASK-170 | Add endpoint-level authentication tests | #180 |
+| TASK-173 | Add stale timestamp validation tests | #182 |
+| TASK-181 | Update SECURITY.md endpoint table | #183 |
+| TASK-167 | Fix BOOT.md duplicate NO_REPLY instructions | #184 |
+| TASK-174 | Improve bad signature test reliability | #186 |
+| TASK-163 | Remove stale minified scripts | #187 |
+
+**Exit Criteria:** ✅ All criteria met
+- Security: Shell injection vector closed, 40 new auth tests
+- Runtime: Script permissions fixed
+- Code Quality: 423 lines of stale code removed
+- Tests: 562 total (up from 510)
+
+**Hotfix:** PR #188 (runcmd ordering fix)
+
 ---
 
 ## In Progress
 
-### R3: Tooling & Observability (Started: 2026-02-07)
-**Theme:** Build features to support the new workflow
+### R6: Habitat Schema v3 / Isolation Support (Started: 2026-02-11)
+**Theme:** Per-agent isolation modes for multi-agent deployments
+
+| Task | Status | Description |
+|------|:------:|-------------|
+| Spec | ✅ | v3 schema specification (PR #197) |
+| TASK-201 | 🔲 | Update parse-habitat.py for v3 fields |
+| TASK-202 | 🔲 | Add isolation validation |
+| TASK-203 | 🔲 | Isolation groups in build-full-config.sh |
+| TASK-204 | 🔲 | Docker Compose generation |
+| TASK-205 | 🔲 | Backward compatibility tests |
+
+**Exit Criteria:**
+- v2 habitats work unchanged (backward compatible)
+- Isolation modes supported: none, session, container, droplet
+- Docker Compose generation for container mode
+- Comprehensive test coverage (50+ tests)
+
+---
+
+## Upcoming Releases
+
+### R3: Tooling & Observability (Deferred)
+**Theme:** Build features to support the workflow
 
 | Task | Status | Description |
 |------|:------:|-------------|
@@ -61,9 +127,28 @@
 
 ---
 
-## Upcoming Releases
+### iOS Shortcut & Distribution (Deferred)
+**Theme:** Update Shortcuts, improve onboarding
 
-### R4: Architecture Modernization
+| Task | Status | Description |
+|------|:------:|-------------|
+| — | ✅ | Token Broker architecture (PR #196) |
+| — | ✅ | Base64 body support for /config/upload (PR #193) |
+| TASK-17 | 🔲 | iOS Shortcut updates: platform picker, Discord IDs |
+| TASK-19 | 🔲 | Documentation: setup guide for new habitats |
+| TASK-20 | 🔲 | Release packaging: versioned tarballs with changelogs |
+
+**Exit Criteria:**
+- Shortcuts support Discord habitats
+- Token Broker implemented for secure token management
+- New users can self-onboard
+- Releases are reproducible
+
+**Architecture Decision:** PR #192 (unauthenticated `/sign` endpoint) was **rejected** due to signing oracle vulnerability. Adopted Token Broker approach instead (Dropbox-backed state, no server-side signing).
+
+---
+
+### Architecture Modernization (Deferred)
 **Theme:** Reduce complexity, improve maintainability
 
 | Task | Status | Description |
@@ -80,37 +165,33 @@
 
 ---
 
-### R5: iOS Shortcut & Distribution
-**Theme:** Update Shortcuts, improve onboarding
-
-| Task | Status | Description |
-|------|:------:|-------------|
-| TASK-17 | 🔲 | iOS Shortcut updates: platform picker, Discord IDs, per-agent tokens |
-| TASK-19 | 🔲 | Documentation: setup guide for new habitats |
-| TASK-20 | 🔲 | Release packaging: versioned tarballs with changelogs |
-
-**Exit Criteria:**
-- Shortcuts support Discord habitats
-- New users can self-onboard
-- Releases are reproducible
-
----
-
 ## Summary
 
 | Release | Tasks | Done | Theme | Status |
 |---------|:-----:|:----:|-------|--------|
 | **R1** | 5 | 5 | Stability + Security | ✅ Complete |
 | **R2** | 4 | 4 | Resilience & Data Safety | ✅ Complete |
-| **R3** | 4 | 0 | Tooling & Observability | 🟡 In Progress |
-| **R4** | 4 | 0 | Architecture Modernization | ⬜ Not Started |
-| **R5** | 3 | 0 | iOS Shortcut & Distribution | ⬜ Not Started |
+| **R4** | 8 | 8 | Code Quality & Documentation | ✅ Complete |
+| **R5** | 10 | 10 | Code Review Fixes | ✅ Complete |
+| **R6** | 5 | 0 | Habitat Schema v3 / Isolation | 🟡 In Progress |
+| **R3** | 4 | 0 | Tooling & Observability | ⬜ Deferred |
+| **iOS** | 3 | 2 | Shortcut & Distribution | 🟡 Partial |
+| **Arch** | 4 | 0 | Architecture Modernization | ⬜ Deferred |
 
-**Total: 20 tasks across 5 releases (9 complete, 11 remaining)**
+**Total: 43 tasks across 8 releases (29 complete, 14 remaining)**
 
 ---
 
 ## Changelog
+
+### v1.3 (2026-02-11)
+- Added R4: Code Quality & Documentation (8 tasks, complete)
+- Added R5: Code Review Fixes (10 tasks + 1 hotfix, complete)
+- Added R6: Habitat Schema v3 / Isolation Support (in progress)
+- Documented PR #192 security decision (Token Broker adopted)
+- Marked iOS Shortcut work as partial (Token Broker + base64 support merged)
+- Reorganized deferred releases (R3, Architecture, iOS)
+- Updated summary table with actual sprint history
 
 ### v1.2 (2026-02-07)
 - R1 marked complete (5/5 tasks)
