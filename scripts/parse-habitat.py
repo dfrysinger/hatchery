@@ -62,6 +62,9 @@ with open('/etc/habitat.json', 'w') as f:
     json.dump(hab, f, indent=2)
 os.chmod('/etc/habitat.json', 0o600)
 
+# Track deprecation warnings to emit at end
+deprecation_warnings = []
+
 # Helper: get platform config with v2/v1 fallback
 def get_platform_config(hab, platform_name):
     """Get platform config: v2 (platforms.X) or v1 (X) format."""
@@ -69,7 +72,13 @@ def get_platform_config(hab, platform_name):
     if platform_name in platforms:
         return platforms[platform_name]
     # v1 fallback: top-level discord/telegram
-    return hab.get(platform_name, {})
+    if platform_name in hab:
+        deprecation_warnings.append(
+            f"DEPRECATION: Top-level '{platform_name}' is v1 schema. "
+            f"Use 'platforms.{platform_name}' instead. See issue #112."
+        )
+        return hab[platform_name]
+    return {}
 
 # Helper: normalize agent reference (string shorthand to dict)
 def normalize_agent_ref(agent_ref):
@@ -83,16 +92,32 @@ def normalize_agent_ref(agent_ref):
     return agent_ref
 
 # Helper: get agent token with v2/v1 fallback
-def get_agent_token(agent_ref, platform_name):
+def get_agent_token(agent_ref, platform_name, agent_name=""):
     """Get agent token: v2 (tokens.X) or v1 (XBotToken) format."""
     tokens = agent_ref.get("tokens", {})
     if platform_name in tokens:
         return tokens[platform_name]
     # v1 fallback: discordBotToken, telegramBotToken, botToken
     if platform_name == "discord":
-        return agent_ref.get("discordBotToken", "")
+        if "discordBotToken" in agent_ref:
+            deprecation_warnings.append(
+                f"DEPRECATION: Agent '{agent_name}' uses 'discordBotToken' (v1 schema). "
+                f"Use 'tokens.discord' instead. See issue #112."
+            )
+            return agent_ref["discordBotToken"]
     elif platform_name == "telegram":
-        return agent_ref.get("telegramBotToken", agent_ref.get("botToken", ""))
+        if "telegramBotToken" in agent_ref:
+            deprecation_warnings.append(
+                f"DEPRECATION: Agent '{agent_name}' uses 'telegramBotToken' (v1 schema). "
+                f"Use 'tokens.telegram' instead. See issue #112."
+            )
+            return agent_ref["telegramBotToken"]
+        if "botToken" in agent_ref:
+            deprecation_warnings.append(
+                f"DEPRECATION: Agent '{agent_name}' uses 'botToken' (v1 schema). "
+                f"Use 'tokens.telegram' instead. See issue #112."
+            )
+            return agent_ref["botToken"]
     return ""
 
 with open('/etc/habitat-parsed.env', 'w') as f:
@@ -168,8 +193,8 @@ with open('/etc/habitat-parsed.env', 'w') as f:
         user = lib_entry.get("user", "")
 
         # Get tokens (v2: tokens.X, v1: XBotToken)
-        tg_bot_token = get_agent_token(agent_ref, "telegram")
-        dc_bot_token = get_agent_token(agent_ref, "discord")
+        tg_bot_token = get_agent_token(agent_ref, "telegram", name)
+        dc_bot_token = get_agent_token(agent_ref, "discord", name)
 
         f.write('AGENT{}_NAME="{}"\n'.format(n, name))
         f.write('AGENT{}_NAME_B64="{}"\n'.format(n, b64(name)))
@@ -190,4 +215,9 @@ with open('/etc/habitat-parsed.env', 'w') as f:
         f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
 
 os.chmod('/etc/habitat-parsed.env', 0o600)
+
+# Emit deprecation warnings
+for warning in deprecation_warnings:
+    print(warning, file=sys.stderr)
+
 print("Parsed habitat '{}' with {} agents (platform: {})".format(hab['name'], len(agents), platform))
