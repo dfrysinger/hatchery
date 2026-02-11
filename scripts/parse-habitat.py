@@ -189,5 +189,14 @@ with open('/etc/habitat-parsed.env', 'w') as f:
         f.write('AGENT{}_BOOTSTRAP_B64="{}"\n'.format(n, b64(bootstrap)))
         f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
 
+    # Collect unique isolation groups (Bug #206)
+    groups = set()
+    for i, raw_agent_ref in enumerate(agents):
+        agent_ref = normalize_agent_ref(raw_agent_ref)
+        isolation_group = agent_ref.get("isolationGroup", agent_ref.get("agent", f"agent{i+1}"))
+        groups.add(isolation_group)
+    
+    f.write('ISOLATION_GROUPS="{}"\n'.format(",".join(sorted(groups))))
+
 os.chmod('/etc/habitat-parsed.env', 0o600)
 print("Parsed habitat '{}' with {} agents (platform: {})".format(hab['name'], len(agents), platform))
