@@ -29,7 +29,7 @@
 #
 # Original: /usr/local/bin/parse-habitat.py (in hatch.yaml write_files)
 # =============================================================================
-import json, base64, os, sys, re
+import json, base64, os, sys
 
 def d(val):
     try: return base64.b64decode(val).decode()
