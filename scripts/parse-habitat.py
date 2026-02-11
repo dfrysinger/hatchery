@@ -107,10 +107,14 @@ def validate_habitat_schema(hab):
                 errors.extend(agent_errors)
     
     # Optional: destructMinutes (int or float, coercible to int)
+    # Note: bool is subclass of int in Python, so explicitly exclude it
     if "destructMinutes" in hab:
         dm = hab["destructMinutes"]
-        if dm is not None and not isinstance(dm, (int, float)):
-            errors.append(f"'destructMinutes' must be number, got {type(dm).__name__}")
+        if dm is not None:
+            if isinstance(dm, bool):
+                errors.append("'destructMinutes' must be number, got bool (use integer like 30)")
+            elif not isinstance(dm, (int, float)):
+                errors.append(f"'destructMinutes' must be number, got {type(dm).__name__}")
     
     # Optional: remoteApi (bool)
     if "remoteApi" in hab:
@@ -225,6 +229,7 @@ def validate_agent_schema(agent, index):
                     errors.append(f"'{prefix}.capabilities[{j}]' must be string, got {type(cap).__name__}")
     
     # Optional: resources (dict)
+    # Note: bool is subclass of int in Python, so explicitly exclude it
     if "resources" in agent:
         if not isinstance(agent["resources"], dict):
             errors.append(f"'{prefix}.resources' must be object, got {type(agent['resources']).__name__}")
@@ -232,7 +237,9 @@ def validate_agent_schema(agent, index):
             for res_key in ["memory", "cpu"]:
                 if res_key in agent["resources"] and agent["resources"][res_key] is not None:
                     val = agent["resources"][res_key]
-                    if not isinstance(val, (str, int, float)):
+                    if isinstance(val, bool):
+                        errors.append(f"'{prefix}.resources.{res_key}' must be string or number, got bool")
+                    elif not isinstance(val, (str, int, float)):
                         errors.append(f"'{prefix}.resources.{res_key}' must be string or number, got {type(val).__name__}")
     
     return errors
@@ -308,10 +315,14 @@ def normalize_agent_ref(agent_ref):
 
 # Helper: get agent token with v2/v1 fallback
 def get_agent_token(agent_ref, platform_name, agent_name=""):
-    """Get agent token: v2 (tokens.X) or v1 (XBotToken) format."""
+    """Get agent token: v2 (tokens.X) or v1 (XBotToken) format.
+    
+    Returns empty string for missing or null tokens (never None).
+    """
     tokens = agent_ref.get("tokens", {})
     if platform_name in tokens:
-        return tokens[platform_name]
+        # Normalize null to empty string to avoid "None" in env vars
+        return tokens[platform_name] or ""
     # v1 fallback: discordBotToken, telegramBotToken, botToken
     if platform_name == "discord":
         if "discordBotToken" in agent_ref:

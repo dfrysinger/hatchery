@@ -67,6 +67,64 @@ exec(open("{PARSE_HABITAT}").read())
         return result.returncode, result.stdout, result.stderr
 
 
+def run_parse_habitat_with_env(habitat_json, agent_lib=None) -> tuple[dict, str, int]:
+    """Run parse-habitat.py and return (env_vars, stderr, returncode).
+    
+    Use this when you need to inspect the generated env vars.
+    """
+    habitat_b64 = base64.b64encode(json.dumps(habitat_json).encode()).decode()
+    
+    env = os.environ.copy()
+    env['HABITAT_B64'] = habitat_b64
+    if agent_lib:
+        env['AGENT_LIB_B64'] = base64.b64encode(json.dumps(agent_lib).encode()).decode()
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wrapper = f'''
+import sys
+sys.path.insert(0, "{SCRIPTS_DIR}")
+
+original_open = open
+def mock_open(path, *args, **kwargs):
+    if path == '/etc/habitat.json':
+        path = "{tmpdir}/habitat.json"
+    elif path == '/etc/habitat-parsed.env':
+        path = "{tmpdir}/habitat-parsed.env"
+    return original_open(path, *args, **kwargs)
+
+import builtins
+builtins.open = mock_open
+
+import os
+original_chmod = os.chmod
+def mock_chmod(path, mode):
+    if path.startswith('/etc/'):
+        path = path.replace('/etc/', '{tmpdir}/')
+    return original_chmod(path, mode)
+os.chmod = mock_chmod
+
+exec(open("{PARSE_HABITAT}").read())
+'''
+        result = subprocess.run(
+            ['python3', '-c', wrapper],
+            env=env,
+            capture_output=True,
+            text=True
+        )
+        
+        # Parse the env file if it was created
+        env_vars = {}
+        env_file = Path(tmpdir) / "habitat-parsed.env"
+        if env_file.exists():
+            for line in env_file.read_text().split('\n'):
+                if '=' in line and not line.startswith('#'):
+                    key, _, value = line.partition('=')
+                    # Strip quotes from value
+                    env_vars[key] = value.strip('"\'')
+        
+        return env_vars, result.stderr, result.returncode
+
+
 class TestRootValidation:
     """Test validation of root habitat object."""
 
@@ -568,6 +626,125 @@ class TestEdgeCases:
         }
         rc, stdout, stderr = run_parse_habitat(habitat)
         assert rc == 0, f"Nested platform config should be valid: {stderr}"
+
+
+class TestBoolAsIntBypass:
+    """Test BUG-213-A: bool-as-int bypass (Python bool is subclass of int)."""
+
+    def test_destruct_minutes_bool_rejected(self):
+        """destructMinutes: true should be rejected (not treated as 1)."""
+        habitat = {"name": "Test", "destructMinutes": True, "agents": [{"agent": "Claude"}]}
+        rc, stdout, stderr = run_parse_habitat(habitat)
+        assert rc == 1
+        assert "'destructMinutes' must be number, got bool" in stderr
+
+    def test_destruct_minutes_false_rejected(self):
+        """destructMinutes: false should be rejected (not treated as 0)."""
+        habitat = {"name": "Test", "destructMinutes": False, "agents": [{"agent": "Claude"}]}
+        rc, stdout, stderr = run_parse_habitat(habitat)
+        assert rc == 1
+        assert "'destructMinutes' must be number, got bool" in stderr
+
+    def test_destruct_minutes_int_accepted(self):
+        """destructMinutes: 30 should be accepted."""
+        habitat = {"name": "Test", "destructMinutes": 30, "agents": [{"agent": "Claude"}]}
+        rc, stdout, stderr = run_parse_habitat(habitat)
+        assert rc == 0, f"Integer destructMinutes should be valid: {stderr}"
+
+    def test_resources_cpu_bool_rejected(self):
+        """resources.cpu: true should be rejected."""
+        habitat = {
+            "name": "Test",
+            "agents": [{"agent": "Claude", "resources": {"cpu": True}}]
+        }
+        rc, stdout, stderr = run_parse_habitat(habitat)
+        assert rc == 1
+        assert "resources.cpu" in stderr
+        assert "got bool" in stderr
+
+    def test_resources_memory_bool_rejected(self):
+        """resources.memory: true should be rejected."""
+        habitat = {
+            "name": "Test",
+            "agents": [{"agent": "Claude", "resources": {"memory": False}}]
+        }
+        rc, stdout, stderr = run_parse_habitat(habitat)
+        assert rc == 1
+        assert "resources.memory" in stderr
+        assert "got bool" in stderr
+
+    def test_resources_cpu_number_accepted(self):
+        """resources.cpu: 0.5 should be accepted."""
+        habitat = {
+            "name": "Test",
+            "agents": [{"agent": "Claude", "resources": {"cpu": 0.5}}]
+        }
+        rc, stdout, stderr = run_parse_habitat(habitat)
+        assert rc == 0, f"Numeric cpu should be valid: {stderr}"
+
+    def test_resources_memory_string_accepted(self):
+        """resources.memory: '512Mi' should be accepted."""
+        habitat = {
+            "name": "Test",
+            "agents": [{"agent": "Claude", "resources": {"memory": "512Mi"}}]
+        }
+        rc, stdout, stderr = run_parse_habitat(habitat)
+        assert rc == 0, f"String memory should be valid: {stderr}"
+
+
+class TestNullTokenNormalization:
+    """Test BUG-213-B: null token propagation."""
+
+    def test_null_token_normalized_to_empty(self):
+        """tokens.discord: null should become empty string, not 'None'."""
+        habitat = {
+            "name": "Test",
+            "agents": [{"agent": "Claude", "tokens": {"discord": None}}]
+        }
+        env_vars, stderr, rc = run_parse_habitat_with_env(habitat)
+        
+        assert rc == 0, f"Null token should be valid: {stderr}"
+        # Token should be empty string, not "None"
+        token = env_vars.get("AGENT1_DISCORD_BOT_TOKEN", "MISSING")
+        assert token == "", f"Expected empty string, got '{token}'"
+        assert token != "None", "Token should not be literal 'None' string"
+
+    def test_missing_token_is_empty(self):
+        """Missing token should be empty string."""
+        habitat = {
+            "name": "Test",
+            "agents": [{"agent": "Claude", "tokens": {"telegram": "tok123"}}]  # No discord
+        }
+        env_vars, stderr, rc = run_parse_habitat_with_env(habitat)
+        
+        assert rc == 0
+        # Discord token not specified, should be empty
+        token = env_vars.get("AGENT1_DISCORD_BOT_TOKEN", "MISSING")
+        assert token == "", f"Expected empty string for missing token, got '{token}'"
+
+    def test_valid_token_preserved(self):
+        """Valid token string should be preserved."""
+        habitat = {
+            "name": "Test",
+            "agents": [{"agent": "Claude", "tokens": {"discord": "my-secret-token"}}]
+        }
+        env_vars, stderr, rc = run_parse_habitat_with_env(habitat)
+        
+        assert rc == 0
+        token = env_vars.get("AGENT1_DISCORD_BOT_TOKEN", "MISSING")
+        assert token == "my-secret-token"
+
+    def test_empty_string_token_preserved(self):
+        """Empty string token should remain empty string."""
+        habitat = {
+            "name": "Test",
+            "agents": [{"agent": "Claude", "tokens": {"discord": ""}}]
+        }
+        env_vars, stderr, rc = run_parse_habitat_with_env(habitat)
+        
+        assert rc == 0
+        token = env_vars.get("AGENT1_DISCORD_BOT_TOKEN", "MISSING")
+        assert token == ""
 
 
 if __name__ == '__main__':
