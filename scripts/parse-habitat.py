@@ -38,6 +38,208 @@ def d(val):
 def b64(s):
     return base64.b64encode((s or "").encode()).decode()
 
+# =============================================================================
+# Schema Validation
+# =============================================================================
+def validate_type(value, expected_type, field_name, required=False):
+    """Validate a field's type. Returns (is_valid, error_message)."""
+    if value is None:
+        if required:
+            return False, f"'{field_name}' is required but missing"
+        return True, None
+    if not isinstance(value, expected_type):
+        # Use readable type names
+        type_names = {
+            str: "string", int: "int", float: "number", bool: "bool",
+            dict: "object", list: "array"
+        }
+        actual = type_names.get(type(value), type(value).__name__)
+        if isinstance(expected_type, tuple):
+            expected = '/'.join(type_names.get(t, t.__name__) for t in expected_type)
+        else:
+            expected = type_names.get(expected_type, expected_type.__name__)
+        return False, f"'{field_name}' must be {expected}, got {actual}"
+    return True, None
+
+def validate_habitat_schema(hab):
+    """Validate habitat JSON schema. Returns list of error messages."""
+    errors = []
+    
+    # Root must be a dict
+    if not isinstance(hab, dict):
+        return [f"Habitat must be a JSON object, got {type(hab).__name__}"]
+    
+    # Required field: name (string)
+    if "name" not in hab:
+        errors.append("'name' is required")
+    elif not isinstance(hab["name"], str):
+        errors.append(f"'name' must be string, got {type(hab['name']).__name__}")
+    elif not hab["name"].strip():
+        errors.append("'name' cannot be empty")
+    
+    # Optional: platform (string)
+    if "platform" in hab:
+        valid, err = validate_type(hab["platform"], str, "platform")
+        if not valid:
+            errors.append(err)
+        elif hab["platform"] not in ("telegram", "discord", "both"):
+            errors.append(f"'platform' must be 'telegram', 'discord', or 'both', got '{hab['platform']}'")
+    
+    # Optional: platforms (dict)
+    if "platforms" in hab:
+        valid, err = validate_type(hab["platforms"], dict, "platforms")
+        if not valid:
+            errors.append(err)
+        else:
+            for platform_name, platform_cfg in hab["platforms"].items():
+                if not isinstance(platform_cfg, dict):
+                    errors.append(f"'platforms.{platform_name}' must be object, got {type(platform_cfg).__name__}")
+    
+    # Optional: agents (list) - technically required for useful config but we allow empty
+    if "agents" in hab:
+        if hab["agents"] is None:
+            errors.append("'agents' cannot be null (use [] for empty)")
+        elif not isinstance(hab["agents"], list):
+            errors.append(f"'agents' must be array, got {type(hab['agents']).__name__}")
+        else:
+            for i, agent in enumerate(hab["agents"]):
+                agent_errors = validate_agent_schema(agent, i)
+                errors.extend(agent_errors)
+    
+    # Optional: destructMinutes (int or float, coercible to int)
+    if "destructMinutes" in hab:
+        dm = hab["destructMinutes"]
+        if dm is not None and not isinstance(dm, (int, float)):
+            errors.append(f"'destructMinutes' must be number, got {type(dm).__name__}")
+    
+    # Optional: remoteApi (bool)
+    if "remoteApi" in hab:
+        valid, err = validate_type(hab["remoteApi"], bool, "remoteApi")
+        if not valid:
+            errors.append(err)
+    
+    # Optional: apiBindAddress (string)
+    if "apiBindAddress" in hab:
+        valid, err = validate_type(hab["apiBindAddress"], str, "apiBindAddress")
+        if not valid:
+            errors.append(err)
+    
+    # Optional: council (dict)
+    if "council" in hab:
+        valid, err = validate_type(hab["council"], dict, "council")
+        if not valid:
+            errors.append(err)
+    
+    # Optional: sharedPaths (list of strings)
+    if "sharedPaths" in hab:
+        if not isinstance(hab["sharedPaths"], list):
+            errors.append(f"'sharedPaths' must be array, got {type(hab['sharedPaths']).__name__}")
+        else:
+            for j, path in enumerate(hab["sharedPaths"]):
+                if not isinstance(path, str):
+                    errors.append(f"'sharedPaths[{j}]' must be string, got {type(path).__name__}")
+    
+    # Optional: isolation (string)
+    if "isolation" in hab:
+        valid, err = validate_type(hab["isolation"], str, "isolation")
+        if not valid:
+            errors.append(err)
+    
+    # Optional string fields
+    for field in ["domain", "bgColor", "globalIdentity", "globalBoot", "globalBootstrap", 
+                  "globalSoul", "globalAgents", "globalUser", "globalTools"]:
+        if field in hab and hab[field] is not None:
+            valid, err = validate_type(hab[field], str, field)
+            if not valid:
+                errors.append(err)
+    
+    return errors
+
+def validate_agent_schema(agent, index):
+    """Validate a single agent entry. Returns list of error messages."""
+    errors = []
+    prefix = f"agents[{index}]"
+    
+    # Agent can be string shorthand or dict
+    if isinstance(agent, str):
+        if not agent.strip():
+            errors.append(f"'{prefix}' string shorthand cannot be empty")
+        return errors
+    
+    if agent is None:
+        errors.append(f"'{prefix}' cannot be null")
+        return errors
+    
+    if not isinstance(agent, dict):
+        errors.append(f"'{prefix}' must be string or object, got {type(agent).__name__}")
+        return errors
+    
+    # Required: agent (string) - the agent name
+    if "agent" not in agent:
+        errors.append(f"'{prefix}.agent' is required")
+    elif not isinstance(agent["agent"], str):
+        errors.append(f"'{prefix}.agent' must be string, got {type(agent['agent']).__name__}")
+    elif not agent["agent"].strip():
+        errors.append(f"'{prefix}.agent' cannot be empty")
+    
+    # Optional: model (string)
+    if "model" in agent and agent["model"] is not None:
+        valid, err = validate_type(agent["model"], str, f"{prefix}.model")
+        if not valid:
+            errors.append(err)
+    
+    # Optional: tokens (dict)
+    if "tokens" in agent:
+        if not isinstance(agent["tokens"], dict):
+            errors.append(f"'{prefix}.tokens' must be object, got {type(agent['tokens']).__name__}")
+        else:
+            for token_key, token_val in agent["tokens"].items():
+                if token_val is not None and not isinstance(token_val, str):
+                    errors.append(f"'{prefix}.tokens.{token_key}' must be string, got {type(token_val).__name__}")
+    
+    # Optional: isolationGroup (string)
+    if "isolationGroup" in agent and agent["isolationGroup"] is not None:
+        valid, err = validate_type(agent["isolationGroup"], str, f"{prefix}.isolationGroup")
+        if not valid:
+            errors.append(err)
+    
+    # Optional: isolation (string)
+    if "isolation" in agent and agent["isolation"] is not None:
+        valid, err = validate_type(agent["isolation"], str, f"{prefix}.isolation")
+        if not valid:
+            errors.append(err)
+    
+    # Optional: network (string)
+    if "network" in agent and agent["network"] is not None:
+        valid, err = validate_type(agent["network"], str, f"{prefix}.network")
+        if not valid:
+            errors.append(err)
+    
+    # Optional: capabilities (list of strings)
+    if "capabilities" in agent:
+        if not isinstance(agent["capabilities"], list):
+            errors.append(f"'{prefix}.capabilities' must be array, got {type(agent['capabilities']).__name__}")
+        else:
+            for j, cap in enumerate(agent["capabilities"]):
+                if not isinstance(cap, str):
+                    errors.append(f"'{prefix}.capabilities[{j}]' must be string, got {type(cap).__name__}")
+    
+    # Optional: resources (dict)
+    if "resources" in agent:
+        if not isinstance(agent["resources"], dict):
+            errors.append(f"'{prefix}.resources' must be object, got {type(agent['resources']).__name__}")
+        else:
+            for res_key in ["memory", "cpu"]:
+                if res_key in agent["resources"] and agent["resources"][res_key] is not None:
+                    val = agent["resources"][res_key]
+                    if not isinstance(val, (str, int, float)):
+                        errors.append(f"'{prefix}.resources.{res_key}' must be string or number, got {type(val).__name__}")
+    
+    return errors
+
+# =============================================================================
+# Main Script
+# =============================================================================
 hab_raw = os.environ.get('HABITAT_B64', '')
 lib_raw = os.environ.get('AGENT_LIB_B64', '')
 
@@ -51,12 +253,25 @@ except (json.JSONDecodeError, Exception) as e:
     print("ERROR: Failed to parse HABITAT_B64: {}".format(e), file=sys.stderr)
     sys.exit(1)
 
+# Validate schema before processing
+validation_errors = validate_habitat_schema(hab)
+if validation_errors:
+    print("ERROR: Invalid habitat schema:", file=sys.stderr)
+    for err in validation_errors:
+        print(f"  - {err}", file=sys.stderr)
+    sys.exit(1)
+
 lib = {}
 if lib_raw:
     try:
         lib = json.loads(d(lib_raw))
     except (json.JSONDecodeError, Exception):
         print("WARN: Failed to parse AGENT_LIB_B64, using empty library", file=sys.stderr)
+    else:
+        # Validate agent library is a dict
+        if not isinstance(lib, dict):
+            print(f"WARN: AGENT_LIB_B64 must be object, got {type(lib).__name__}. Using empty library.", file=sys.stderr)
+            lib = {}
 
 with open('/etc/habitat.json', 'w') as f:
     json.dump(hab, f, indent=2)
