@@ -176,8 +176,24 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     f.write('GLOBAL_USER_B64="{}"\n'.format(b64(hab.get("globalUser", ""))))
     f.write('GLOBAL_TOOLS_B64="{}"\n'.format(b64(hab.get("globalTools", ""))))
 
+    # v3 Isolation settings (TASK-201, TASK-202)
+    # Default isolation level for all agents
+    isolation_default = hab.get("isolation", "none")
+    valid_isolation_levels = ["none", "session", "container", "droplet"]
+    if isolation_default not in valid_isolation_levels:
+        print(f"WARN: Invalid isolation level '{isolation_default}', defaulting to 'none'", file=sys.stderr)
+        isolation_default = "none"
+    f.write('ISOLATION_DEFAULT="{}"\n'.format(isolation_default))
+
+    # Shared paths for cross-boundary access
+    shared_paths = hab.get("sharedPaths", [])
+    f.write('ISOLATION_SHARED_PATHS="{}"\n'.format(",".join(shared_paths)))
+
     agents = hab.get("agents", [])
     f.write('AGENT_COUNT={}\n'.format(len(agents)))
+
+    # Track unique isolation groups for ISOLATION_GROUPS output
+    isolation_groups = set()
 
     for i, raw_agent_ref in enumerate(agents):
         n = i + 1
@@ -213,6 +229,45 @@ with open('/etc/habitat-parsed.env', 'w') as f:
         f.write('AGENT{}_BOOT_B64="{}"\n'.format(n, b64(boot)))
         f.write('AGENT{}_BOOTSTRAP_B64="{}"\n'.format(n, b64(bootstrap)))
         f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
+
+        # v3 Per-agent isolation fields (TASK-201, TASK-202)
+        # isolationGroup: agents in same group share isolation boundary
+        agent_isolation_group = agent_ref.get("isolationGroup", name)  # Default: agent name
+        f.write('AGENT{}_ISOLATION_GROUP="{}"\n'.format(n, agent_isolation_group))
+
+        # isolation: override global isolation level for this agent
+        agent_isolation = agent_ref.get("isolation", "")  # Empty = inherit global
+        if agent_isolation and agent_isolation not in valid_isolation_levels:
+            print(f"WARN: Agent '{name}' has invalid isolation '{agent_isolation}', ignoring", file=sys.stderr)
+            agent_isolation = ""
+        f.write('AGENT{}_ISOLATION="{}"\n'.format(n, agent_isolation))
+
+        # network: container/droplet network mode (host, internal, none)
+        agent_network = agent_ref.get("network", "host")
+        valid_network_modes = ["host", "internal", "none"]
+        if agent_network not in valid_network_modes:
+            print(f"WARN: Agent '{name}' has invalid network '{agent_network}', defaulting to 'host'", file=sys.stderr)
+            agent_network = "host"
+        # Warn if network set for non-container/droplet isolation
+        effective_isolation = agent_isolation or isolation_default
+        if agent_network != "host" and effective_isolation not in ["container", "droplet"]:
+            print(f"WARN: Agent '{name}' has network='{agent_network}' but isolation='{effective_isolation}' (network only applies to container/droplet)", file=sys.stderr)
+        f.write('AGENT{}_NETWORK="{}"\n'.format(n, agent_network))
+
+        # capabilities: restrict tool access (empty = all tools)
+        agent_capabilities = agent_ref.get("capabilities", [])
+        f.write('AGENT{}_CAPABILITIES="{}"\n'.format(n, ",".join(agent_capabilities)))
+
+        # resources: memory/cpu limits for container/droplet
+        agent_resources = agent_ref.get("resources", {})
+        f.write('AGENT{}_RESOURCES_MEMORY="{}"\n'.format(n, agent_resources.get("memory", "")))
+        f.write('AGENT{}_RESOURCES_CPU="{}"\n'.format(n, agent_resources.get("cpu", "")))
+
+        # Track unique isolation groups
+        isolation_groups.add(agent_isolation_group)
+
+    # List of unique isolation groups (for container/droplet orchestration)
+    f.write('ISOLATION_GROUPS="{}"\n'.format(",".join(sorted(isolation_groups))))
 
 os.chmod('/etc/habitat-parsed.env', 0o600)
 
