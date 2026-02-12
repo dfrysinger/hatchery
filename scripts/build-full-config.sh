@@ -383,9 +383,9 @@ SVC
 systemctl daemon-reload
 # --- Agent Isolation: wire isolation scripts into pipeline ---
 if [ "$ISOLATION_DEFAULT" = "session" ]; then
-  bash /usr/local/sbin/generate-session-services.sh
+  bash /usr/local/sbin/generate-session-services.sh || { echo "FATAL: session isolation setup failed" >&2; exit 1; }
 elif [ "$ISOLATION_DEFAULT" = "container" ]; then
-  bash /usr/local/sbin/generate-docker-compose.sh
+  bash /usr/local/sbin/generate-docker-compose.sh || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
 fi
 if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
   R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
