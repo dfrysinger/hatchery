@@ -22,6 +22,8 @@ SBIN_SCRIPTS = {
     "phase1-critical.sh",
     "phase2-background.sh",
     "build-full-config.sh",
+    "generate-session-services.sh",
+    "generate-docker-compose.sh",
 }
 
 # Scripts that go to /usr/local/bin/ (everything else)
@@ -285,3 +287,54 @@ class TestPathDocumentation:
                 )
         
         assert not errors, "Header path documentation errors:\n" + "\n".join(errors)
+
+
+class TestIsolationDeployment:
+    """Tests for isolation script deployment paths (#229)."""
+
+    def test_hatch_yaml_sbin_case_matches_constant(self):
+        """hatch.yaml sbin case statement must match the SBIN_SCRIPTS constant."""
+        hatch_yaml = REPO_ROOT / "hatch.yaml"
+        if not hatch_yaml.exists():
+            pytest.skip("hatch.yaml not found")
+
+        content = hatch_yaml.read_text()
+
+        # Extract pipe-delimited script names from the sbin branch of case statement
+        # Pattern: scriptA|scriptB|scriptC)cp "$f" /usr/local/sbin/
+        match = re.search(
+            r'([\w.-]+\.sh(?:\|[\w.-]+\.sh)*)\)cp\s+"\$f"\s+/usr/local/sbin/',
+            content
+        )
+        assert match, "Could not find sbin case pattern in hatch.yaml"
+
+        hatch_sbin = set(match.group(1).split('|'))
+        assert hatch_sbin == SBIN_SCRIPTS, (
+            f"SBIN_SCRIPTS constant ({SBIN_SCRIPTS}) doesn't match "
+            f"hatch.yaml case pattern ({hatch_sbin})"
+        )
+
+    def test_build_pipeline_isolation_scripts_in_sbin(self):
+        """All sbin-path scripts called from build-full-config.sh must be in SBIN_SCRIPTS."""
+        build_script = SCRIPTS_DIR / "build-full-config.sh"
+        if not build_script.exists():
+            pytest.skip("build-full-config.sh not found")
+
+        content = build_script.read_text()
+
+        # Find all scripts referenced at /usr/local/sbin/
+        sbin_refs = set(re.findall(r'/usr/local/sbin/([\w.-]+\.sh)', content))
+        missing = sbin_refs - SBIN_SCRIPTS
+        assert not missing, (
+            f"Scripts referenced at /usr/local/sbin/ in build-full-config.sh "
+            f"but not in SBIN_SCRIPTS: {missing}"
+        )
+
+    def test_isolation_scripts_deployed(self):
+        """Isolation generator scripts must exist in the scripts directory."""
+        for script_name in ("generate-session-services.sh", "generate-docker-compose.sh"):
+            script_path = SCRIPTS_DIR / script_name
+            assert script_path.exists(), (
+                f"{script_name} not found in scripts/ — "
+                f"isolation will fail on deployment"
+            )

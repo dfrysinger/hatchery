@@ -130,7 +130,7 @@ write_files:
       fi
       rm -f "$T";chmod +x "$DIR"/scripts/*.sh 2>/dev/null||true
       for f in "$DIR"/scripts/*.sh;do bn=$(basename "$f")
-        case "$bn" in bootstrap.sh);;phase1-critical.sh|phase2-background.sh|build-full-config.sh)cp "$f" /usr/local/sbin/;;*)cp "$f" /usr/local/bin/;;esac;done
+        case "$bn" in bootstrap.sh);;phase1-critical.sh|phase2-background.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh)cp "$f" /usr/local/sbin/;;*)cp "$f" /usr/local/bin/;;esac;done
       for f in "$DIR"/scripts/*.py;do [ -f "$f" ]&&cp "$f" /usr/local/bin/&&chmod 755 "/usr/local/bin/$(basename "$f")";done
       [ -f "$DIR/gmail-api.py" ]&&cp "$DIR/gmail-api.py" /usr/local/bin/gmail-api.py&&chmod 755 /usr/local/bin/gmail-api.py
       [ -f "$DIR/set-council-group.sh" ]&&cp "$DIR/set-council-group.sh" /usr/local/bin/set-council-group.telegram.sh&&chmod 755 /usr/local/bin/set-council-group.telegram.sh
