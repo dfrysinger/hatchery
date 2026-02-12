@@ -223,6 +223,78 @@ class TestAgentIsolationGroupParsing:
         assert rc == 0
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "council"
 
+    def test_isolation_group_with_hyphens(self):
+        """isolationGroup with hyphens (valid)."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Claude", "isolationGroup": "team-alpha-1"}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "team-alpha-1"
+        assert "WARN" not in stderr
+
+    def test_isolation_group_with_spaces_warns_and_sanitizes(self):
+        """isolationGroup with spaces should warn and fall back to sanitized agent name."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Claude", "isolationGroup": "my group"}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Claude"
+        assert "invalid isolationGroup" in stderr
+        assert "my group" in stderr
+
+    def test_isolation_group_with_commas_warns_and_sanitizes(self):
+        """isolationGroup with commas should warn and fall back to sanitized agent name."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Worker", "isolationGroup": "team,other"}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Worker"
+        assert "invalid isolationGroup" in stderr
+        assert "team,other" in stderr
+
+    def test_isolation_group_empty_string_falls_back_to_agent_name(self):
+        """Empty isolationGroup should fall back to sanitized agent name."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Agent-X", "isolationGroup": ""}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Agent-X"
+
+    def test_isolation_group_special_chars_warns_and_sanitizes(self):
+        """isolationGroup with special characters should warn and fall back to sanitized agent name."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Bot", "isolationGroup": "team@group!"}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
+        assert "invalid isolationGroup" in stderr
+
+    def test_agent_name_with_spaces_sanitized_for_default_group(self):
+        """Agent name with spaces should be sanitized when used as default isolationGroup."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "My Bot"}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "My-Bot"
+
     def test_multiple_agents_same_group(self):
         """Multiple agents in same isolationGroup."""
         habitat = {

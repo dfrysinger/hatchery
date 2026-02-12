@@ -29,7 +29,7 @@
 #
 # Original: /usr/local/bin/parse-habitat.py (in hatch.yaml write_files)
 # =============================================================================
-import json, base64, os, sys
+import json, base64, os, sys, re
 
 def d(val):
     try: return base64.b64decode(val).decode()
@@ -37,6 +37,23 @@ def d(val):
 
 def b64(s):
     return base64.b64encode((s or "").encode()).decode()
+
+def is_valid_isolation_group(value):
+    """Check if isolationGroup is valid (alphanumeric + hyphens only)."""
+    if not value:
+        return False
+    return bool(re.match(r'^[a-zA-Z0-9\-]+$', value))
+
+def sanitize_isolation_group(value):
+    """Sanitize a value to be a valid isolationGroup (alphanumeric + hyphens)."""
+    if not value:
+        return ""
+    # Replace invalid characters with hyphens, then collapse multiple hyphens
+    sanitized = re.sub(r'[^a-zA-Z0-9\-]', '-', value)
+    sanitized = re.sub(r'-+', '-', sanitized)
+    # Remove leading/trailing hyphens
+    sanitized = sanitized.strip('-')
+    return sanitized if sanitized else "agent"
 
 hab_raw = os.environ.get('HABITAT_B64', '')
 lib_raw = os.environ.get('AGENT_LIB_B64', '')
@@ -232,7 +249,22 @@ with open('/etc/habitat-parsed.env', 'w') as f:
 
         # v3 Per-agent isolation fields (TASK-201, TASK-202)
         # isolationGroup: agents in same group share isolation boundary
-        agent_isolation_group = agent_ref.get("isolationGroup", name)  # Default: agent name
+        raw_isolation_group = agent_ref.get("isolationGroup", "")
+        if raw_isolation_group:
+            # User specified an isolationGroup, validate it
+            if not is_valid_isolation_group(raw_isolation_group):
+                sanitized_name = sanitize_isolation_group(name)
+                print(
+                    f"WARN: Agent '{name}' has invalid isolationGroup '{raw_isolation_group}' "
+                    f"(must be alphanumeric + hyphens); falling back to '{sanitized_name}'",
+                    file=sys.stderr
+                )
+                agent_isolation_group = sanitized_name
+            else:
+                agent_isolation_group = raw_isolation_group
+        else:
+            # No isolationGroup specified, default to sanitized agent name
+            agent_isolation_group = sanitize_isolation_group(name)
         f.write('AGENT{}_ISOLATION_GROUP="{}"\n'.format(n, agent_isolation_group))
 
         # isolation: override global isolation level for this agent
