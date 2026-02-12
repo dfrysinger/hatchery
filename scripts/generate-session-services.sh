@@ -134,7 +134,7 @@ for group in "${SESSION_GROUPS[@]}"; do
     "port": ${port},
     "bind": "lan",
     "controlUi": {"enabled": true, "allowInsecureAuth": true},
-    "auth": {"mode": "token", "token": "session-${group}"}
+    "auth": {"mode": "token", "token": "$(openssl rand -hex 16)"}
   },
   "agents": {
     "defaults": {

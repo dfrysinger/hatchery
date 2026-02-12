@@ -178,12 +178,11 @@ class TestDockerComposeStructure(unittest.TestCase):
         svc = compose['services']['council']
         self.assertEqual(svc['image'], 'myregistry/agent:v2')
 
-    def test_compose_version(self):
-        """Compose file specifies version 3.8."""
+    def test_compose_no_version(self):
+        """Compose file must not contain deprecated version field."""
         env = make_container_env()
         compose, _, _, _ = run_generator(env)
-        self.assertEqual(compose.get('version'), '3.8')
-
+        self.assertNotIn('version', compose)
 
 @unittest.skipUnless(HAS_YAML, "PyYAML required for docker-compose tests")
 class TestDockerComposeVolumes(unittest.TestCase):
