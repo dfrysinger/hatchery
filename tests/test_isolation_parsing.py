@@ -305,6 +305,8 @@ class TestAgentIsolationGroupParsing:
         
         assert rc == 0
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "agent"
+        # No warning should be emitted for default isolation group sanitization
+        assert "invalid isolationGroup" not in stderr
 
     def test_multiple_agents_same_group(self):
         """Multiple agents in same isolationGroup."""

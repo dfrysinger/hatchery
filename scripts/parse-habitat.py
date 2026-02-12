@@ -42,7 +42,7 @@ def is_valid_isolation_group(value):
     """Check if isolationGroup is valid (alphanumeric + hyphens only)."""
     if not value:
         return False
-    return bool(re.match(r'^[a-zA-Z0-9\-]+$', value))
+    return bool(re.match(r'^[a-zA-Z0-9-]+$', value))
 
 def sanitize_isolation_group(value):
     """Sanitize a value to be a valid isolationGroup (alphanumeric + hyphens).
