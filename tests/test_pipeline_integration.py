@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for TASK-206: Pipeline integration of isolation scripts.
+"""Tests for GitHub Issue #223: Pipeline integration of isolation scripts.
 
 Verifies:
 1. build-full-config.sh calls generate-session-services.sh for session mode
@@ -28,6 +28,9 @@ COMPOSE_SCRIPT = os.path.join(SCRIPTS_DIR, 'generate-docker-compose.sh')
 
 class TestBuildScriptContainsIsolationWiring(unittest.TestCase):
     """Static analysis: build-full-config.sh must reference the isolation scripts."""
+    # Static analysis is used because the actual pipeline runs during droplet
+    # provisioning with real systemctl/docker — these checks verify the wiring
+    # exists without needing the full environment.
 
     def setUp(self):
         with open(BUILD_SCRIPT) as f:
