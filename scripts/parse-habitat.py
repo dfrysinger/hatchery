@@ -29,7 +29,7 @@
 #
 # Original: /usr/local/bin/parse-habitat.py (in hatch.yaml write_files)
 # =============================================================================
-import json, base64, os, sys
+import json, base64, os, sys, re
 
 def d(val):
     try: return base64.b64decode(val).decode()
@@ -37,6 +37,62 @@ def d(val):
 
 def b64(s):
     return base64.b64encode((s or "").encode()).decode()
+
+def is_valid_isolation_group(value):
+    """Check if isolationGroup is valid (alphanumeric + hyphens only).
+    
+    Handles non-string inputs by coercing simple types (int, float, bool) to strings,
+    and rejecting complex types (dict, list, etc.) as invalid.
+    """
+    if not value:
+        return False
+    
+    # Handle non-string types
+    if not isinstance(value, str):
+        # Reject complex types like dict, list, etc.
+        if isinstance(value, (dict, list, tuple, set)):
+            return False
+        # Coerce simple types (int, float, bool) to string
+        try:
+            value = str(value)
+        except (TypeError, ValueError):
+            return False
+    
+    return bool(re.match(r'^[a-zA-Z0-9-]+$', value))
+
+def sanitize_isolation_group(value):
+    """Sanitize a value to be a valid isolationGroup (alphanumeric + hyphens).
+    
+    Handles non-string inputs by coercing simple types (int, float, bool) to strings,
+    and falling back to 'agent' for complex types (dict, list, etc.).
+    
+    Returns the sanitized value, or 'agent' as a safe fallback if sanitization 
+    produces an empty string. Note: When multiple agents have names that sanitize 
+    to empty, they will all get 'agent' as the group name, causing them to share 
+    an isolation boundary. This is acceptable as it's an edge case with unusual 
+    agent names.
+    """
+    if not value:
+        return "agent"
+    
+    # Handle non-string types
+    if not isinstance(value, str):
+        # Reject complex types like dict, list, etc. - fall back to 'agent'
+        if isinstance(value, (dict, list, tuple, set)):
+            return "agent"
+        # Coerce simple types (int, float, bool) to string
+        try:
+            value = str(value)
+        except (TypeError, ValueError):
+            return "agent"
+    
+    # Replace invalid characters with hyphens, then collapse multiple hyphens
+    sanitized = re.sub(r'[^a-zA-Z0-9\-]', '-', value)
+    sanitized = re.sub(r'-+', '-', sanitized)
+    # Remove leading/trailing hyphens
+    sanitized = sanitized.strip('-')
+    # If sanitization results in empty string, use 'agent' as safe fallback
+    return sanitized if sanitized else "agent"
 
 hab_raw = os.environ.get('HABITAT_B64', '')
 lib_raw = os.environ.get('AGENT_LIB_B64', '')
@@ -176,8 +232,38 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     f.write('GLOBAL_USER_B64="{}"\n'.format(b64(hab.get("globalUser", ""))))
     f.write('GLOBAL_TOOLS_B64="{}"\n'.format(b64(hab.get("globalTools", ""))))
 
+    # v3 Isolation settings (TASK-201, TASK-202)
+    # Default isolation level for all agents
+    isolation_default = hab.get("isolation", "none")
+    valid_isolation_levels = ["none", "session", "container", "droplet"]
+    if isolation_default not in valid_isolation_levels:
+        print(f"WARN: Invalid isolation level '{isolation_default}', defaulting to 'none'", file=sys.stderr)
+        isolation_default = "none"
+    f.write('ISOLATION_DEFAULT="{}"\n'.format(isolation_default))
+
+    # Shared paths for cross-boundary access
+    shared_paths = hab.get("sharedPaths", [])
+    # Ensure sharedPaths is a list of strings; warn and default safely otherwise
+    if not isinstance(shared_paths, list):
+        print(f"WARN: sharedPaths must be a list; got {type(shared_paths).__name__}, defaulting to empty list", file=sys.stderr)
+        shared_paths_normalized = []
+    else:
+        shared_paths_normalized = []
+        for idx, p in enumerate(shared_paths):
+            if p is None:
+                print(f"WARN: sharedPaths[{idx}] is None; skipping", file=sys.stderr)
+                continue
+            try:
+                shared_paths_normalized.append(str(p))
+            except Exception as e:
+                print(f"WARN: sharedPaths[{idx}] could not be converted to string ({e}); skipping", file=sys.stderr)
+    f.write('ISOLATION_SHARED_PATHS="{}"\n'.format(",".join(shared_paths_normalized)))
+
     agents = hab.get("agents", [])
     f.write('AGENT_COUNT={}\n'.format(len(agents)))
+
+    # Track unique isolation groups for ISOLATION_GROUPS output
+    isolation_groups = set()
 
     for i, raw_agent_ref in enumerate(agents):
         n = i + 1
@@ -213,6 +299,87 @@ with open('/etc/habitat-parsed.env', 'w') as f:
         f.write('AGENT{}_BOOT_B64="{}"\n'.format(n, b64(boot)))
         f.write('AGENT{}_BOOTSTRAP_B64="{}"\n'.format(n, b64(bootstrap)))
         f.write('AGENT{}_USER_B64="{}"\n'.format(n, b64(user)))
+
+        # v3 Per-agent isolation fields (TASK-201, TASK-202)
+        # isolationGroup: agents in same group share isolation boundary
+        raw_isolation_group = agent_ref.get("isolationGroup", "")
+        if raw_isolation_group:
+            # User specified an isolationGroup, validate it
+            if not is_valid_isolation_group(raw_isolation_group):
+                sanitized_name = sanitize_isolation_group(name)
+                # Check if it's a type error (non-string complex type)
+                if isinstance(raw_isolation_group, (dict, list, tuple, set)):
+                    print(
+                        f"WARN: Agent '{name}' has invalid isolationGroup type '{type(raw_isolation_group).__name__}' "
+                        f"(must be a string); falling back to '{sanitized_name}'",
+                        file=sys.stderr
+                    )
+                else:
+                    print(
+                        f"WARN: Agent '{name}' has invalid isolationGroup '{raw_isolation_group}' "
+                        f"(must be alphanumeric + hyphens); falling back to '{sanitized_name}'",
+                        file=sys.stderr
+                    )
+                agent_isolation_group = sanitized_name
+            else:
+                # Valid but may need string coercion
+                if not isinstance(raw_isolation_group, str):
+                    agent_isolation_group = str(raw_isolation_group)
+                else:
+                    agent_isolation_group = raw_isolation_group
+        else:
+            # No isolationGroup specified, default to sanitized agent name
+            agent_isolation_group = sanitize_isolation_group(name)
+        f.write('AGENT{}_ISOLATION_GROUP="{}"\n'.format(n, agent_isolation_group))
+
+        # isolation: override global isolation level for this agent
+        agent_isolation = agent_ref.get("isolation", "")  # Empty = inherit global
+        if agent_isolation and agent_isolation not in valid_isolation_levels:
+            print(f"WARN: Agent '{name}' has invalid isolation '{agent_isolation}', ignoring", file=sys.stderr)
+            agent_isolation = ""
+        f.write('AGENT{}_ISOLATION="{}"\n'.format(n, agent_isolation))
+
+        # network: container/droplet network mode (host, internal, none)
+        agent_network = agent_ref.get("network", "host")
+        valid_network_modes = ["host", "internal", "none"]
+        if agent_network not in valid_network_modes:
+            print(f"WARN: Agent '{name}' has invalid network '{agent_network}', defaulting to 'host'", file=sys.stderr)
+            agent_network = "host"
+        # Warn if network set for non-container/droplet isolation
+        effective_isolation = agent_isolation or isolation_default
+        if agent_network != "host" and effective_isolation not in ["container", "droplet"]:
+            print(f"WARN: Agent '{name}' has network='{agent_network}' but isolation='{effective_isolation}' (network only applies to container/droplet)", file=sys.stderr)
+        f.write('AGENT{}_NETWORK="{}"\n'.format(n, agent_network))
+
+        # capabilities: restrict tool access (empty = all tools)
+        agent_capabilities = agent_ref.get("capabilities", [])
+        if not isinstance(agent_capabilities, list):
+            print(
+                f"WARN: Agent '{name}' has non-list capabilities (type {type(agent_capabilities).__name__}); defaulting to []",
+                file=sys.stderr,
+            )
+            agent_capabilities = []
+        else:
+            # Ensure all capabilities are strings before joining
+            agent_capabilities = [str(cap) for cap in agent_capabilities]
+        f.write('AGENT{}_CAPABILITIES="{}"\n'.format(n, ",".join(agent_capabilities)))
+
+        # resources: memory/cpu limits for container/droplet
+        agent_resources = agent_ref.get("resources", {})
+        if not isinstance(agent_resources, dict):
+            print(
+                f"WARN: Agent '{name}' has non-dict resources (type {type(agent_resources).__name__}); defaulting to {{}}",
+                file=sys.stderr,
+            )
+            agent_resources = {}
+        f.write('AGENT{}_RESOURCES_MEMORY="{}"\n'.format(n, agent_resources.get("memory", "")))
+        f.write('AGENT{}_RESOURCES_CPU="{}"\n'.format(n, agent_resources.get("cpu", "")))
+
+        # Track unique isolation groups
+        isolation_groups.add(agent_isolation_group)
+
+    # List of unique isolation groups (for container/droplet orchestration)
+    f.write('ISOLATION_GROUPS="{}"\n'.format(",".join(sorted(isolation_groups))))
 
 os.chmod('/etc/habitat-parsed.env', 0o600)
 
