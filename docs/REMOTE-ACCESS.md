@@ -72,61 +72,16 @@ http://habitat.yourdomain.com:8080/status
 
 All API endpoints require HMAC-SHA256 authentication when `API_SECRET` is set.
 
-### Signature Format
+> **Full details:** See [Security: HMAC Authentication](security/SECURITY.md) for the complete signature format, replay protection, endpoint sensitivity table, and code examples (Python, iOS Shortcut).
 
-The signature binds:
-- **Timestamp** (Unix seconds, replay protection)
-- **HTTP method** (GET, POST, etc.)
-- **Path** (e.g., `/config/status`)
-- **Body** (request body as UTF-8 string)
+**Quick reference:**
 
-**Message format:** `"{timestamp}.{method}.{path}.{body}"`
+| Header | Value |
+|--------|-------|
+| `X-Timestamp` | Unix seconds |
+| `X-Signature` | `HMAC-SHA256("{timestamp}.{method}.{path}.{body}", API_SECRET)` |
 
-**Replay window:** 5 minutes (300 seconds)
-
-### Request Headers
-
-```
-X-Timestamp: <unix_timestamp_seconds>
-X-Signature: <HMAC-SHA256("{timestamp}.{method}.{path}.{body}", API_SECRET)>
-```
-
-### Example (Python)
-
-```python
-import hmac
-import hashlib
-import time
-import requests
-
-API_SECRET = "your-secret-here"
-url = "http://YOUR_IP:8080/config/status"
-method = "GET"
-path = "/config/status"
-body = ""  # Empty for GET requests
-timestamp = str(int(time.time()))  # Unix seconds
-
-# Construct message: "{timestamp}.{method}.{path}.{body}"
-message = f"{timestamp}.{method}.{path}.{body}"
-
-signature = hmac.new(
-    API_SECRET.encode(),
-    message.encode(),
-    hashlib.sha256
-).hexdigest()
-
-headers = {
-    "X-Timestamp": timestamp,
-    "X-Signature": signature
-}
-
-response = requests.get(url, headers=headers)
-print(response.json())
-```
-
-### Example (iOS Shortcut)
-
-See `examples/ios-shortcut-config.json` for a complete Shortcut configuration with HMAC authentication.
+Replay window: 5 minutes (300 seconds).
 
 ## SSH Tunnel (Secure Alternative)
 
@@ -198,4 +153,4 @@ This keeps the API server bound to `127.0.0.1` while allowing secure remote acce
 
 - API Endpoints: See `scripts/api-server.py` docstring
 - HMAC Authentication: [RFC 2104](https://tools.ietf.org/html/rfc2104)
-- Security Considerations: `docs/SECURITY.md` (if available)
+- Security Model: [docs/security/SECURITY.md](security/SECURITY.md)

@@ -91,14 +91,16 @@
 ### R6: Habitat Schema v3 / Isolation Support (Started: 2026-02-11)
 **Theme:** Per-agent isolation modes for multi-agent deployments
 
-| Task | Status | Description |
-|------|:------:|-------------|
-| Spec | ✅ | v3 schema specification (PR #197) |
-| TASK-201 | 🔲 | Update parse-habitat.py for v3 fields |
-| TASK-202 | 🔲 | Add isolation validation |
-| TASK-203 | 🔲 | Isolation groups in build-full-config.sh |
-| TASK-204 | 🔲 | Docker Compose generation |
-| TASK-205 | 🔲 | Backward compatibility tests |
+| Task | Status | Description | PR |
+|------|:------:|-------------|:--:|
+| Spec | ✅ | v3 schema specification | #197 |
+| TASK-201 | ✅ | Update parse-habitat.py for v3 fields | #212 |
+| TASK-202 | ✅ | Add isolation validation | #212 |
+| TASK-205 | ✅ | Backward compatibility tests (21 tests) | #212 |
+| TASK-203 | ✅ | Session mode — per-group systemd services (22 tests) | — |
+| TASK-204 | ✅ | Docker Compose generation (26 tests) | — |
+
+**Note:** PR #211 (`feature/isolation-v3-parse`) is superseded by #212 — close it.
 
 **Exit Criteria:**
 - v2 habitats work unchanged (backward compatible)

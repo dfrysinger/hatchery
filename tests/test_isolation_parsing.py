@@ -142,8 +142,8 @@ class TestIsolationDefaultParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
-        assert env_vars.get("ISOLATION_DEFAULT") == "droplet"
+        assert rc == 1
+        assert "droplet isolation mode is not yet supported" in stderr
 
     def test_invalid_isolation_warns_and_defaults(self):
         """Invalid isolation level should warn and default to 'none'."""

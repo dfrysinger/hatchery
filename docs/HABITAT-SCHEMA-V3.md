@@ -193,26 +193,14 @@ Interpreted as:
 }
 ```
 
-## Implementation Notes
+## Validation Rules
 
-### parse-habitat.py
-
-Must extract:
-- `isolation` (top-level, default "none")
-- `sharedPaths` (top-level, default [])
-- Per-agent: `isolation`, `isolationGroup`, `network`, `capabilities`, `resources`
-
-### build-full-config.sh
-
-Must generate:
-- For `isolation: "none"` — current behavior
-- For `isolation: "session"` — separate OpenClaw sessions
-- For `isolation: "container"` — docker-compose.yaml
-- For `isolation: "droplet"` — separate provisioning calls
-
-### Validation
-
-- `isolation` must be one of: `none`, `session`, `container`, `droplet`
+- `isolation` must be one of: `none`, `session`, `container`
+- `droplet` is reserved for future use — validation rejects it with: `"droplet isolation mode is not yet supported"`
 - `network` must be one of: `host`, `internal`, `none`
 - `network` only valid when `isolation` is `container` or `droplet`
 - `isolationGroup` must be alphanumeric + hyphens
+
+## Implementation
+
+See [RELEASE-ROADMAP-v1.md](roadmap/RELEASE-ROADMAP-v1.md) for task status, PR history, and implementation details.

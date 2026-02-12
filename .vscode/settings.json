@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "mv": true,
+        "/^python -m pytest tests/test_isolation_schema\\.py -v 2>&1$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

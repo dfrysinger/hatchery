@@ -11,7 +11,7 @@ import re
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SECURITY_MD = os.path.join(REPO_ROOT, "docs", "SECURITY.md")
+SECURITY_MD = os.path.join(REPO_ROOT, "docs", "security", "SECURITY.md")
 API_SERVER_PY = os.path.join(REPO_ROOT, "scripts", "api-server.py")
 
 

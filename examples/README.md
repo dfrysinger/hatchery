@@ -16,6 +16,17 @@ Hatchery supports three platform modes, set via the `"platform"` field:
 | `"telegram"` | [habitat-telegram.json](habitat-telegram.json) | Agents run only on Telegram |
 | `"both"` | [habitat-both.json](habitat-both.json) | Agents run on both Discord and Telegram simultaneously |
 
+### Isolation Modes (v3 Schema)
+
+These examples demonstrate agent isolation support added in schema v3:
+
+| Mode | File | Description |
+|------|------|-------------|
+| `"session"` | [habitat-isolation-session.json](habitat-isolation-session.json) | Agents grouped into systemd session units (council + workers) |
+| `"container"` | [habitat-isolation-container.json](habitat-isolation-container.json) | Agents run in Docker containers with network/resource constraints |
+
+> **Note:** The `"droplet"` isolation mode is not yet supported and will be rejected by the parser.
+
 ## Filling in Placeholders
 
 Every value prefixed with `YOUR_` must be replaced with your actual credentials:
@@ -68,6 +79,12 @@ Every value prefixed with `YOUR_` must be replaced with your actual credentials:
 | `globalAgents` | Instructions about other agents (shared context) |
 | `globalUser` | Information about the owner/user |
 | `agents` | Array of agent configurations with platform-specific bot tokens |
+| `isolation` | *(v3)* Isolation mode: `"none"` (default), `"session"`, or `"container"` |
+| `sharedPaths` | *(v3)* Array of paths shared across isolation groups |
+| `agents[].isolationGroup` | *(v3)* Group name for agent isolation (alphanumeric + hyphens) |
+| `agents[].network` | *(v3)* Network mode for container isolation: `"host"`, `"internal"`, or `"none"` |
+| `agents[].capabilities` | *(v3)* Array of capabilities granted to the agent |
+| `agents[].resources` | *(v3)* Resource limits: `{"memory": "512Mi", "cpu": "0.5"}` |
 
 ## ⚠️ Security: Keep Real Configs Private
 

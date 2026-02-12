@@ -73,7 +73,28 @@ cat /etc/config-api-uploaded
 curl -s http://<droplet-ip>:8080/config/status
 ```
 
-## Implementation reference
+## Logging and Error Handling
+
+The marker write operation (as of TASK-21) uses structured JSON logging to stderr:
+
+**Success:**
+```json
+{"event": "upload_marker_written", "path": "/etc/config-api-uploaded", "timestamp": 1707442800.123, "success": true}
+```
+
+**Failure:**
+```json
+{"event": "upload_marker_write_failed", "path": "/etc/config-api-uploaded", "timestamp": 1707442800.123, "success": false, "error": "PermissionError", "details": "Permission denied"}
+```
+
+Marker write failures are **non-fatal** — the config upload still succeeds. Clients can check marker status via `/config/status` to verify.
+
+## Implementation Reference
 - Marker path constant: `MARKER_PATH='/etc/config-api-uploaded'`
-- Marker write: `write_upload_marker()`
+- Marker write: `write_upload_marker()` in `scripts/api-server.py`
 - Status endpoints: `/config` and `/config/status`
+- Tests: `tests/test_upload_marker.py`
+
+## See Also
+- [Troubleshooting: Config Upload](../troubleshooting/api-config-upload.md)
+- [Security: HMAC Authentication](../security/SECURITY.md)

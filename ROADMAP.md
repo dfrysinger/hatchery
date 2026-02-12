@@ -246,10 +246,36 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. PRs welcome!
 
 ---
 
+## R6: Habitat Schema v3 / Isolation Support *(In Progress — 2026-02-11)*
+
+**Goal:** Per-agent isolation modes for multi-agent deployments.
+
+| Task | Status | Description |
+|------|:------:|-------------|
+| Spec | ✅ | v3 schema specification ([HABITAT-SCHEMA-V3.md](docs/HABITAT-SCHEMA-V3.md)) |
+| TASK-201 | ✅ | Update parse-habitat.py for v3 isolation fields |
+| TASK-202 | ✅ | Add isolation validation to parser |
+| TASK-205 | ✅ | Backward compatibility tests (21 tests) |
+| TASK-203 | ✅ | Session mode — per-group systemd services (22 tests) |
+| TASK-204 | ✅ | Container mode — Docker Compose generation (26 tests) |
+
+**Isolation Levels:** `none` (shared process), `session` (separate OpenClaw), `container` (Docker), `droplet` (future — rejected at validation for now)
+
+**Exit Criteria:**
+- v2 habitats work unchanged (backward compatible) ✅
+- Session mode generates per-group systemd services ✅
+- Container mode generates docker-compose.yaml ✅
+- 50+ isolation-specific tests (integration, not placeholder) ✅ (118 total)
+
+See [RELEASE-ROADMAP-v1.md](docs/roadmap/RELEASE-ROADMAP-v1.md) for full details.
+
+---
+
 ## Version History
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| R6 | 2026-02-11 | Habitat Schema v3: per-agent isolation modes (none, session, container) |
 | R5 | 2026-02-09 | Code review fixes: security hardening (shell=True removal), 40 new auth tests, script permissions, documentation corrections |
 | R4 | 2026-02-09 | Code quality & documentation: API secure-by-default, drift detection, v1 schema compatibility, upload marker logging |
 | v4.3 | 2024-02 | Config upload API, agent library support |

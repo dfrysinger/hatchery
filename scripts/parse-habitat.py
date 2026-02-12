@@ -335,9 +335,12 @@ if lib_raw:
             print(f"WARN: AGENT_LIB_B64 must be object, got {type(lib).__name__}. Using empty library.", file=sys.stderr)
             lib = {}
 
-with open('/etc/habitat.json', 'w') as f:
+# Output directory: /etc by default, override with HABITAT_OUTPUT_DIR for testing
+output_dir = os.environ.get('HABITAT_OUTPUT_DIR', '/etc')
+
+with open(os.path.join(output_dir, 'habitat.json'), 'w') as f:
     json.dump(hab, f, indent=2)
-os.chmod('/etc/habitat.json', 0o600)
+os.chmod(os.path.join(output_dir, 'habitat.json'), 0o600)
 
 # Track deprecation warnings to emit at end
 deprecation_warnings = []
@@ -401,7 +404,7 @@ def get_agent_token(agent_ref, platform_name, agent_name=""):
             return agent_ref["botToken"]
     return ""
 
-with open('/etc/habitat-parsed.env', 'w') as f:
+with open(os.path.join(output_dir, 'habitat-parsed.env'), 'w') as f:
     f.write('HABITAT_NAME="{}"\n'.format(hab["name"]))
     f.write('HABITAT_NAME_B64="{}"\n'.format(b64(hab["name"])))
     f.write('DESTRUCT_MINS="{}"\n'.format(hab.get("destructMinutes", 0)))
@@ -461,6 +464,9 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     # Default isolation level for all agents
     isolation_default = hab.get("isolation", "none")
     valid_isolation_levels = ["none", "session", "container", "droplet"]
+    if isolation_default == "droplet":
+        print("ERROR: droplet isolation mode is not yet supported", file=sys.stderr)
+        sys.exit(1)
     if isolation_default not in valid_isolation_levels:
         print(f"WARN: Invalid isolation level '{isolation_default}', defaulting to 'none'", file=sys.stderr)
         isolation_default = "none"
@@ -559,6 +565,9 @@ with open('/etc/habitat-parsed.env', 'w') as f:
 
         # isolation: override global isolation level for this agent
         agent_isolation = agent_ref.get("isolation", "")  # Empty = inherit global
+        if agent_isolation == "droplet":
+            print("ERROR: droplet isolation mode is not yet supported", file=sys.stderr)
+            sys.exit(1)
         if agent_isolation and agent_isolation not in valid_isolation_levels:
             print(f"WARN: Agent '{name}' has invalid isolation '{agent_isolation}', ignoring", file=sys.stderr)
             agent_isolation = ""
@@ -606,7 +615,7 @@ with open('/etc/habitat-parsed.env', 'w') as f:
     # List of unique isolation groups (for container/droplet orchestration)
     f.write('ISOLATION_GROUPS="{}"\n'.format(",".join(sorted(isolation_groups))))
 
-os.chmod('/etc/habitat-parsed.env', 0o600)
+os.chmod(os.path.join(output_dir, 'habitat-parsed.env'), 0o600)
 
 # Emit deprecation warnings
 for warning in deprecation_warnings:

@@ -1,443 +1,629 @@
 #!/usr/bin/env python3
-"""Tests for Habitat Schema v3 isolation support.
+"""Integration tests for v3 isolation schema parsing.
 
-These tests verify that parse-habitat.py correctly handles:
-- Top-level isolation settings
-- Per-agent isolation overrides
-- Isolation groups
-- Network modes
-- Shared paths
-- Backward compatibility with v2 schemas
+These tests invoke scripts/parse-habitat.py via subprocess with
+HABITAT_OUTPUT_DIR pointed at a temp directory, then verify the
+generated habitat-parsed.env contains correct isolation fields.
 """
+
+import base64
 import json
 import os
 import subprocess
+import sys
 import tempfile
-from pathlib import Path
+import unittest
 
-import pytest
-
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "scripts"
-PARSE_HABITAT = SCRIPTS_DIR / "parse-habitat.py"
+PARSER = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'parse-habitat.py')
 
 
-def run_parse_habitat(habitat_json: dict) -> dict:
-    """Run parse-habitat.py with given habitat and return parsed env vars."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        json.dump(habitat_json, f)
-        habitat_file = f.name
-    
-    try:
-        # Set up environment
+def make_habitat(overrides=None, agents=None):
+    """Build a minimal v2 habitat dict with optional overrides."""
+    hab = {
+        "name": "TestHabitat",
+        "platform": "telegram",
+        "destructMinutes": 0,
+        "platforms": {"telegram": {"ownerId": "123"}},
+        "agents": agents or [
+            {"agent": "Agent1", "tokens": {"telegram": "tok1"}},
+        ],
+    }
+    if overrides:
+        hab.update(overrides)
+    return hab
+
+
+def run_parser(habitat_dict, expect_fail=False):
+    """Run parse-habitat.py with the given habitat dict.
+
+    Returns (env_dict, stderr_text).
+    env_dict is a dict of KEY=VALUE pairs from habitat-parsed.env.
+    If expect_fail=True, asserts non-zero exit and returns ({}, stderr).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        b64 = base64.b64encode(json.dumps(habitat_dict).encode()).decode()
         env = os.environ.copy()
-        env['HABITAT_B64'] = ''  # Will read from file
-        
-        # Run parse-habitat.py
+        env['HABITAT_B64'] = b64
+        env['HABITAT_OUTPUT_DIR'] = tmpdir
+        env.pop('AGENT_LIB_B64', None)
+
         result = subprocess.run(
-            ['python3', str(PARSE_HABITAT)],
+            [sys.executable, PARSER],
             env=env,
             capture_output=True,
             text=True,
-            input=json.dumps(habitat_json)
+            timeout=10,
         )
-        
-        # Parse output env file
-        env_vars = {}
-        output_file = Path('/etc/habitat-parsed.env')
-        if output_file.exists():
-            for line in output_file.read_text().split('\n'):
+
+        if expect_fail:
+            assert result.returncode != 0, \
+                f"Expected failure but got rc=0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+            return {}, result.stderr
+
+        assert result.returncode == 0, \
+            f"Parser failed (rc={result.returncode}).\nstderr: {result.stderr}"
+
+        env_file = os.path.join(tmpdir, 'habitat-parsed.env')
+        assert os.path.exists(env_file), "habitat-parsed.env not created"
+
+        env_dict = {}
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
                 if '=' in line and not line.startswith('#'):
-                    key, _, value = line.partition('=')
-                    env_vars[key] = value.strip('"\'')
-        
-        return env_vars
-    finally:
-        os.unlink(habitat_file)
+                    key, _, val = line.partition('=')
+                    env_dict[key] = val.strip('"')
+        return env_dict, result.stderr
 
 
-class TestIsolationTopLevel:
-    """Test top-level isolation settings."""
+class TestIsolationTopLevel(unittest.TestCase):
+    """Tests for top-level isolation and sharedPaths fields."""
 
-    def test_isolation_none_is_default(self):
-        """Missing isolation field should default to 'none'."""
-        habitat = {
-            "name": "TestHabitat",
-            "agents": [{"agent": "Claude"}]
-        }
-        # Verify schema allows missing isolation
-        assert "isolation" not in habitat
-        # Default should be "none" when parsed
+    def test_default_isolation_none(self):
+        env, _ = run_parser(make_habitat())
+        self.assertEqual(env.get('ISOLATION_DEFAULT'), 'none')
 
-    def test_isolation_values_valid(self):
-        """Valid isolation values: none, session, container, droplet."""
-        valid_values = ["none", "session", "container", "droplet"]
-        for value in valid_values:
-            habitat = {
-                "name": "TestHabitat",
-                "isolation": value,
-                "agents": [{"agent": "Claude"}]
-            }
-            # Should not raise
-            json.dumps(habitat)
+    def test_isolation_session(self):
+        env, _ = run_parser(make_habitat({'isolation': 'session'}))
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'session')
 
-    def test_shared_paths_is_array(self):
-        """sharedPaths must be an array of strings."""
-        habitat = {
-            "name": "TestHabitat",
-            "isolation": "container",
-            "sharedPaths": ["/clawd/shared", "/clawd/reports"],
-            "agents": [{"agent": "Claude"}]
-        }
-        assert isinstance(habitat["sharedPaths"], list)
-        assert all(isinstance(p, str) for p in habitat["sharedPaths"])
+    def test_isolation_container(self):
+        env, _ = run_parser(make_habitat({'isolation': 'container'}))
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'container')
+
+    def test_isolation_droplet_rejected(self):
+        _, stderr = run_parser(make_habitat({'isolation': 'droplet'}), expect_fail=True)
+        self.assertIn('droplet isolation mode is not yet supported', stderr)
+
+    def test_isolation_invalid_value_warns_and_defaults(self):
+        env, stderr = run_parser(make_habitat({'isolation': 'kubernetes'}))
+        self.assertIn('Invalid isolation', stderr)
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
+
+    def test_shared_paths_default_empty(self):
+        env, _ = run_parser(make_habitat())
+        self.assertEqual(env.get('ISOLATION_SHARED_PATHS'), '')
+
+    def test_shared_paths_single(self):
+        env, _ = run_parser(make_habitat({'sharedPaths': ['/clawd/shared']}))
+        self.assertEqual(env['ISOLATION_SHARED_PATHS'], '/clawd/shared')
+
+    def test_shared_paths_multiple(self):
+        env, _ = run_parser(make_habitat({'sharedPaths': ['/a', '/b', '/c']}))
+        self.assertEqual(env['ISOLATION_SHARED_PATHS'], '/a,/b,/c')
+
+    def test_shared_paths_not_array_rejected_by_schema(self):
+        _, stderr = run_parser(make_habitat({'sharedPaths': '/bad'}), expect_fail=True)
+        self.assertIn('sharedPaths', stderr)
+        self.assertIn('must be array', stderr)
 
 
-class TestIsolationPerAgent:
-    """Test per-agent isolation settings."""
+class TestIsolationPerAgent(unittest.TestCase):
+    """Tests for per-agent isolation fields."""
 
-    def test_agent_inherits_global_isolation(self):
-        """Agent without isolation should inherit global setting."""
-        habitat = {
-            "name": "TestHabitat",
-            "isolation": "container",
-            "agents": [
-                {"agent": "Claude"}  # No isolation specified
-            ]
-        }
-        # Claude should inherit "container"
-        assert "isolation" not in habitat["agents"][0]
+    def test_agent_isolation_empty_by_default(self):
+        env, _ = run_parser(make_habitat())
+        self.assertEqual(env.get('AGENT1_ISOLATION'), '')
 
-    def test_agent_overrides_global_isolation(self):
-        """Agent can override global isolation level."""
-        habitat = {
-            "name": "TestHabitat",
-            "isolation": "container",
-            "agents": [
-                {"agent": "Orchestrator", "isolation": "session"},
-                {"agent": "Worker"}  # Inherits container
-            ]
-        }
-        assert habitat["agents"][0]["isolation"] == "session"
-        assert "isolation" not in habitat["agents"][1]
+    def test_agent_isolation_set(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "isolation": "container"}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_ISOLATION'], 'container')
+
+    def test_agent_isolation_droplet_rejected(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "isolation": "droplet"}]
+        _, stderr = run_parser(make_habitat(agents=agents), expect_fail=True)
+        self.assertIn('droplet isolation mode is not yet supported', stderr)
+
+    def test_agent_isolation_invalid_warns(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "isolation": "vm"}]
+        env, stderr = run_parser(make_habitat(agents=agents))
+        self.assertIn('invalid isolation', stderr.lower())
+        self.assertEqual(env['AGENT1_ISOLATION'], '')
 
     def test_agent_isolation_group(self):
-        """Agents with same isolationGroup share boundary."""
-        habitat = {
-            "name": "TestHabitat",
-            "isolation": "container",
-            "agents": [
-                {"agent": "A", "isolationGroup": "team1"},
-                {"agent": "B", "isolationGroup": "team1"},
-                {"agent": "C", "isolationGroup": "team2"}
-            ]
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "isolationGroup": "workers"}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_ISOLATION_GROUP'], 'workers')
+
+    def test_agent_isolation_group_defaults_to_agent_name(self):
+        env, _ = run_parser(make_habitat())
+        self.assertEqual(env.get('AGENT1_ISOLATION_GROUP'), 'Agent1')
+
+    def test_agent_isolation_group_invalid_chars_warns(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "isolationGroup": "bad group!"}]
+        env, stderr = run_parser(make_habitat(agents=agents))
+        self.assertIn('invalid isolationgroup', stderr.lower())
+        self.assertEqual(env['AGENT1_ISOLATION_GROUP'], 'A')
+
+    def test_agent_network_default_host(self):
+        env, _ = run_parser(make_habitat())
+        self.assertEqual(env.get('AGENT1_NETWORK'), 'host')
+
+    def test_agent_network_host(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "network": "host", "isolation": "container"}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_NETWORK'], 'host')
+
+    def test_agent_capabilities(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "capabilities": ["exec", "web_search"]}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_CAPABILITIES'], 'exec,web_search')
+
+    def test_agent_capabilities_empty(self):
+        env, _ = run_parser(make_habitat())
+        self.assertEqual(env.get('AGENT1_CAPABILITIES'), '')
+
+    def test_agent_resources_memory(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "resources": {"memory": "512Mi"}}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_RESOURCES_MEMORY'], '512Mi')
+
+    def test_agent_resources_cpu(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "resources": {"cpu": "0.5"}}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_RESOURCES_CPU'], '0.5')
+
+
+class TestIsolationGroupLogic(unittest.TestCase):
+    """Tests for isolation group aggregation."""
+
+    def test_isolation_groups_default_to_agent_names(self):
+        env, _ = run_parser(make_habitat())
+        self.assertEqual(env.get('ISOLATION_GROUPS'), 'Agent1')
+
+    def test_isolation_groups_single(self):
+        agents = [
+            {"agent": "A", "tokens": {"telegram": "t"}, "isolationGroup": "council"},
+        ]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['ISOLATION_GROUPS'], 'council')
+
+    def test_isolation_groups_multiple_deduped(self):
+        agents = [
+            {"agent": "A", "tokens": {"telegram": "t1"}, "isolationGroup": "council"},
+            {"agent": "B", "tokens": {"telegram": "t2"}, "isolationGroup": "workers"},
+            {"agent": "C", "tokens": {"telegram": "t3"}, "isolationGroup": "council"},
+        ]
+        env, _ = run_parser(make_habitat(agents=agents))
+        groups = env['ISOLATION_GROUPS'].split(',')
+        self.assertEqual(sorted(groups), ['council', 'workers'])
+
+    def test_isolation_groups_sorted(self):
+        agents = [
+            {"agent": "A", "tokens": {"telegram": "t1"}, "isolationGroup": "zebra"},
+            {"agent": "B", "tokens": {"telegram": "t2"}, "isolationGroup": "alpha"},
+        ]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['ISOLATION_GROUPS'], 'alpha,zebra')
+
+    def test_group_name_alphanumeric_with_hyphens(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "isolationGroup": "my-group-1"}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_ISOLATION_GROUP'], 'my-group-1')
+
+    def test_group_name_hyphen_start_is_valid(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "isolationGroup": "-prefixed"}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_ISOLATION_GROUP'], '-prefixed')
+
+    def test_group_name_no_spaces_warns(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "isolationGroup": "has space"}]
+        env, stderr = run_parser(make_habitat(agents=agents))
+        self.assertIn('invalid isolationgroup', stderr.lower())
+        self.assertEqual(env['AGENT1_ISOLATION_GROUP'], 'A')
+
+
+class TestNetworkValidation(unittest.TestCase):
+    """Tests for network field validation."""
+
+    def test_network_invalid_value_warns_and_defaults(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "network": "bridge"}]
+        env, stderr = run_parser(make_habitat(agents=agents))
+        self.assertIn('invalid network', stderr.lower())
+        self.assertEqual(env['AGENT1_NETWORK'], 'host')
+
+    def test_network_valid_values(self):
+        for net in ['host', 'internal', 'none']:
+            agents = [{"agent": "A", "tokens": {"telegram": "t"}, "network": net, "isolation": "container"}]
+            env, _ = run_parser(make_habitat(agents=agents))
+            self.assertEqual(env['AGENT1_NETWORK'], net)
+
+    def test_network_on_non_container_warns(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "network": "internal"}]
+        env, stderr = run_parser(make_habitat(agents=agents))
+        self.assertIn('WARN', stderr)
+        self.assertIn('network only applies to container/droplet', stderr)
+
+    def test_network_on_session_isolation_warns(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "network": "internal", "isolation": "session"}]
+        env, stderr = run_parser(make_habitat(agents=agents))
+        self.assertIn('WARN', stderr)
+
+    def test_network_on_container_no_warning(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "network": "internal", "isolation": "container"}]
+        env, stderr = run_parser(make_habitat(agents=agents))
+        self.assertNotIn('WARN', stderr)
+
+
+class TestBackwardCompatibility(unittest.TestCase):
+    """Ensure v1/v2 habitats work unchanged with v3 parser."""
+
+    def test_v2_habitat_no_isolation(self):
+        hab = make_habitat()
+        env, _ = run_parser(hab)
+        self.assertEqual(env['HABITAT_NAME'], 'TestHabitat')
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
+        self.assertEqual(env['ISOLATION_SHARED_PATHS'], '')
+        self.assertEqual(env['ISOLATION_GROUPS'], 'Agent1')
+
+    def test_v1_legacy_format(self):
+        hab = {
+            "name": "LegacyHab",
+            "telegram": {"ownerId": "123"},
+            "agents": [{"agent": "Bot", "botToken": "tok1"}],
         }
-        # A and B should share container, C separate
-        assert habitat["agents"][0]["isolationGroup"] == habitat["agents"][1]["isolationGroup"]
-        assert habitat["agents"][0]["isolationGroup"] != habitat["agents"][2]["isolationGroup"]
+        env, _ = run_parser(hab)
+        self.assertEqual(env['HABITAT_NAME'], 'LegacyHab')
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
 
-    def test_agent_network_modes(self):
-        """Agent network mode: host, internal, none."""
-        habitat = {
-            "name": "TestHabitat",
-            "isolation": "container",
-            "agents": [
-                {"agent": "WebAgent", "network": "host"},
-                {"agent": "InternalAgent", "network": "internal"},
-                {"agent": "SandboxAgent", "network": "none"}
-            ]
-        }
-        assert habitat["agents"][0]["network"] == "host"
-        assert habitat["agents"][1]["network"] == "internal"
-        assert habitat["agents"][2]["network"] == "none"
+    def test_v2_with_platform_key(self):
+        hab = make_habitat()
+        hab['platform'] = 'discord'
+        hab['platforms'] = {'discord': {'ownerId': '456', 'serverId': '789'}}
+        hab['agents'] = [{"agent": "A", "tokens": {"discord": "dtok"}}]
+        env, _ = run_parser(hab)
+        self.assertEqual(env['PLATFORM'], 'discord')
 
+    def test_agent_count_preserved(self):
+        agents = [
+            {"agent": f"Agent{i}", "tokens": {"telegram": f"tok{i}"}}
+            for i in range(3)
+        ]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT_COUNT'], '3')
 
-class TestIsolationGroupLogic:
-    """Test isolation group behavior."""
+    def test_existing_fields_unaffected(self):
+        env, _ = run_parser(make_habitat({'bgColor': 'FF0000', 'destructMinutes': 120}))
+        self.assertEqual(env['BG_COLOR'], 'FF0000')
+        self.assertEqual(env['DESTRUCT_MINS'], '120')
 
-    def test_missing_group_means_own_boundary(self):
-        """Agent without isolationGroup gets its own boundary."""
-        habitat = {
-            "name": "TestHabitat",
-            "isolation": "container",
-            "agents": [
-                {"agent": "A"},  # Own boundary (implicit group "A")
-                {"agent": "B"}   # Own boundary (implicit group "B")
-            ]
-        }
-        # Each should be isolated from the other
-        assert "isolationGroup" not in habitat["agents"][0]
-        assert "isolationGroup" not in habitat["agents"][1]
+    def test_multiple_agents_backward_compat(self):
+        agents = [
+            {"agent": "A", "tokens": {"telegram": "t1"}},
+            {"agent": "B", "tokens": {"telegram": "t2"}},
+        ]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_NAME'], 'A')
+        self.assertEqual(env['AGENT2_NAME'], 'B')
+        # v3 fields default to empty
+        self.assertEqual(env['AGENT1_ISOLATION'], '')
+        self.assertEqual(env['AGENT2_ISOLATION'], '')
 
-    def test_group_name_validation(self):
-        """isolationGroup should be alphanumeric + hyphens."""
-        valid_groups = ["team1", "team-a", "workers", "council-2024"]
-        invalid_groups = ["team 1", "team@1", "team/a", ""]
-        
-        for group in valid_groups:
-            habitat = {
-                "name": "Test",
-                "agents": [{"agent": "A", "isolationGroup": group}]
-            }
-            # Should be valid
-            assert habitat["agents"][0]["isolationGroup"] == group
-        
-        # Invalid groups should be rejected by validation (not JSON schema)
+    def test_council_config_preserved(self):
+        hab = make_habitat()
+        hab['council'] = {'groupName': 'Council', 'judge': 'Opus'}
+        env, _ = run_parser(hab)
+        self.assertEqual(env.get('COUNCIL_GROUP_NAME'), 'Council')
+        self.assertEqual(env.get('COUNCIL_JUDGE'), 'Opus')
 
+    # --- TASK-205 expanded backward compatibility tests ---
 
-class TestBackwardCompatibility:
-    """Test v2 schema backward compatibility."""
+    def test_v2_simple_single_agent(self):
+        """Minimal v2 habitat with one agent — all isolation defaults."""
+        hab = {"name": "SimpleBot", "agents": [{"agent": "Claude"}]}
+        env, _ = run_parser(hab)
+        self.assertEqual(env['HABITAT_NAME'], 'SimpleBot')
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
+        self.assertEqual(env['ISOLATION_SHARED_PATHS'], '')
+        self.assertIn('Claude', env['ISOLATION_GROUPS'])
+        self.assertEqual(env['AGENT_COUNT'], '1')
+        self.assertEqual(env.get('AGENT1_ISOLATION'), '')
+        self.assertEqual(env.get('AGENT1_ISOLATION_GROUP'), 'Claude')
+        self.assertEqual(env.get('AGENT1_NETWORK'), 'host')
 
-    def test_v2_schema_still_valid(self):
-        """v2 habitat without isolation fields should work."""
-        v2_habitat = {
-            "name": "OldHabitat",
+    def test_v2_multi_agent_no_isolation(self):
+        """v2 with multiple agents and no isolation fields at all."""
+        hab = {
+            "name": "MultiBot",
             "platform": "discord",
+            "platforms": {"discord": {"ownerId": "456", "serverId": "789"}},
             "agents": [
-                {"agent": "Claude"},
-                {"agent": "ChatGPT"}
-            ]
+                {"agent": "Claude", "tokens": {"discord": "tok1"}},
+                {"agent": "ChatGPT", "tokens": {"discord": "tok2"}},
+                {"agent": "Gemini", "tokens": {"discord": "tok3"}},
+            ],
         }
-        # Should be valid JSON
-        json.dumps(v2_habitat)
-        # No isolation fields
-        assert "isolation" not in v2_habitat
-        assert "sharedPaths" not in v2_habitat
+        env, _ = run_parser(hab)
+        self.assertEqual(env['AGENT_COUNT'], '3')
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
+        for i in range(1, 4):
+            self.assertEqual(env.get(f'AGENT{i}_ISOLATION'), '')
+            self.assertEqual(env.get(f'AGENT{i}_ISOLATION_GROUP'), ['Claude', 'ChatGPT', 'Gemini'][i-1])
+            self.assertEqual(env.get(f'AGENT{i}_NETWORK'), 'host')
+            self.assertEqual(env.get(f'AGENT{i}_CAPABILITIES'), '')
+            self.assertEqual(env.get(f'AGENT{i}_RESOURCES_MEMORY'), '')
+            self.assertEqual(env.get(f'AGENT{i}_RESOURCES_CPU'), '')
 
-    def test_v2_treated_as_isolation_none(self):
-        """v2 habitat should be treated as isolation: none."""
-        # This is a behavioral test - parse-habitat.py should
-        # default to "none" when isolation is missing
-        pass  # Verified in integration tests
-
-    def test_mixed_v2_v3_agents(self):
-        """Agents can mix v2 style (minimal) with v3 style (full)."""
-        habitat = {
-            "name": "MixedHabitat",
-            "isolation": "session",
-            "agents": [
-                {"agent": "Simple"},  # v2 style
-                {
-                    "agent": "Complex",
-                    "isolation": "container",
-                    "isolationGroup": "workers",
-                    "network": "none"
-                }  # v3 style
-            ]
+    def test_v1_telegram_legacy_botToken(self):
+        """v1 legacy format with botToken field."""
+        hab = {
+            "name": "OldBot",
+            "telegram": {"ownerId": "111"},
+            "agents": [{"agent": "Bot", "botToken": "tok_legacy"}],
         }
-        # Should be valid
-        json.dumps(habitat)
+        env, stderr = run_parser(hab)
+        self.assertEqual(env['HABITAT_NAME'], 'OldBot')
+        self.assertEqual(env['AGENT1_BOT_TOKEN'], 'tok_legacy')
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
+        self.assertIn('DEPRECATION', stderr)
 
-
-class TestNetworkModeValidation:
-    """Test network mode constraints."""
-
-    def test_network_only_for_container_or_droplet(self):
-        """network field only valid for container/droplet isolation."""
-        # Valid: container + network
-        valid = {
-            "name": "Test",
-            "isolation": "container",
-            "agents": [{"agent": "A", "network": "none"}]
-        }
-        json.dumps(valid)
-        
-        # Should warn/error: session + network (network has no effect)
-        # This is a validation rule, not schema rule
-
-    def test_network_default_is_host(self):
-        """Missing network should default to 'host'."""
-        habitat = {
-            "name": "Test",
-            "isolation": "container",
-            "agents": [{"agent": "A"}]  # No network specified
-        }
-        # Default should be "host" when parsed
-        assert "network" not in habitat["agents"][0]
-
-
-class TestResourceLimits:
-    """Test resource limit fields."""
-
-    def test_resources_optional(self):
-        """resources field is optional."""
-        habitat = {
-            "name": "Test",
-            "agents": [{"agent": "A"}]
-        }
-        assert "resources" not in habitat["agents"][0]
-
-    def test_resources_memory_format(self):
-        """memory should be Kubernetes-style (e.g., '512Mi')."""
-        habitat = {
-            "name": "Test",
-            "isolation": "container",
-            "agents": [
-                {"agent": "A", "resources": {"memory": "512Mi"}},
-                {"agent": "B", "resources": {"memory": "1Gi"}}
-            ]
-        }
-        assert habitat["agents"][0]["resources"]["memory"] == "512Mi"
-        assert habitat["agents"][1]["resources"]["memory"] == "1Gi"
-
-
-class TestCapabilities:
-    """Test capabilities field."""
-
-    def test_capabilities_is_array(self):
-        """capabilities should be array of strings."""
-        habitat = {
-            "name": "Test",
-            "agents": [
-                {"agent": "A", "capabilities": ["exec", "web_search"]},
-                {"agent": "B", "capabilities": []}
-            ]
-        }
-        assert isinstance(habitat["agents"][0]["capabilities"], list)
-        assert isinstance(habitat["agents"][1]["capabilities"], list)
-
-    def test_capabilities_restricts_tools(self):
-        """Agent with limited capabilities should only access those tools."""
-        habitat = {
-            "name": "Test",
-            "agents": [
-                {"agent": "Researcher", "capabilities": ["web_search", "web_fetch"]},
-                {"agent": "Executor", "capabilities": ["exec"]}
-            ]
-        }
-        # Researcher can't exec, Executor can't web_search
-        assert "exec" not in habitat["agents"][0]["capabilities"]
-        assert "web_search" not in habitat["agents"][1]["capabilities"]
-
-
-class TestSchemaValidation:
-    """Test schema validation rules."""
-
-    def test_isolation_must_be_valid_value(self):
-        """isolation must be one of: none, session, container, droplet."""
-        valid = ["none", "session", "container", "droplet"]
-        invalid = ["docker", "vm", "kubernetes", ""]
-        
-        for v in valid:
-            habitat = {"name": "T", "isolation": v, "agents": [{"agent": "A"}]}
-            json.dumps(habitat)  # Should work
-        
-        # Invalid values should be rejected by parse-habitat.py validation
-
-    def test_network_must_be_valid_value(self):
-        """network must be one of: host, internal, none."""
-        valid = ["host", "internal", "none"]
-        invalid = ["bridge", "overlay", ""]
-        
-        for v in valid:
-            habitat = {
-                "name": "T",
-                "isolation": "container",
-                "agents": [{"agent": "A", "network": v}]
-            }
-            json.dumps(habitat)  # Should work
-
-    def test_agents_required(self):
-        """agents array is required."""
-        habitat = {"name": "Test"}
-        assert "agents" not in habitat
-        # parse-habitat.py should error on missing agents
-
-
-class TestComplexScenarios:
-    """Test complex real-world scenarios."""
-
-    def test_council_with_workers(self):
-        """Council pattern: shared council, isolated workers."""
-        habitat = {
-            "name": "Council",
+    def test_v1_discord_legacy_discordBotToken(self):
+        """v1 legacy format with discordBotToken field."""
+        hab = {
+            "name": "OldDiscord",
             "platform": "discord",
-            "isolation": "session",
-            "sharedPaths": ["/clawd/shared"],
-            "agents": [
-                {"agent": "Opus", "isolationGroup": "council"},
-                {"agent": "Claude", "isolationGroup": "council"},
-                {"agent": "ChatGPT", "isolationGroup": "council"},
-                {"agent": "Worker-1", "isolation": "container", "isolationGroup": "workers"},
-                {"agent": "Worker-2", "isolation": "container", "isolationGroup": "workers"}
-            ]
+            "discord": {"ownerId": "222", "serverId": "333"},
+            "agents": [{"agent": "Bot", "discordBotToken": "dtok_legacy"}],
         }
-        # Council shares session, workers share container
-        council = [a for a in habitat["agents"] if a.get("isolationGroup") == "council"]
-        workers = [a for a in habitat["agents"] if a.get("isolationGroup") == "workers"]
-        
-        assert len(council) == 3
-        assert len(workers) == 2
-        assert all(a.get("isolation") == "container" for a in workers)
+        env, stderr = run_parser(hab)
+        self.assertEqual(env['AGENT1_DISCORD_BOT_TOKEN'], 'dtok_legacy')
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
+        self.assertIn('DEPRECATION', stderr)
 
-    def test_code_sandbox_pattern(self):
-        """Code execution pattern: trusted orchestrator, sandboxed executor."""
-        habitat = {
-            "name": "CodeRunner",
-            "platform": "telegram",
+    def test_v1_telegramBotToken_legacy(self):
+        """v1 legacy format with telegramBotToken field."""
+        hab = {
+            "name": "OldTG",
+            "telegram": {"ownerId": "444"},
+            "agents": [{"agent": "Bot", "telegramBotToken": "ttok_legacy"}],
+        }
+        env, stderr = run_parser(hab)
+        self.assertEqual(env['AGENT1_BOT_TOKEN'], 'ttok_legacy')
+        self.assertEqual(env['AGENT1_TELEGRAM_BOT_TOKEN'], 'ttok_legacy')
+        self.assertIn('DEPRECATION', stderr)
+
+    def test_destruct_minutes_default_zero(self):
+        """destructMinutes defaults to 0 for v2 habitats without it."""
+        hab = {"name": "NoDM", "agents": [{"agent": "Bot"}]}
+        env, _ = run_parser(hab)
+        self.assertEqual(env['DESTRUCT_MINS'], '0')
+
+    def test_platform_defaults_telegram(self):
+        """Platform defaults to telegram when not specified."""
+        hab = {"name": "NoPlat", "agents": [{"agent": "Bot"}]}
+        env, _ = run_parser(hab)
+        self.assertEqual(env['PLATFORM'], 'telegram')
+
+    def test_global_fields_preserved(self):
+        """Global identity/soul/boot fields survive v3 parser."""
+        hab = make_habitat({
+            'globalIdentity': 'I am a helper',
+            'globalSoul': 'Be kind',
+            'globalBoot': 'Check services',
+        })
+        env, _ = run_parser(hab)
+        # These are base64-encoded; just verify they are non-empty
+        self.assertNotEqual(env.get('GLOBAL_IDENTITY_B64', ''), '')
+        self.assertNotEqual(env.get('GLOBAL_SOUL_B64', ''), '')
+        self.assertNotEqual(env.get('GLOBAL_BOOT_B64', ''), '')
+
+    def test_api_bind_address_default(self):
+        """API bind defaults to 127.0.0.1 (secure-by-default)."""
+        hab = make_habitat()
+        env, _ = run_parser(hab)
+        self.assertEqual(env['API_BIND_ADDRESS'], '127.0.0.1')
+
+    def test_api_bind_remote_enabled(self):
+        """remoteApi: true sets API bind to 0.0.0.0."""
+        hab = make_habitat({'remoteApi': True})
+        env, _ = run_parser(hab)
+        self.assertEqual(env['API_BIND_ADDRESS'], '0.0.0.0')
+
+    def test_both_platform_v1(self):
+        """v1 dual-platform habitat with both telegram and discord."""
+        hab = {
+            "name": "DualBot",
+            "platform": "both",
+            "telegram": {"ownerId": "111"},
+            "discord": {"ownerId": "222", "serverId": "333"},
+            "agents": [
+                {"agent": "Bot1", "telegramBotToken": "tt1", "discordBotToken": "dt1"},
+            ],
+        }
+        env, stderr = run_parser(hab)
+        self.assertEqual(env['PLATFORM'], 'both')
+        self.assertEqual(env['AGENT1_BOT_TOKEN'], 'tt1')
+        self.assertEqual(env['AGENT1_DISCORD_BOT_TOKEN'], 'dt1')
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
+
+    def test_string_agent_shorthand(self):
+        """String shorthand for agent ref (just agent name)."""
+        hab = {
+            "name": "StringAgent",
+            "agents": ["Claude"],
+        }
+        env, _ = run_parser(hab)
+        self.assertEqual(env['AGENT1_NAME'], 'Claude')
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
+
+    def test_domain_field_preserved(self):
+        """domain field passes through to HABITAT_DOMAIN."""
+        hab = make_habitat({'domain': 'bot.example.com'})
+        env, _ = run_parser(hab)
+        self.assertEqual(env['HABITAT_DOMAIN'], 'bot.example.com')
+
+    def test_council_group_id_legacy(self):
+        """Legacy councilGroupId field still works."""
+        hab = make_habitat({'councilGroupId': '-100999'})
+        env, _ = run_parser(hab)
+        self.assertEqual(env['COUNCIL_GROUP_ID'], '-100999')
+
+
+class TestExampleFiles(unittest.TestCase):
+    """Test that the v3 example habitat files parse correctly."""
+
+    def _load_example(self, filename):
+        path = os.path.join(os.path.dirname(__file__), '..', 'examples', filename)
+        if not os.path.exists(path):
+            self.skipTest(f"Example file {filename} not found")
+        with open(path) as f:
+            return json.load(f)
+
+    def test_session_example_parses(self):
+        hab = self._load_example('habitat-isolation-session.json')
+        env, _ = run_parser(hab)
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'session')
+        self.assertIn('council', env['ISOLATION_GROUPS'])
+        self.assertIn('workers', env['ISOLATION_GROUPS'])
+
+    def test_session_example_agent_count(self):
+        hab = self._load_example('habitat-isolation-session.json')
+        env, _ = run_parser(hab)
+        self.assertEqual(env['AGENT_COUNT'], '4')
+
+    def test_container_example_parses(self):
+        hab = self._load_example('habitat-isolation-container.json')
+        env, _ = run_parser(hab)
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'container')
+
+    def test_container_example_agent_overrides(self):
+        hab = self._load_example('habitat-isolation-container.json')
+        env, _ = run_parser(hab)
+        # Orchestrator overrides to session
+        self.assertEqual(env['AGENT1_ISOLATION'], 'session')
+        # CodeExecutor has network=none
+        self.assertEqual(env['AGENT2_NETWORK'], 'none')
+        self.assertEqual(env['AGENT2_RESOURCES_MEMORY'], '512Mi')
+
+    def test_container_example_shared_paths(self):
+        hab = self._load_example('habitat-isolation-container.json')
+        env, _ = run_parser(hab)
+        self.assertIn('/clawd/shared/code', env['ISOLATION_SHARED_PATHS'])
+
+
+class TestComplexScenarios(unittest.TestCase):
+    """Test complex multi-agent isolation scenarios."""
+
+    def test_mixed_isolation_levels(self):
+        agents = [
+            {"agent": "A", "tokens": {"telegram": "t1"}, "isolation": "session", "isolationGroup": "g1"},
+            {"agent": "B", "tokens": {"telegram": "t2"}, "isolation": "container", "isolationGroup": "g2"},
+            {"agent": "C", "tokens": {"telegram": "t3"}, "isolationGroup": "g1"},
+        ]
+        env, _ = run_parser(make_habitat({'isolation': 'none'}, agents=agents))
+        self.assertEqual(env['AGENT1_ISOLATION'], 'session')
+        self.assertEqual(env['AGENT2_ISOLATION'], 'container')
+        self.assertEqual(env['AGENT3_ISOLATION'], '')  # inherits default
+        groups = env['ISOLATION_GROUPS'].split(',')
+        self.assertEqual(sorted(groups), ['g1', 'g2'])
+
+    def test_container_with_full_resources(self):
+        agents = [{
+            "agent": "Heavy",
+            "tokens": {"telegram": "t"},
             "isolation": "container",
-            "sharedPaths": ["/clawd/shared/code"],
-            "agents": [
-                {
-                    "agent": "orchestrator",
-                    "isolation": "session",
-                    "capabilities": ["message", "cron", "sessions_spawn"]
-                },
-                {
-                    "agent": "executor",
-                    "isolationGroup": "sandbox",
-                    "network": "none",
-                    "capabilities": ["exec"],
-                    "resources": {"memory": "512Mi"}
-                }
-            ]
-        }
-        orchestrator = habitat["agents"][0]
-        executor = habitat["agents"][1]
-        
-        assert orchestrator["isolation"] == "session"
-        assert executor["network"] == "none"
-        assert "exec" in executor["capabilities"]
-        assert "exec" not in orchestrator["capabilities"]
+            "network": "internal",
+            "capabilities": ["exec", "web_search", "web_fetch"],
+            "resources": {"memory": "1Gi", "cpu": "2.0"},
+        }]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_RESOURCES_MEMORY'], '1Gi')
+        self.assertEqual(env['AGENT1_RESOURCES_CPU'], '2.0')
+        self.assertEqual(env['AGENT1_CAPABILITIES'], 'exec,web_search,web_fetch')
+        self.assertEqual(env['AGENT1_NETWORK'], 'internal')
+
+    def test_ten_agents_all_grouped(self):
+        agents = [
+            {"agent": f"A{i}", "tokens": {"telegram": f"t{i}"},
+             "isolationGroup": f"group-{i % 3}"}
+            for i in range(10)
+        ]
+        env, _ = run_parser(make_habitat({'isolation': 'session'}, agents=agents))
+        self.assertEqual(env['AGENT_COUNT'], '10')
+        groups = env['ISOLATION_GROUPS'].split(',')
+        self.assertEqual(sorted(groups), ['group-0', 'group-1', 'group-2'])
+
+    def test_session_with_shared_paths_and_groups(self):
+        agents = [
+            {"agent": "Judge", "tokens": {"telegram": "t1"}, "isolationGroup": "council"},
+            {"agent": "Worker", "tokens": {"telegram": "t2"}, "isolationGroup": "workers"},
+        ]
+        env, _ = run_parser(make_habitat({
+            'isolation': 'session',
+            'sharedPaths': ['/clawd/shared', '/tmp/exchange'],
+        }, agents=agents))
+        self.assertEqual(env['ISOLATION_SHARED_PATHS'], '/clawd/shared,/tmp/exchange')
+        self.assertIn('council', env['ISOLATION_GROUPS'])
 
 
-# Task definitions for implementation
-IMPLEMENTATION_TASKS = """
-## Implementation Tasks
+class TestSchemaValidation(unittest.TestCase):
+    """Test edge cases and validation boundaries."""
 
-### TASK-201: Update parse-habitat.py for v3 schema
-- Extract `isolation` (default: "none")
-- Extract `sharedPaths` (default: [])
-- Per-agent: `isolation`, `isolationGroup`, `network`, `capabilities`, `resources`
-- Export as environment variables
-- Acceptance: All tests in TestIsolationTopLevel pass
+    def test_empty_isolation_string_treated_as_none(self):
+        """An empty string for isolation should use the default."""
+        hab = make_habitat()
+        env, _ = run_parser(hab)
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
 
-### TASK-202: Add isolation validation to parse-habitat.py
-- Validate `isolation` is one of: none, session, container, droplet
-- Validate `network` is one of: host, internal, none
-- Validate `network` only set when isolation is container/droplet
-- Warn if invalid, don't fail (backward compat)
-- Acceptance: All tests in TestSchemaValidation pass
+    def test_isolation_case_sensitive(self):
+        env, stderr = run_parser(make_habitat({'isolation': 'Session'}))
+        self.assertIn('Invalid isolation', stderr)
+        self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
 
-### TASK-203: Update build-full-config.sh for isolation groups
-- Group agents by `isolationGroup`
-- For `isolation: none` — current single-process behavior
-- For `isolation: session` — separate OpenClaw sessions
-- Acceptance: All tests in TestIsolationGroupLogic pass
+    def test_network_case_sensitive(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "network": "Host"}]
+        env, stderr = run_parser(make_habitat(agents=agents))
+        self.assertIn('invalid network', stderr.lower())
+        self.assertEqual(env['AGENT1_NETWORK'], 'host')
 
-### TASK-204: Add docker-compose generation for container mode
-- Generate docker-compose.yaml when `isolation: container`
-- Mount `sharedPaths` as volumes
-- Apply `network` mode per container
-- Apply `resources` limits
-- Acceptance: All tests in TestComplexScenarios pass
+    def test_capabilities_as_empty_list(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "capabilities": []}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_CAPABILITIES'], '')
 
-### TASK-205: Add backward compatibility tests
-- Verify v2 schemas work unchanged
-- Verify missing fields default correctly
-- Acceptance: All tests in TestBackwardCompatibility pass
-"""
+    def test_resources_empty_dict(self):
+        agents = [{"agent": "A", "tokens": {"telegram": "t"}, "resources": {}}]
+        env, _ = run_parser(make_habitat(agents=agents))
+        self.assertEqual(env['AGENT1_RESOURCES_MEMORY'], '')
+        self.assertEqual(env['AGENT1_RESOURCES_CPU'], '')
+
+    def test_habitat_json_written(self):
+        """Verify habitat.json is also written to output dir."""
+        hab = make_habitat({'isolation': 'session'})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            b64 = base64.b64encode(json.dumps(hab).encode()).decode()
+            env = os.environ.copy()
+            env['HABITAT_B64'] = b64
+            env['HABITAT_OUTPUT_DIR'] = tmpdir
+            env.pop('AGENT_LIB_B64', None)
+            subprocess.run([sys.executable, PARSER], env=env, capture_output=True, timeout=10)
+            hab_path = os.path.join(tmpdir, 'habitat.json')
+            self.assertTrue(os.path.exists(hab_path))
+            with open(hab_path) as f:
+                written = json.load(f)
+            self.assertEqual(written['isolation'], 'session')
+
 
 if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
-    print(IMPLEMENTATION_TASKS)
+    unittest.main()

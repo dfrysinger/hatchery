@@ -4,23 +4,24 @@
 Generate docker-compose.yaml when isolation mode is `container`.
 
 ## Acceptance Criteria
-- [ ] Detect `isolation: container` and generate `docker-compose.yaml`
-- [ ] Create one service per unique `isolationGroup`
-- [ ] Mount `sharedPaths` as volumes in each container
-- [ ] Apply `network` mode per service:
+- [x] Detect `isolation: container` and generate `docker-compose.yaml`
+- [x] Create one service per unique `isolationGroup`
+- [x] Mount `sharedPaths` as volumes in each container
+- [x] Apply `network` mode per service:
   - `host` → `network_mode: host`
   - `internal` → custom bridge network, no external
   - `none` → `network_mode: none`
-- [ ] Apply `resources.memory` as `mem_limit`
-- [ ] Use `hatchery/agent:latest` base image (or configurable)
-- [ ] Include volume for OpenClaw config
-- [ ] All tests in `TestComplexScenarios` pass
+- [x] Apply `resources.memory` as `mem_limit`
+- [x] Use `hatchery/agent:latest` base image (or configurable)
+- [x] Include volume for OpenClaw config
+- [x] All tests pass (26 tests in test_docker_compose.py)
 
 ## Files to Modify
 - `scripts/build-full-config.sh`
 
 ## New Files
-- `scripts/generate-docker-compose.sh` (optional, can be inline)
+- `scripts/generate-docker-compose.sh` — Docker Compose generator
+- `tests/test_docker_compose.py` — 26 TDD tests
 
 ## Test Command
 ```bash

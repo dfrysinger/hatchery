@@ -1,0 +1,45 @@
+{
+  "name": "CouncilWithWorkers",
+  "domain": "mybot.example.com",
+  "destructMinutes": 0,
+  "bgColor": "2D3748",
+  "platform": "discord",
+  "isolation": "session",
+  "sharedPaths": ["/clawd/shared"],
+  "discord": {
+    "serverId": "YOUR_DISCORD_SERVER_ID",
+    "ownerId": "YOUR_DISCORD_USER_ID"
+  },
+  "council": {
+    "groupName": "The Council",
+    "judge": "Opus"
+  },
+  "globalIdentity": "You are a helpful assistant running on a cloud VM.",
+  "globalBoot": "",
+  "globalBootstrap": "",
+  "globalSoul": "",
+  "globalAgents": "",
+  "globalUser": "- Name: Your Name",
+  "agents": [
+    {
+      "agent": "Opus",
+      "discordBotToken": "YOUR_OPUS_DISCORD_BOT_TOKEN",
+      "isolationGroup": "council"
+    },
+    {
+      "agent": "Claude",
+      "discordBotToken": "YOUR_CLAUDE_DISCORD_BOT_TOKEN",
+      "isolationGroup": "council"
+    },
+    {
+      "agent": "ChatGPT",
+      "discordBotToken": "YOUR_CHATGPT_DISCORD_BOT_TOKEN",
+      "isolationGroup": "council"
+    },
+    {
+      "agent": "Researcher",
+      "discordBotToken": "YOUR_RESEARCHER_DISCORD_BOT_TOKEN",
+      "isolationGroup": "workers"
+    }
+  ]
+}
