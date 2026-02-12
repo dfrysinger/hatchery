@@ -430,7 +430,8 @@ class TestAuthCoverage(unittest.TestCase):
             '/sync',
             '/prepare-shutdown',
             '/config/upload',
-            '/config/apply'
+            '/config/apply',
+            '/keepalive'
         ]
         
         # Check that all POST endpoints require auth

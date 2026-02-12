@@ -14,6 +14,7 @@
 #   GET  /config/status -- API upload status only (no auth required)
 #   POST /sync    -- Trigger openclaw state sync to Dropbox
 #   POST /prepare-shutdown -- Sync state and stop openclaw for shutdown
+#   POST /keepalive -- Reset self-destruct timer (HMAC auth required)
 #   POST /config/upload -- Upload habitat and/or agents JSON (base64 supported)
 #   POST /config/apply  -- Apply uploaded config and restart
 #
@@ -382,6 +383,21 @@ class H(http.server.BaseHTTPRequestHandler):
       self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
       try:subprocess.run(["/usr/local/bin/sync-openclaw-state.sh"],timeout=60);subprocess.run(["systemctl","stop","clawdbot"],timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
       except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
+    
+    elif self.path=='/keepalive':
+      timestamp=self.headers.get('X-Timestamp')
+      signature=self.headers.get('X-Signature')
+      ok,err=verify_hmac_auth(timestamp, signature, self.command, self.path, body)
+      if not ok:
+        self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
+      
+      try:
+        subprocess.run(["systemctl","stop","self-destruct.timer","self-destruct.service"],capture_output=True,timeout=10)
+        subprocess.run(["systemctl","reset-failed","self-destruct.timer"],capture_output=True,timeout=10)
+        subprocess.run(["/usr/local/bin/schedule-destruct.sh"],check=True,capture_output=True,timeout=30)
+        self.send_json(200,{"ok":True})
+      except Exception as e:
+        self.send_json(500,{"ok":False,"error":str(e)})
     
     elif self.path=='/config/upload':
       timestamp=self.headers.get('X-Timestamp')
