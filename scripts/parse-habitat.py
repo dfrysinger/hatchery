@@ -39,13 +39,32 @@ def b64(s):
     return base64.b64encode((s or "").encode()).decode()
 
 def is_valid_isolation_group(value):
-    """Check if isolationGroup is valid (alphanumeric + hyphens only)."""
+    """Check if isolationGroup is valid (alphanumeric + hyphens only).
+    
+    Handles non-string inputs by coercing simple types (int, float, bool) to strings,
+    and rejecting complex types (dict, list, etc.) as invalid.
+    """
     if not value:
         return False
+    
+    # Handle non-string types
+    if not isinstance(value, str):
+        # Reject complex types like dict, list, etc.
+        if isinstance(value, (dict, list, tuple, set)):
+            return False
+        # Coerce simple types (int, float, bool) to string
+        try:
+            value = str(value)
+        except (TypeError, ValueError):
+            return False
+    
     return bool(re.match(r'^[a-zA-Z0-9-]+$', value))
 
 def sanitize_isolation_group(value):
     """Sanitize a value to be a valid isolationGroup (alphanumeric + hyphens).
+    
+    Handles non-string inputs by coercing simple types (int, float, bool) to strings,
+    and falling back to 'agent' for complex types (dict, list, etc.).
     
     Returns the sanitized value, or 'agent' as a safe fallback if sanitization 
     produces an empty string. Note: When multiple agents have names that sanitize 
@@ -55,6 +74,18 @@ def sanitize_isolation_group(value):
     """
     if not value:
         return "agent"
+    
+    # Handle non-string types
+    if not isinstance(value, str):
+        # Reject complex types like dict, list, etc. - fall back to 'agent'
+        if isinstance(value, (dict, list, tuple, set)):
+            return "agent"
+        # Coerce simple types (int, float, bool) to string
+        try:
+            value = str(value)
+        except (TypeError, ValueError):
+            return "agent"
+    
     # Replace invalid characters with hyphens, then collapse multiple hyphens
     sanitized = re.sub(r'[^a-zA-Z0-9\-]', '-', value)
     sanitized = re.sub(r'-+', '-', sanitized)
@@ -276,14 +307,26 @@ with open('/etc/habitat-parsed.env', 'w') as f:
             # User specified an isolationGroup, validate it
             if not is_valid_isolation_group(raw_isolation_group):
                 sanitized_name = sanitize_isolation_group(name)
-                print(
-                    f"WARN: Agent '{name}' has invalid isolationGroup '{raw_isolation_group}' "
-                    f"(must be alphanumeric + hyphens); falling back to '{sanitized_name}'",
-                    file=sys.stderr
-                )
+                # Check if it's a type error (non-string complex type)
+                if isinstance(raw_isolation_group, (dict, list, tuple, set)):
+                    print(
+                        f"WARN: Agent '{name}' has invalid isolationGroup type '{type(raw_isolation_group).__name__}' "
+                        f"(must be a string); falling back to '{sanitized_name}'",
+                        file=sys.stderr
+                    )
+                else:
+                    print(
+                        f"WARN: Agent '{name}' has invalid isolationGroup '{raw_isolation_group}' "
+                        f"(must be alphanumeric + hyphens); falling back to '{sanitized_name}'",
+                        file=sys.stderr
+                    )
                 agent_isolation_group = sanitized_name
             else:
-                agent_isolation_group = raw_isolation_group
+                # Valid but may need string coercion
+                if not isinstance(raw_isolation_group, str):
+                    agent_isolation_group = str(raw_isolation_group)
+                else:
+                    agent_isolation_group = raw_isolation_group
         else:
             # No isolationGroup specified, default to sanitized agent name
             agent_isolation_group = sanitize_isolation_group(name)

@@ -308,6 +308,82 @@ class TestAgentIsolationGroupParsing:
         # No warning should be emitted for default isolation group sanitization
         assert "invalid isolationGroup" not in stderr
 
+    def test_isolation_group_as_number_warns_and_converts(self):
+        """isolationGroup as number should be coerced to string if valid."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Bot", "isolationGroup": 123}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "123"
+        # No warning for valid numeric values that coerce cleanly
+        assert "invalid isolationGroup" not in stderr
+
+    def test_isolation_group_as_float_warns_and_falls_back(self):
+        """isolationGroup as float should warn and fall back to agent name."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Bot", "isolationGroup": 1.5}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        # Float "1.5" is invalid (contains dot), falls back to agent name
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
+        assert "invalid isolationGroup" in stderr
+
+    def test_isolation_group_as_bool_warns_and_converts(self):
+        """isolationGroup as boolean should be coerced to string."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Bot", "isolationGroup": True}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "True"
+        # No warning for valid boolean values that coerce cleanly
+        assert "invalid isolationGroup" not in stderr
+
+    def test_isolation_group_as_dict_warns_and_falls_back(self):
+        """isolationGroup as dict should warn about type and fall back to agent name."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Bot", "isolationGroup": {"group": "team1"}}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
+        assert "invalid isolationGroup type 'dict'" in stderr
+
+    def test_isolation_group_as_list_warns_and_falls_back(self):
+        """isolationGroup as list should warn about type and fall back to agent name."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Worker", "isolationGroup": ["team1", "team2"]}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Worker"
+        assert "invalid isolationGroup type 'list'" in stderr
+
+    def test_isolation_group_as_none_uses_default(self):
+        """isolationGroup as None/null should use default behavior (agent name)."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "Bot", "isolationGroup": None}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
+        # No warning for None/null values (treated as missing)
+        assert "invalid isolationGroup" not in stderr
+
     def test_multiple_agents_same_group(self):
         """Multiple agents in same isolationGroup."""
         habitat = {
