@@ -170,11 +170,8 @@ get_group_agent_names() {
 # --- Write docker-compose.yaml ---
 COMPOSE_FILE="${OUTPUT_DIR}/docker-compose.yaml"
 
-# Header
-cat > "$COMPOSE_FILE" <<'HEADER'
-version: '3.8'
-HEADER
-
+# Initialize compose file
+: > "$COMPOSE_FILE"
 # Check if we need an internal network
 needs_internal=false
 for group in "${CONTAINER_GROUPS[@]}"; do
