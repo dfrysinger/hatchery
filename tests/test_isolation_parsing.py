@@ -10,10 +10,8 @@ import base64
 import json
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
