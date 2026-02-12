@@ -295,6 +295,17 @@ class TestAgentIsolationGroupParsing:
         assert rc == 0
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "My-Bot"
 
+    def test_agent_name_only_special_chars_falls_back_to_generic(self):
+        """Agent name with only special characters should fall back to 'agent'."""
+        habitat = {
+            "name": "TestHabitat",
+            "agents": [{"agent": "!!!"}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0
+        assert env_vars.get("AGENT1_ISOLATION_GROUP") == "agent"
+
     def test_multiple_agents_same_group(self):
         """Multiple agents in same isolationGroup."""
         habitat = {

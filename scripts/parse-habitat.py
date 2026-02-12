@@ -45,14 +45,22 @@ def is_valid_isolation_group(value):
     return bool(re.match(r'^[a-zA-Z0-9\-]+$', value))
 
 def sanitize_isolation_group(value):
-    """Sanitize a value to be a valid isolationGroup (alphanumeric + hyphens)."""
+    """Sanitize a value to be a valid isolationGroup (alphanumeric + hyphens).
+    
+    Returns the sanitized value, or 'agent' as a safe fallback if sanitization 
+    produces an empty string. Note: When multiple agents have names that sanitize 
+    to empty, they will all get 'agent' as the group name, causing them to share 
+    an isolation boundary. This is acceptable as it's an edge case with unusual 
+    agent names.
+    """
     if not value:
-        return ""
+        return "agent"
     # Replace invalid characters with hyphens, then collapse multiple hyphens
     sanitized = re.sub(r'[^a-zA-Z0-9\-]', '-', value)
     sanitized = re.sub(r'-+', '-', sanitized)
     # Remove leading/trailing hyphens
     sanitized = sanitized.strip('-')
+    # If sanitization results in empty string, use 'agent' as safe fallback
     return sanitized if sanitized else "agent"
 
 hab_raw = os.environ.get('HABITAT_B64', '')
