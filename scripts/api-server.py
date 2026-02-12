@@ -77,6 +77,27 @@ def write_upload_marker():
   config upload via POST /config/upload endpoint. Used by /config/status to
   report upload state.
   
+  API Upload Marker Semantics (Issue #115, #119):
+  -----------------------------------------------
+  The marker file distinguishes between two config provisioning modes:
+  
+  1. API-UPLOADED MODE (api_uploaded=True):
+     - Config was uploaded via POST /config/upload endpoint
+     - Marker file exists with upload timestamp
+     - Typical flow: iOS Shortcut → API → config files → apply
+  
+  2. APPLY-ONLY MODE (api_uploaded=False):
+     - Config was placed manually or via cloud-init (never API-uploaded)
+     - Marker file does NOT exist
+     - Config may still be valid and functional
+     - Typical flow: cloud-init → config files → apply
+  
+  Why This Matters:
+  - Polling clients can distinguish "never configured" from "configured locally"
+  - Enables workflows where some droplets use API, others use cloud-init
+  - api_uploaded=False + habitat_exists=True = apply-only mode
+  - api_uploaded=False + habitat_exists=False = unconfigured
+  
   Logs success/failure in structured format to stderr. Failures are non-fatal
   since upload status can still be determined via API (file existence check).
   
@@ -144,7 +165,39 @@ def write_upload_marker():
     return {"ok": False, "error": error_msg}
 
 def get_config_status():
-  """Get current config file status without exposing sensitive data."""
+  """Get current config file status (authenticated endpoint).
+  
+  Returns detailed config status including file existence, modification times,
+  and API upload status. Does not expose sensitive data (no tokens, secrets).
+  
+  Config State Matrix (Issue #119):
+  ---------------------------------
+  | api_uploaded | habitat_exists | State                              |
+  |--------------|----------------|-------------------------------------|
+  | False        | False          | Unconfigured (fresh droplet)        |
+  | False        | True           | Apply-only (manual/cloud-init)      |
+  | True         | False          | Error (marker without config)       |
+  | True         | True           | API-provisioned (normal flow)       |
+  
+  Apply-Only Mode:
+  - habitat_exists=True but api_uploaded=False
+  - Config was placed via cloud-init or manual copy, then applied
+  - This is valid and functional; API upload is optional
+  - Polling clients should check habitat_exists, not just api_uploaded
+  
+  Returns:
+    dict: {
+      "habitat_exists": bool,
+      "agents_exists": bool,
+      "habitat_modified": float (mtime, if exists),
+      "agents_modified": float (mtime, if exists),
+      "habitat_name": str (if exists),
+      "habitat_agent_count": int (if exists),
+      "agents_names": list[str] (if exists),
+      "api_uploaded": bool,
+      "api_uploaded_at": float (timestamp, if api_uploaded)
+    }
+  """
   result={"habitat_exists":os.path.exists(HABITAT_PATH),"agents_exists":os.path.exists(AGENTS_PATH)}
   if result["habitat_exists"]:
     stat=os.stat(HABITAT_PATH);result["habitat_modified"]=stat.st_mtime
@@ -170,7 +223,24 @@ def get_config_status():
   return result
 
 def get_config_upload_status():
-  """Get simple config upload status for unauthenticated endpoint (issue #130)."""
+  """Get simple config upload status for unauthenticated endpoint.
+  
+  Lightweight endpoint for polling (Issue #130). Returns ONLY the api_uploaded
+  status, not full config details (which require authentication).
+  
+  IMPORTANT (Issue #119): api_uploaded=False does NOT mean "unconfigured".
+  It means config was never uploaded via the API. The config may still exist
+  and be functional (apply-only mode via cloud-init or manual placement).
+  
+  For full config state, use GET /config (authenticated) which includes
+  habitat_exists and agents_exists flags.
+  
+  Returns:
+    dict: {
+      "api_uploaded": bool,        # True if config was uploaded via API
+      "api_uploaded_at": float     # Unix timestamp of upload (if api_uploaded)
+    }
+  """
   result={"api_uploaded":False,"api_uploaded_at":None}
   if os.path.exists(MARKER_PATH):
     result["api_uploaded"]=True
