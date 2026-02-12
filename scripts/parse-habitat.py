@@ -256,10 +256,25 @@ with open('/etc/habitat-parsed.env', 'w') as f:
 
         # capabilities: restrict tool access (empty = all tools)
         agent_capabilities = agent_ref.get("capabilities", [])
+        if not isinstance(agent_capabilities, list):
+            print(
+                f"WARN: Agent '{name}' has non-list capabilities (type {type(agent_capabilities).__name__}); defaulting to []",
+                file=sys.stderr,
+            )
+            agent_capabilities = []
+        else:
+            # Ensure all capabilities are strings before joining
+            agent_capabilities = [str(cap) for cap in agent_capabilities]
         f.write('AGENT{}_CAPABILITIES="{}"\n'.format(n, ",".join(agent_capabilities)))
 
         # resources: memory/cpu limits for container/droplet
         agent_resources = agent_ref.get("resources", {})
+        if not isinstance(agent_resources, dict):
+            print(
+                f"WARN: Agent '{name}' has non-dict resources (type {type(agent_resources).__name__}); defaulting to {{}}",
+                file=sys.stderr,
+            )
+            agent_resources = {}
         f.write('AGENT{}_RESOURCES_MEMORY="{}"\n'.format(n, agent_resources.get("memory", "")))
         f.write('AGENT{}_RESOURCES_CPU="{}"\n'.format(n, agent_resources.get("cpu", "")))
 
