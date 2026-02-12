@@ -212,7 +212,21 @@ with open('/etc/habitat-parsed.env', 'w') as f:
 
     # Shared paths for cross-boundary access
     shared_paths = hab.get("sharedPaths", [])
-    f.write('ISOLATION_SHARED_PATHS="{}"\n'.format(",".join(shared_paths)))
+    # Ensure sharedPaths is a list of strings; warn and default safely otherwise
+    if not isinstance(shared_paths, list):
+        print(f"WARN: sharedPaths must be a list; got {type(shared_paths).__name__}, defaulting to empty list", file=sys.stderr)
+        shared_paths_normalized = []
+    else:
+        shared_paths_normalized = []
+        for idx, p in enumerate(shared_paths):
+            if p is None:
+                print(f"WARN: sharedPaths[{idx}] is None; skipping", file=sys.stderr)
+                continue
+            try:
+                shared_paths_normalized.append(str(p))
+            except Exception as e:
+                print(f"WARN: sharedPaths[{idx}] could not be converted to string ({e}); skipping", file=sys.stderr)
+    f.write('ISOLATION_SHARED_PATHS="{}"\n'.format(",".join(shared_paths_normalized)))
 
     agents = hab.get("agents", [])
     f.write('AGENT_COUNT={}\n'.format(len(agents)))
