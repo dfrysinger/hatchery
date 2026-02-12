@@ -55,7 +55,7 @@ def is_valid_isolation_group(value):
         # Coerce simple types (int, float, bool) to string
         try:
             value = str(value)
-        except Exception:
+        except (TypeError, ValueError):
             return False
     
     return bool(re.match(r'^[a-zA-Z0-9-]+$', value))
@@ -83,7 +83,7 @@ def sanitize_isolation_group(value):
         # Coerce simple types (int, float, bool) to string
         try:
             value = str(value)
-        except Exception:
+        except (TypeError, ValueError):
             return "agent"
     
     # Replace invalid characters with hyphens, then collapse multiple hyphens

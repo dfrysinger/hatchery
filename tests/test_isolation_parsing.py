@@ -322,7 +322,7 @@ class TestAgentIsolationGroupParsing:
         assert "invalid isolationGroup" not in stderr
 
     def test_isolation_group_as_float_warns_and_sanitizes(self):
-        """isolationGroup as float should be coerced and sanitized (dots become hyphens)."""
+        """isolationGroup as float should warn and fall back to agent name."""
         habitat = {
             "name": "TestHabitat",
             "agents": [{"agent": "Bot", "isolationGroup": 1.5}]
@@ -330,7 +330,7 @@ class TestAgentIsolationGroupParsing:
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
         assert rc == 0
-        # Float "1.5" becomes "1-5" after sanitization
+        # Float "1.5" is invalid (contains dot), falls back to agent name
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
         assert "invalid isolationGroup" in stderr
 
