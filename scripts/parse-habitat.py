@@ -308,7 +308,7 @@ with open('/etc/habitat-parsed.env', 'w') as f:
             if not is_valid_isolation_group(raw_isolation_group):
                 sanitized_name = sanitize_isolation_group(name)
                 # Check if it's a type error (non-string complex type)
-                if not isinstance(raw_isolation_group, str) and isinstance(raw_isolation_group, (dict, list, tuple, set)):
+                if isinstance(raw_isolation_group, (dict, list, tuple, set)):
                     print(
                         f"WARN: Agent '{name}' has invalid isolationGroup type '{type(raw_isolation_group).__name__}' "
                         f"(must be a string); falling back to '{sanitized_name}'",

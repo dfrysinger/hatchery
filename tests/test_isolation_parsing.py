@@ -321,7 +321,7 @@ class TestAgentIsolationGroupParsing:
         # No warning for valid numeric values that coerce cleanly
         assert "invalid isolationGroup" not in stderr
 
-    def test_isolation_group_as_float_warns_and_sanitizes(self):
+    def test_isolation_group_as_float_warns_and_falls_back(self):
         """isolationGroup as float should warn and fall back to agent name."""
         habitat = {
             "name": "TestHabitat",
