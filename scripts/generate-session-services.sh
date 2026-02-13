@@ -168,13 +168,15 @@ Wants=desktop.service
 Type=simple
 User=${SVC_USER}
 WorkingDirectory=${HOME_DIR}
-ExecStart=/usr/local/bin/openclaw gateway --config ${group_dir}/openclaw.session.json --bind lan --port ${port}
+ExecStart=/usr/local/bin/openclaw gateway --bind lan --port ${port}
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
 Environment=DISPLAY=:10
+Environment=OPENCLAW_CONFIG_PATH=${group_dir}/openclaw.session.json
+Environment=OPENCLAW_STATE_DIR=${group_dir}
 
 [Install]
 WantedBy=multi-user.target
