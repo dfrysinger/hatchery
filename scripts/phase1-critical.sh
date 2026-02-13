@@ -197,17 +197,13 @@ if [ ! -f /etc/api-server.env ]; then
   source /etc/droplet.env 2>/dev/null || true
   if [ -n "$API_SECRET_B64" ] && [ "$API_SECRET_B64" != "[[API_SECRET_B64]]" ]; then
     API_SECRET=$(echo "$API_SECRET_B64" | base64 -d)
-    # If secret is configured, enable remote access (0.0.0.0)
-    API_BIND_ADDRESS="0.0.0.0"
-    echo "[api-server] Using provided API_SECRET, binding to 0.0.0.0"
+    echo "[api-server] Using provided API_SECRET"
   else
     API_SECRET=$(openssl rand -hex 32)
-    # No explicit secret = local access only (127.0.0.1)
-    API_BIND_ADDRESS="127.0.0.1"
-    echo "[api-server] Generated random API_SECRET, binding to 127.0.0.1"
+    echo "[api-server] Generated random API_SECRET"
   fi
   umask 077
-  printf 'API_SECRET=%s\nAPI_BIND_ADDRESS=%s\n' "$API_SECRET" "$API_BIND_ADDRESS" > /etc/api-server.env
+  printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env
   chmod 600 /etc/api-server.env
 fi
 
