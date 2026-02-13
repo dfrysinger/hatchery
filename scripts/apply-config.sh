@@ -70,18 +70,87 @@ echo "Renaming Telegram bots..."
 /usr/local/bin/rename-bots.sh || echo "Warning: rename-bots.sh failed (non-fatal)"
 echo "Bot renaming complete"
 
-# Restart clawdbot service
-echo "Restarting clawdbot service..."
-systemctl restart clawdbot
+# Handle service restarts based on isolation mode
+echo "Handling service restarts for isolation mode: ${ISOLATION_DEFAULT:-none}"
+systemctl daemon-reload
+
+case "${ISOLATION_DEFAULT:-none}" in
+    session)
+        echo "Session isolation mode - managing per-group services"
+        # Stop the single clawdbot service if running
+        systemctl stop clawdbot 2>/dev/null || true
+        systemctl disable clawdbot 2>/dev/null || true
+        
+        # Start all openclaw-* group services
+        for svc in /etc/systemd/system/openclaw-*.service; do
+            [ -f "$svc" ] || continue
+            svc_name=$(basename "$svc")
+            echo "Starting $svc_name..."
+            systemctl enable "$svc_name" 2>/dev/null || true
+            systemctl restart "$svc_name"
+        done
+        ;;
+    
+    container)
+        echo "Container isolation mode - managing docker-compose"
+        # Stop the single clawdbot service if running
+        systemctl stop clawdbot 2>/dev/null || true
+        systemctl disable clawdbot 2>/dev/null || true
+        
+        # Start containers via docker-compose
+        COMPOSE_FILE="/home/${USERNAME:-bot}/docker-compose.yaml"
+        if [ -f "$COMPOSE_FILE" ]; then
+            cd "$(dirname "$COMPOSE_FILE")"
+            docker-compose up -d
+        else
+            echo "WARNING: docker-compose.yaml not found at $COMPOSE_FILE"
+        fi
+        ;;
+    
+    *)
+        echo "Standard mode - restarting clawdbot service"
+        # Stop any isolation services that might be running
+        for svc in /etc/systemd/system/openclaw-*.service; do
+            [ -f "$svc" ] || continue
+            svc_name=$(basename "$svc")
+            systemctl stop "$svc_name" 2>/dev/null || true
+            systemctl disable "$svc_name" 2>/dev/null || true
+        done
+        
+        # Restart the single clawdbot service
+        systemctl enable clawdbot 2>/dev/null || true
+        systemctl restart clawdbot
+        ;;
+esac
 
 # Wait a moment and check status
 sleep 3
-if systemctl is-active --quiet clawdbot; then
-    echo "clawdbot service is active"
-else
-    echo "WARNING: clawdbot service may not be active"
-    systemctl status clawdbot --no-pager || true
-fi
+echo "Checking service status..."
+case "${ISOLATION_DEFAULT:-none}" in
+    session)
+        for svc in /etc/systemd/system/openclaw-*.service; do
+            [ -f "$svc" ] || continue
+            svc_name=$(basename "$svc")
+            if systemctl is-active --quiet "$svc_name"; then
+                echo "  $svc_name: active"
+            else
+                echo "  $svc_name: INACTIVE"
+                systemctl status "$svc_name" --no-pager 2>&1 | head -5 || true
+            fi
+        done
+        ;;
+    container)
+        docker-compose ps 2>/dev/null || echo "docker-compose status unavailable"
+        ;;
+    *)
+        if systemctl is-active --quiet clawdbot; then
+            echo "clawdbot service is active"
+        else
+            echo "WARNING: clawdbot service may not be active"
+            systemctl status clawdbot --no-pager || true
+        fi
+        ;;
+esac
 
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Config apply complete"
 echo "========================================"
