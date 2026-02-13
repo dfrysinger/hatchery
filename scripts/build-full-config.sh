@@ -76,31 +76,39 @@ done
 AL="$AL]"
 BD="["
 if [ "$TG_ENABLED" = "true" ]; then
-  for i in $(seq 2 $AC); do
-    [ "$BD" != "[" ] && BD="$BD,"
-    BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
-  done
+  if [ "$AC" -gt 1 ]; then
+    for i in $(seq 2 $AC); do
+      [ "$BD" != "[" ] && BD="$BD,"
+      BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
+    done
+  fi
 fi
 if [ "$DC_ENABLED" = "true" ]; then
-  for i in $(seq 2 $AC); do
-    [ "$BD" != "[" ] && BD="$BD,"
-    BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"discord\",\"accountId\":\"agent${i}\"}}"
-  done
+  if [ "$AC" -gt 1 ]; then
+    for i in $(seq 2 $AC); do
+      [ "$BD" != "[" ] && BD="$BD,"
+      BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"discord\",\"accountId\":\"agent${i}\"}}"
+    done
+  fi
 fi
 BD="$BD]"
 A1_TG_TOK_ESC=$(json_escape "$AGENT1_BOT_TOKEN")
 TA="\"default\":{\"botToken\":\"${A1_TG_TOK_ESC}\"}"
-for i in $(seq 2 $AC); do
-  TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"; TOK_ESC=$(json_escape "$TOK")
-  [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK_ESC}\"}"
-done
+if [ "$AC" -gt 1 ]; then
+  for i in $(seq 2 $AC); do
+    TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"; TOK_ESC=$(json_escape "$TOK")
+    [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK_ESC}\"}"
+  done
+fi
 TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI_ESC}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
 A1_DC_TOK_ESC=$(json_escape "$AGENT1_DISCORD_BOT_TOKEN")
 DA="\"default\":{\"token\":\"${A1_DC_TOK_ESC}\"}"
-for i in $(seq 2 $AC); do
-  DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"; DTOK_ESC=$(json_escape "$DTOK")
-  [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"token\":\"${DTOK_ESC}\"}"
-done
+if [ "$AC" -gt 1 ]; then
+  for i in $(seq 2 $AC); do
+    DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"; DTOK_ESC=$(json_escape "$DTOK")
+    [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"token\":\"${DTOK_ESC}\"}"
+  done
+fi
 DG=""; [ -n "$DGI" ] && DG=",\"guilds\":{\"${DGI_ESC}\":{\"requireMention\":true}}"
 DC_DM_ALLOW=""; [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI_ESC}\"]"
 AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"

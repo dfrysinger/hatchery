@@ -71,7 +71,7 @@ class TestBadSignatureScenarios:
             result = self.api['verify_hmac_auth'](
                 timestamp, bad_sig, 'POST', '/config/upload', body
             )
-            assert result is False, f"Random string signature '{bad_sig}' should be rejected"
+            assert result[0] is False, f"Random string signature '{bad_sig}' should be rejected"
     
     def test_wrong_secret_key_signature_rejected(self):
         """TASK-174 AC2.5: Signature signed with wrong secret key is rejected.
@@ -90,7 +90,7 @@ class TestBadSignatureScenarios:
         result = self.api['verify_hmac_auth'](
             timestamp, signature, 'POST', '/config/upload', body
         )
-        assert result is False, "Signature with wrong secret key should be rejected"
+        assert result[0] is False, "Signature with wrong secret key should be rejected"
     
     def test_wrong_body_signature_rejected(self):
         """TASK-174 Bonus: Signature for different body is rejected.
@@ -111,7 +111,7 @@ class TestBadSignatureScenarios:
         result = self.api['verify_hmac_auth'](
             timestamp, signature, 'POST', '/config/upload', tampered_body
         )
-        assert result is False, "Signature for different body should be rejected"
+        assert result[0] is False, "Signature for different body should be rejected"
     
     def test_empty_signature_rejected(self):
         """TASK-174 Bonus: Empty signature is rejected.
@@ -125,7 +125,7 @@ class TestBadSignatureScenarios:
         result = self.api['verify_hmac_auth'](
             timestamp, "", 'POST', '/config/upload', body
         )
-        assert result is False, "Empty signature should be rejected"
+        assert result[0] is False, "Empty signature should be rejected"
     
     def test_hex_like_but_invalid_signature_rejected(self):
         """TASK-174 Bonus: Valid hex format but wrong signature is rejected.
@@ -142,7 +142,7 @@ class TestBadSignatureScenarios:
         result = self.api['verify_hmac_auth'](
             timestamp, fake_hex_sig, 'POST', '/config/upload', body
         )
-        assert result is False, "Valid hex but incorrect signature should be rejected"
+        assert result[0] is False, "Valid hex but incorrect signature should be rejected"
     
     def test_signature_with_wrong_timestamp_rejected(self):
         """TASK-174 AC2.4: Valid signature but with wrong timestamp is rejected.
@@ -163,7 +163,7 @@ class TestBadSignatureScenarios:
         result = self.api['verify_hmac_auth'](
             str(new_timestamp), signature, 'POST', '/config/upload', body
         )
-        assert result is False, "Signature with wrong timestamp should be rejected"
+        assert result[0] is False, "Signature with wrong timestamp should be rejected"
     
     def test_case_sensitivity_of_signature(self):
         """TASK-174 Bonus: Signature is case-sensitive.
@@ -187,7 +187,7 @@ class TestBadSignatureScenarios:
             result = self.api['verify_hmac_auth'](
                 timestamp, uppercase_sig, 'POST', '/config/upload', body
             )
-            assert result is False, "Uppercase version of signature should be rejected"
+            assert result[0] is False, "Uppercase version of signature should be rejected"
     
     def test_signature_with_extra_whitespace_rejected(self):
         """TASK-174 Bonus: Signature with whitespace is rejected.
@@ -209,7 +209,7 @@ class TestBadSignatureScenarios:
         result = self.api['verify_hmac_auth'](
             timestamp, signature_with_space, 'POST', '/config/upload', body
         )
-        assert result is False, "Signature with whitespace should be rejected"
+        assert result[0] is False, "Signature with whitespace should be rejected"
     
     def test_truncated_signature_rejected(self):
         """TASK-174 Bonus: Truncated signature is rejected.
@@ -230,7 +230,7 @@ class TestBadSignatureScenarios:
         result = self.api['verify_hmac_auth'](
             timestamp, truncated_sig, 'POST', '/config/upload', body
         )
-        assert result is False, "Truncated signature should be rejected"
+        assert result[0] is False, "Truncated signature should be rejected"
     
     def test_signature_with_null_bytes_rejected(self):
         """TASK-174 Bonus: Signature with null bytes is rejected.
@@ -247,7 +247,7 @@ class TestBadSignatureScenarios:
         result = self.api['verify_hmac_auth'](
             timestamp, bad_signature, 'POST', '/config/upload', body
         )
-        assert result is False, "Signature with null bytes should be rejected"
+        assert result[0] is False, "Signature with null bytes should be rejected"
 
 
 class TestDeterministicBehavior:
@@ -270,7 +270,7 @@ class TestDeterministicBehavior:
             result = api['verify_hmac_auth'](
                 timestamp, bad_signature, 'POST', '/config/upload', body
             )
-            assert result is False, f"Iteration {i+1}: Bad signature should always be rejected"
+            assert result[0] is False, f"Iteration {i+1}: Bad signature should always be rejected"
     
     def test_wrong_secret_consistently_rejected(self):
         """TASK-174 AC4: Wrong secret signature is consistently rejected.
@@ -293,7 +293,7 @@ class TestDeterministicBehavior:
             result = api['verify_hmac_auth'](
                 timestamp, wrong_signature, 'POST', '/config/upload', body
             )
-            assert result is False, f"Iteration {i+1}: Wrong secret should always be rejected"
+            assert result[0] is False, f"Iteration {i+1}: Wrong secret should always be rejected"
 
 
 if __name__ == '__main__':

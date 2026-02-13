@@ -58,7 +58,7 @@ class TestSyncEndpointAuth(unittest.TestCase):
             path='/sync',
             body=b'{}'
         )
-        self.assertFalse(result, "/sync should reject unsigned requests")
+        self.assertFalse(result[0], "/sync should reject unsigned requests")
     
     def test_sync_rejects_bad_signature(self):
         """SEC-001 AC2: /sync rejects requests with invalid signature."""
@@ -74,7 +74,7 @@ class TestSyncEndpointAuth(unittest.TestCase):
             path='/sync',
             body=b'{}'
         )
-        self.assertFalse(result, "/sync should reject bad signatures")
+        self.assertFalse(result[0], "/sync should reject bad signatures")
     
     def test_sync_accepts_valid_signature(self):
         """SEC-001 AC3: /sync accepts requests with valid HMAC signature."""
@@ -97,7 +97,7 @@ class TestSyncEndpointAuth(unittest.TestCase):
                 path='/sync',
                 body=body
             )
-            self.assertTrue(result, "/sync should accept valid signatures")
+            self.assertTrue(result[0], "/sync should accept valid signatures")
         finally:
             # Restore original
             self.api_module.API_SECRET = original_secret
@@ -121,7 +121,7 @@ class TestSyncEndpointAuth(unittest.TestCase):
             path='/sync',
             body=body
         )
-        self.assertFalse(result, "/sync should reject cross-endpoint replay attacks")
+        self.assertFalse(result[0], "/sync should reject cross-endpoint replay attacks")
     
     def test_sync_rejects_stale_timestamp(self):
         """TASK-173 AC1: /sync rejects requests with stale timestamps (>300s old)."""
@@ -147,7 +147,7 @@ class TestSyncEndpointAuth(unittest.TestCase):
                 path='/sync',
                 body=body
             )
-            self.assertFalse(result, "/sync should reject requests with stale timestamps (>300s old)")
+            self.assertFalse(result[0], "/sync should reject requests with stale timestamps (>300s old)")
         finally:
             self.api_module.API_SECRET = original_secret
     
@@ -174,7 +174,7 @@ class TestSyncEndpointAuth(unittest.TestCase):
                 path='/sync',
                 body=body
             )
-            self.assertTrue(result, "/sync should accept timestamps within ±300s window")
+            self.assertTrue(result[0], "/sync should accept timestamps within ±300s window")
         finally:
             self.api_module.API_SECRET = original_secret
     
@@ -202,7 +202,7 @@ class TestSyncEndpointAuth(unittest.TestCase):
                 path='/sync',
                 body=body
             )
-            self.assertFalse(result, "/sync should reject requests with future timestamps (>300s ahead)")
+            self.assertFalse(result[0], "/sync should reject requests with future timestamps (>300s ahead)")
         finally:
             self.api_module.API_SECRET = original_secret
 
@@ -224,7 +224,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
             path='/prepare-shutdown',
             body=b'{}'
         )
-        self.assertFalse(result, "/prepare-shutdown should reject unsigned requests")
+        self.assertFalse(result[0], "/prepare-shutdown should reject unsigned requests")
     
     def test_prepare_shutdown_rejects_bad_signature(self):
         """SEC-001 AC6: /prepare-shutdown rejects requests with invalid signature."""
@@ -240,7 +240,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
             path='/prepare-shutdown',
             body=b'{}'
         )
-        self.assertFalse(result, "/prepare-shutdown should reject bad signatures")
+        self.assertFalse(result[0], "/prepare-shutdown should reject bad signatures")
     
     def test_prepare_shutdown_accepts_valid_signature(self):
         """SEC-001 AC7: /prepare-shutdown accepts requests with valid HMAC signature."""
@@ -262,7 +262,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
                 path='/prepare-shutdown',
                 body=body
             )
-            self.assertTrue(result, "/prepare-shutdown should accept valid signatures")
+            self.assertTrue(result[0], "/prepare-shutdown should accept valid signatures")
         finally:
             self.api_module.API_SECRET = original_secret
     
@@ -285,7 +285,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
             path='/prepare-shutdown',
             body=body
         )
-        self.assertFalse(result, "/prepare-shutdown should reject cross-endpoint replay attacks")
+        self.assertFalse(result[0], "/prepare-shutdown should reject cross-endpoint replay attacks")
     
     def test_prepare_shutdown_prevents_dos(self):
         """SEC-001 AC9: /prepare-shutdown prevents DoS by requiring auth.
@@ -301,7 +301,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
             path='/prepare-shutdown',
             body=b'{}'
         )
-        self.assertFalse(result, "DoS attack should be prevented by authentication")
+        self.assertFalse(result[0], "DoS attack should be prevented by authentication")
     
     def test_prepare_shutdown_rejects_stale_timestamp(self):
         """TASK-173 AC2: /prepare-shutdown rejects requests with stale timestamps (>300s old)."""
@@ -327,7 +327,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
                 path='/prepare-shutdown',
                 body=body
             )
-            self.assertFalse(result, "/prepare-shutdown should reject requests with stale timestamps (>300s old)")
+            self.assertFalse(result[0], "/prepare-shutdown should reject requests with stale timestamps (>300s old)")
         finally:
             self.api_module.API_SECRET = original_secret
     
@@ -354,7 +354,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
                 path='/prepare-shutdown',
                 body=body
             )
-            self.assertTrue(result, "/prepare-shutdown should accept timestamps within ±300s window")
+            self.assertTrue(result[0], "/prepare-shutdown should accept timestamps within ±300s window")
         finally:
             self.api_module.API_SECRET = original_secret
     
@@ -382,7 +382,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
                 path='/prepare-shutdown',
                 body=body
             )
-            self.assertFalse(result, "/prepare-shutdown should reject requests with future timestamps (>300s ahead)")
+            self.assertFalse(result[0], "/prepare-shutdown should reject requests with future timestamps (>300s ahead)")
         finally:
             self.api_module.API_SECRET = original_secret
 
