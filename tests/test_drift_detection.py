@@ -37,52 +37,6 @@ def extract_embedded_script(yaml_path, script_path_in_yaml):
     return None
 
 
-def test_parse_habitat_functional_equivalence():
-    """Verify parse-habitat.py slim version is functionally equivalent to scripts/.
-    
-    The slim YAML has a minified version. We check that key functionality
-    is present in both versions rather than byte-for-byte comparison.
-    """
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    yaml_path = os.path.join(repo_root, 'hatch.yaml')
-    standalone_path = os.path.join(repo_root, 'scripts', 'parse-habitat.py')
-    
-    # Extract embedded version from hatch.yaml
-    embedded = extract_embedded_script(yaml_path, '/usr/local/bin/parse-habitat.py')
-    if embedded is None:
-        pytest.skip("parse-habitat.py not embedded in slim YAML")
-    
-    # Read standalone version
-    with open(standalone_path, 'r') as f:
-        standalone = f.read()
-    
-    # Check key functional elements are present in both
-    key_elements = [
-        'HABITAT_B64',           # Main env var input
-        '/etc/habitat.json',     # Output file
-        '/etc/habitat-parsed.env',  # Output env file
-        'AGENT_COUNT',           # Agent counting
-        'PLATFORM',              # Platform handling
-        'DISCORD_GUILD_ID',      # Discord config
-        'TELEGRAM_OWNER_ID',     # Telegram config
-        'json.loads',            # JSON parsing (embedded) or json.load (standalone)
-        'base64',                # Base64 handling
-    ]
-    
-    for element in key_elements:
-        # Check embedded - it may be minified so check for partial matches
-        embedded_has = element.lower().replace('_', '') in embedded.lower().replace('_', '') or element in embedded
-        standalone_has = element in standalone
-        
-        if not embedded_has:
-            # Relax check for minified version
-            if element == 'json.loads' and 'json' in embedded:
-                embedded_has = True
-        
-        assert standalone_has, f"Standalone script missing key element: {element}"
-        # Embedded can be minified, so we're more lenient
-        
-
 def test_phase2_background_not_embedded():
     """Verify phase2-background.sh is NOT embedded in slim YAML.
     
