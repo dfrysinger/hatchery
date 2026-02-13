@@ -16,8 +16,7 @@ import http.server
 import socketserver
 import threading
 from pathlib import Path
-import pytest
-requests = pytest.importorskip("requests", reason="requests library required for HTTP-level endpoint tests")
+import requests
 
 
 def load_api_server_module(api_secret):
