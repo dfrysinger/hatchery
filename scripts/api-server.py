@@ -39,14 +39,30 @@ def check_service(name):
   except:return False
 
 def get_status():
-  s,p=0,1
-  try:
-    with open('/var/lib/init-status/stage','r') as f:s=int(f.read().strip())
-    with open('/var/lib/init-status/phase','r') as f:p=int(f.read().strip())
-  except:pass
+  # Check completion markers first to determine smart defaults
   p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
   p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
   setup_done=os.path.exists('/var/lib/init-status/setup-complete')
+  
+  # Smart defaults based on completion state (handles transient read failures during reboot)
+  if setup_done:
+    s,p=11,2  # Ready state
+  elif p2_done:
+    s,p=10,2  # Phase 2 done, finalizing
+  elif p1_done:
+    s,p=4,2   # Phase 1 done, starting phase 2
+  else:
+    s,p=0,1   # Initial state
+  
+  # Try to read actual values (overrides defaults if successful)
+  try:
+    with open('/var/lib/init-status/stage','r') as f:
+      val=f.read().strip()
+      if val:s=int(val)
+    with open('/var/lib/init-status/phase','r') as f:
+      val=f.read().strip()
+      if val:p=int(val)
+  except:pass
   bot_online=check_service('clawdbot')
   svc={}
   if p2_done or setup_done:
