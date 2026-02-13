@@ -111,6 +111,8 @@ for group in "${SESSION_GROUPS[@]}"; do
     mkdir -p "$group_dir"
     mkdir -p "$state_dir"
     chown -R "${SVC_USER}:${SVC_USER}" "$state_dir"
+    # Config dir needs to be readable by service user
+    chmod 755 "$group_dir"
 
     # Collect agents for this group
     agent_list_json="["
@@ -159,6 +161,8 @@ for group in "${SESSION_GROUPS[@]}"; do
   }
 }
 SESSIONCFG
+    # Make config readable by service user
+    chmod 644 "${group_dir}/openclaw.session.json"
 
     # Generate systemd service
     cat > "${OUTPUT_DIR}/openclaw-${group}.service" <<SVCFILE
