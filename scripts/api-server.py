@@ -60,6 +60,7 @@ def validate_config_upload(data):
   errors=[]
   if "habitat" in data and not isinstance(data["habitat"],dict):errors.append("habitat must be an object")
   if "agents" in data and not isinstance(data["agents"],dict):errors.append("agents must be an object")
+  if "globals" in data and not isinstance(data["globals"],dict):errors.append("globals must be an object")
   if "apply" in data and not isinstance(data["apply"],bool):errors.append("apply must be a boolean")
   return errors
 
@@ -426,6 +427,17 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_json(400,{"ok":False,"errors":errors});return
       
       files_written=[]
+      
+      # Merge globals into habitat if both provided
+      # This lets iOS Shortcuts send them separately without client-side merging
+      if "globals" in data and "habitat" in data:
+        habitat = data["habitat"]
+        globals_data = data["globals"]
+        if isinstance(globals_data, dict):
+          for key, value in globals_data.items():
+            if key not in habitat:  # Don't overwrite habitat-specific values
+              habitat[key] = value
+          data["habitat"] = habitat
       
       # Write habitat config
       if "habitat" in data:
