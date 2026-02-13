@@ -29,6 +29,10 @@
 
 set -euo pipefail
 
+# --- Source environment files (may be called standalone or from another script) ---
+[ -f /etc/droplet.env ] && source /etc/droplet.env
+[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+
 # --- Validate required inputs ---
 if [ -z "${AGENT_COUNT:-}" ]; then
     echo "ERROR: AGENT_COUNT is required" >&2
