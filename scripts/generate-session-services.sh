@@ -187,9 +187,12 @@ done
 # Install services if not dry-run
 if [ -z "${DRY_RUN:-}" ]; then
     echo "Installing systemd services..."
-    for group in "${SESSION_GROUPS[@]}"; do
-        cp "${OUTPUT_DIR}/openclaw-${group}.service" /etc/systemd/system/
-    done
+    # Only copy if OUTPUT_DIR is not already /etc/systemd/system
+    if [ "$OUTPUT_DIR" != "/etc/systemd/system" ]; then
+        for group in "${SESSION_GROUPS[@]}"; do
+            cp "${OUTPUT_DIR}/openclaw-${group}.service" /etc/systemd/system/
+        done
+    fi
     systemctl daemon-reload
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
