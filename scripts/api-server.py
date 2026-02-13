@@ -428,19 +428,33 @@ class H(http.server.BaseHTTPRequestHandler):
       
       files_written=[]
       
-      # Merge globals into habitat if both provided
-      # This lets iOS Shortcuts send them separately without client-side merging
-      if "globals" in data and "habitat" in data:
-        habitat = data["habitat"]
+      # Merge globals into existing habitat on disk
+      # Flow: YAML embeds minimal habitat → Shortcut sends globals to merge
+      if "globals" in data:
         globals_data = data["globals"]
         if isinstance(globals_data, dict):
+          # Read existing habitat from disk
+          try:
+            with open(HABITAT_PATH, 'r') as f:
+              habitat = json.load(f)
+          except FileNotFoundError:
+            self.send_json(400,{"ok":False,"error":"No existing habitat.json to merge globals into"});return
+          except json.JSONDecodeError as e:
+            self.send_json(500,{"ok":False,"error":f"Existing habitat.json is invalid: {e}"});return
+          
+          # Merge globals into habitat (globals don't overwrite existing keys)
           for key, value in globals_data.items():
-            if key not in habitat:  # Don't overwrite habitat-specific values
+            if key not in habitat:
               habitat[key] = value
-          data["habitat"] = habitat
+          
+          # Write merged habitat back
+          result=write_config_file(HABITAT_PATH, habitat)
+          if not result["ok"]:
+            self.send_json(500,{"ok":False,"error":f"Failed to write merged habitat: {result.get('error')}"});return
+          files_written.append(HABITAT_PATH + " (merged)")
       
-      # Write habitat config
-      if "habitat" in data:
+      # Write habitat config (if provided directly, overwrites)
+      elif "habitat" in data:
         result=write_config_file(HABITAT_PATH,data["habitat"])
         if not result["ok"]:
           self.send_json(500,{"ok":False,"error":f"Failed to write habitat: {result.get('error')}"});return
