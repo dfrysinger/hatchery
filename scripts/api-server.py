@@ -43,10 +43,14 @@ def get_status():
   p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
   p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
   setup_done=os.path.exists('/var/lib/init-status/setup-complete')
+  needs_check=os.path.exists('/var/lib/init-status/needs-post-boot-check')
   
   # Smart defaults based on completion state (handles transient read failures during reboot)
-  if setup_done:
-    s,p=11,2  # Ready state
+  # needs-post-boot-check exists during reboot until post-boot-check.sh completes
+  if setup_done and not needs_check:
+    s,p=11,2  # Ready state (fully booted)
+  elif setup_done and needs_check:
+    s,p=10,2  # Rebooting (setup done but post-boot-check pending)
   elif p2_done:
     s,p=10,2  # Phase 2 done, finalizing
   elif p1_done:
@@ -69,7 +73,8 @@ def get_status():
     for sv in ['clawdbot','xrdp','desktop','x11vnc']:svc[sv]=check_service(sv)
   desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
   safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
-  return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online,"safe_mode":safe_mode,"services":svc if svc else None}
+  rebooting=setup_done and needs_check  # System rebooted, waiting for post-boot-check
+  return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online and not needs_check,"rebooting":rebooting,"safe_mode":safe_mode,"services":svc if svc else None}
 
 def validate_config_upload(data):
   """Validate config upload request data."""
