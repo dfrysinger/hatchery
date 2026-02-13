@@ -107,7 +107,10 @@ group_index=0
 for group in "${SESSION_GROUPS[@]}"; do
     port=$((BASE_PORT + group_index))
     group_dir="${OUTPUT_DIR}/${group}"
+    state_dir="${HOME_DIR}/.openclaw-sessions/${group}"
     mkdir -p "$group_dir"
+    mkdir -p "$state_dir"
+    chown -R "${SVC_USER}:${SVC_USER}" "$state_dir"
 
     # Collect agents for this group
     agent_list_json="["
@@ -176,7 +179,7 @@ Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
 Environment=DISPLAY=:10
 Environment=OPENCLAW_CONFIG_PATH=${group_dir}/openclaw.session.json
-Environment=OPENCLAW_STATE_DIR=${group_dir}
+Environment=OPENCLAW_STATE_DIR=${state_dir}
 
 [Install]
 WantedBy=multi-user.target
@@ -196,6 +199,12 @@ if [ -z "${DRY_RUN:-}" ]; then
         done
     fi
     systemctl daemon-reload
+    
+    # Stop main clawdbot service - session isolation replaces it
+    echo "Stopping main clawdbot service (replaced by session services)..."
+    systemctl stop clawdbot 2>/dev/null || true
+    systemctl disable clawdbot 2>/dev/null || true
+    
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
         systemctl start "openclaw-${group}.service"
