@@ -67,10 +67,46 @@ def get_status():
       val=f.read().strip()
       if val:p=int(val)
   except:pass
-  bot_online=check_service('clawdbot')
+  
+  # Check bot status based on isolation mode
+  # Read isolation config from habitat-parsed.env
+  isolation_mode="none"
+  isolation_groups=[]
+  try:
+    with open('/etc/habitat-parsed.env','r') as f:
+      for line in f:
+        if line.startswith('ISOLATION_DEFAULT='):
+          isolation_mode=line.split('=',1)[1].strip().strip('"')
+        elif line.startswith('ISOLATION_GROUPS='):
+          groups_str=line.split('=',1)[1].strip().strip('"')
+          if groups_str:
+            isolation_groups=groups_str.split(',')
+  except:pass
+  
+  # Determine bot_online based on isolation mode
+  if isolation_mode=="session" and isolation_groups:
+    # Session isolation: check if ANY session service is running
+    bot_online=any(check_service(f'openclaw-{g}') for g in isolation_groups)
+  elif isolation_mode=="container":
+    # Container isolation: check containers service
+    bot_online=check_service('openclaw-containers')
+  else:
+    # No isolation: check main clawdbot
+    bot_online=check_service('clawdbot')
+  
   svc={}
   if p2_done or setup_done:
-    for sv in ['clawdbot','xrdp','desktop','x11vnc']:svc[sv]=check_service(sv)
+    # Include isolation services in status
+    base_services=['xrdp','desktop','x11vnc']
+    if isolation_mode=="session" and isolation_groups:
+      for g in isolation_groups:
+        svc[f'openclaw-{g}']=check_service(f'openclaw-{g}')
+    elif isolation_mode=="container":
+      svc['openclaw-containers']=check_service('openclaw-containers')
+    else:
+      svc['clawdbot']=check_service('clawdbot')
+    for sv in base_services:
+      svc[sv]=check_service(sv)
   desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
   safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
   rebooting=setup_done and needs_check  # System rebooted, waiting for post-boot-check
