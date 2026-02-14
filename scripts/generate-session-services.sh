@@ -234,8 +234,10 @@ for group in "${SESSION_GROUPS[@]}"; do
 }
 SESSIONCFG
     # Make config AND directory writable by service user (OpenClaw needs to persist config changes)
-    chmod 777 "$group_dir"
-    chmod 666 "${group_dir}/openclaw.session.json"
+    # SECURITY: Use restrictive permissions - only owner (bot user) should have write access
+    chown -R "${SVC_USER}:${SVC_USER}" "$group_dir" 2>/dev/null || true
+    chmod 750 "$group_dir"
+    chmod 600 "${group_dir}/openclaw.session.json"
     # Final ownership fix for entire state tree (ensure all subdirs are accessible)
     if [ -z "${DRY_RUN:-}" ]; then
         chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}"
@@ -264,7 +266,7 @@ Environment=PATH=/usr/bin:/usr/local/bin
 Environment=DISPLAY=:10
 Environment=OPENCLAW_CONFIG_PATH=${group_dir}/openclaw.session.json
 Environment=OPENCLAW_STATE_DIR=${state_dir}
-Environment=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+Environment=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 Environment=GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
 Environment=BRAVE_API_KEY=${BRAVE_API_KEY:-}
 

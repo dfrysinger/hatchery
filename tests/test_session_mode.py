@@ -30,9 +30,18 @@ def run_generator(env_vars, expect_fail=False):
     output_dir_contents is a dict of {filename: content}.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
+        # Create home directory structure within tmpdir
+        home_dir = os.path.join(tmpdir, 'home', 'testuser')
+        os.makedirs(home_dir, exist_ok=True)
+        
         env = os.environ.copy()
         env['SESSION_OUTPUT_DIR'] = tmpdir
+        env['HOME_DIR'] = home_dir
         env['DRY_RUN'] = '1'  # Don't actually install systemd services
+        # Provide defaults for API keys to avoid unbound variable errors
+        env.setdefault('ANTHROPIC_API_KEY', '')
+        env.setdefault('GOOGLE_API_KEY', '')
+        env.setdefault('BRAVE_API_KEY', '')
         env.update(env_vars)
 
         result = subprocess.run(
