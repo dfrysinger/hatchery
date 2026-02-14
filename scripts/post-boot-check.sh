@@ -172,9 +172,21 @@ else
     source "/usr/local/bin/safe-mode-recovery.sh"
   fi
   
-  # Try smart recovery (token hunting + API fallback)
+  # Try full recovery escalation (token hunting + API fallback + doctor + state cleanup)
   SMART_RECOVERY_SUCCESS=false
-  if type run_smart_recovery &>/dev/null; then
+  if type run_full_recovery_escalation &>/dev/null; then
+    log "Attempting full recovery escalation..."
+    export HOME_DIR="$H"
+    export USERNAME="$USERNAME"
+    export RECOVERY_LOG="$LOG"
+    
+    if recovery_result=$(run_full_recovery_escalation 2>&1); then
+      log "Full recovery escalation succeeded: $recovery_result"
+      SMART_RECOVERY_SUCCESS=true
+    else
+      log "Full recovery escalation failed, falling back to minimal config"
+    fi
+  elif type run_smart_recovery &>/dev/null; then
     log "Attempting smart recovery (token hunting + API fallback)..."
     export HOME_DIR="$H"
     export USERNAME="$USERNAME"
@@ -190,9 +202,9 @@ else
     log "Smart recovery not available, using minimal config"
   fi
   
-  # If smart recovery failed, fall back to minimal config
+  # If all recovery failed, fall back to minimal config
   if [ "$SMART_RECOVERY_SUCCESS" = "false" ]; then
-    log "Restoring minimal config..."
+    log "All recovery attempts failed, restoring minimal config..."
     cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
     chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
     chmod 600 "$H/.openclaw/openclaw.json"

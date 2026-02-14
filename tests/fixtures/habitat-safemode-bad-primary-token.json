@@ -1,0 +1,31 @@
+{
+  "name": "SafeMode-BadPrimaryToken",
+  "domain": "frybot.dedyn.io",
+  "bgColor": "FF6B6B",
+  "destructMinutes": 30,
+  "remoteApi": true,
+  "platform": "telegram",
+  "platforms": {
+    "telegram": {
+      "ownerId": "5874850284"
+    }
+  },
+  "isolation": "session",
+  "sharedPaths": ["/home/bot/shared"],
+  "agents": [
+    {
+      "agent": "broken-bot",
+      "isolationGroup": "test-group",
+      "tokens": {
+        "telegram": "INVALID_TOKEN_12345:XXXXXXXXXXXXXXXXX"
+      }
+    },
+    {
+      "agent": "resume-optimizer",
+      "isolationGroup": "test-group",
+      "tokens": {
+        "telegram": "8513046756:AAGA45Bl4MhJ0d9cJQzhP6ZEQVLKLilD_O0"
+      }
+    }
+  ]
+}
