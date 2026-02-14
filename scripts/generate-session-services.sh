@@ -30,8 +30,8 @@
 set -euo pipefail
 
 # --- Source environment files (may be called standalone or from another script) ---
-[ -f /etc/droplet.env ] && source /etc/droplet.env
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+[ -r /etc/droplet.env ] && source /etc/droplet.env || true
+[ -r /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env || true
 
 # --- Validate required inputs ---
 if [ -z "${AGENT_COUNT:-}" ]; then
@@ -59,7 +59,8 @@ if [ -z "$ISO_GROUPS" ]; then
     exit 0
 fi
 
-HOME_DIR="/home/${SVC_USER}"
+# HOME_DIR can be overridden for testing
+HOME_DIR="${HOME_DIR:-/home/${SVC_USER}}"
 
 # --- Filter groups: only generate services for session-mode groups ---
 IFS=',' read -ra ALL_GROUPS <<< "$ISO_GROUPS"
@@ -110,30 +111,66 @@ for group in "${SESSION_GROUPS[@]}"; do
     state_dir="${HOME_DIR}/.openclaw-sessions/${group}"
     mkdir -p "$group_dir"
     mkdir -p "$state_dir"
-    chown -R "${SVC_USER}:${SVC_USER}" "$state_dir"
+    [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir"
     # Config dir needs to be readable by service user
     chmod 755 "$group_dir"
 
     # Collect agents for this group
     agent_list_json="["
+    telegram_accounts_json=""
+    discord_accounts_json=""
+    bindings_json=""
     agent_count_in_group=0
+    
     for i in $(seq 1 "$AGENT_COUNT"); do
         agent_group_var="AGENT${i}_ISOLATION_GROUP"
         agent_name_var="AGENT${i}_NAME"
         agent_model_var="AGENT${i}_MODEL"
+        agent_bot_token_var="AGENT${i}_BOT_TOKEN"
+        agent_dc_token_var="AGENT${i}_DISCORD_TOKEN"
+        
         agent_group="${!agent_group_var:-}"
         agent_name="${!agent_name_var:-Agent${i}}"
         agent_model="${!agent_model_var:-anthropic/claude-opus-4-5}"
+        agent_bot_token="${!agent_bot_token_var:-}"
+        agent_dc_token="${!agent_dc_token_var:-}"
 
         if [ "$agent_group" = "$group" ]; then
             [ $agent_count_in_group -gt 0 ] && agent_list_json="${agent_list_json},"
             is_default="false"
             [ $agent_count_in_group -eq 0 ] && is_default="true"
             agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\"}"
+            
+            # Build Telegram account for this agent
+            if [ -n "$agent_bot_token" ]; then
+                [ -n "$telegram_accounts_json" ] && telegram_accounts_json="${telegram_accounts_json},"
+                telegram_accounts_json="${telegram_accounts_json}\"agent${i}\":{\"name\":\"${agent_name}\",\"botToken\":\"${agent_bot_token}\"}"
+                
+                # Build binding for this agent
+                [ -n "$bindings_json" ] && bindings_json="${bindings_json},"
+                bindings_json="${bindings_json}{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
+            fi
+            
+            # Build Discord account for this agent
+            if [ -n "$agent_dc_token" ]; then
+                [ -n "$discord_accounts_json" ] && discord_accounts_json="${discord_accounts_json},"
+                discord_accounts_json="${discord_accounts_json}\"agent${i}\":{\"name\":\"${agent_name}\",\"botToken\":\"${agent_dc_token}\"}"
+                
+                # Build Discord binding if not already added
+                if [ -z "$agent_bot_token" ]; then
+                    [ -n "$bindings_json" ] && bindings_json="${bindings_json},"
+                fi
+                bindings_json="${bindings_json}{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"discord\",\"accountId\":\"agent${i}\"}}"
+            fi
+            
             agent_count_in_group=$((agent_count_in_group + 1))
         fi
     done
     agent_list_json="${agent_list_json}]"
+
+    # Get owner IDs (from habitat-parsed.env)
+    telegram_owner_id="${TELEGRAM_OWNER_ID:-}"
+    discord_owner_id="${DISCORD_OWNER_ID:-}"
 
     # Generate OpenClaw session config
     cat > "${group_dir}/openclaw.session.json" <<SESSIONCFG
@@ -153,12 +190,21 @@ for group in "${SESSION_GROUPS[@]}"; do
     },
     "list": ${agent_list_json}
   },
-  "plugins": {
-    "entries": {
-      "telegram": {"enabled": $([ "$PLATFORM" = "telegram" ] || [ "$PLATFORM" = "both" ] && echo true || echo false)},
-      "discord": {"enabled": $([ "$PLATFORM" = "discord" ] || [ "$PLATFORM" = "both" ] && echo true || echo false)}
+  "channels": {
+    "telegram": {
+      "enabled": $([ "$PLATFORM" = "telegram" ] || [ "$PLATFORM" = "both" ] && echo true || echo false),
+      "ownerId": "${telegram_owner_id}",
+      "dmPolicy": "allowlist",
+      "allowFrom": ["${telegram_owner_id}"],
+      "accounts": {${telegram_accounts_json}}
+    },
+    "discord": {
+      "enabled": $([ "$PLATFORM" = "discord" ] || [ "$PLATFORM" = "both" ] && echo true || echo false),
+      "ownerId": "${discord_owner_id}",
+      "accounts": {${discord_accounts_json}}
     }
-  }
+  },
+  "bindings": [${bindings_json}]
 }
 SESSIONCFG
     # Make config readable by service user
