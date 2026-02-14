@@ -403,34 +403,96 @@ class H(http.server.BaseHTTPRequestHandler):
       for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/post-boot-check.log','/var/log/cloud-init-output.log']:
         try:
           self.wfile.write(f"\n=== {lf} ===\n".encode())
-          with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
+          with open(lf,'r') as f:self.wfile.write(f.read()[-16384:].encode())  # Increased to 16KB
         except:self.wfile.write(f"  (not found)\n".encode())
-      # Include session isolation debug info
-      self.wfile.write(b"\n=== Session Isolation Debug ===\n")
+      
+      # Enhanced debug info for isolation issues
+      self.wfile.write(b"\n=== FILE EXISTENCE CHECKS ===\n")
+      for f in ['/etc/droplet.env','/etc/habitat-parsed.env','/etc/habitat.json','/etc/agents.json']:
+        try:
+          import stat
+          st=os.stat(f)
+          self.wfile.write(f"{f}: exists, size={st.st_size}, mode={oct(st.st_mode)}\n".encode())
+        except:self.wfile.write(f"{f}: NOT FOUND\n".encode())
+      
+      self.wfile.write(b"\n=== /etc/habitat-parsed.env FULL CONTENTS (secrets redacted) ===\n")
       try:
-        # Show isolation config
-        isolation_mode="none"
-        isolation_groups=""
         with open('/etc/habitat-parsed.env','r') as f:
           for line in f:
-            if line.startswith('ISOLATION_DEFAULT='):isolation_mode=line.strip()
-            if line.startswith('ISOLATION_GROUPS='):isolation_groups=line.strip()
-        self.wfile.write(f"Config: {isolation_mode}, {isolation_groups}\n".encode())
-        # Show session service status
-        for svc in ['clawdbot','openclaw-browser','openclaw-documents','openclaw-containers']:
-          try:
-            r=subprocess.run(['systemctl','is-active',svc],capture_output=True,timeout=5)
-            status=r.stdout.decode().strip()
-          except:status='unknown'
-          self.wfile.write(f"Service {svc}: {status}\n".encode())
-        # Show recent openclaw logs
-        try:
-          r=subprocess.run(['journalctl','-u','openclaw-browser','-u','openclaw-documents','--since','10 min ago','-n','50','--no-pager'],capture_output=True,timeout=10)
-          self.wfile.write(b"\n=== Recent OpenClaw Session Logs ===\n")
-          self.wfile.write(r.stdout[-4096:])
-        except:self.wfile.write(b"(failed to get journalctl)\n")
+            # Redact sensitive lines
+            if any(x in line.upper() for x in ['TOKEN','SECRET','KEY','PASSWORD']):
+              key=line.split('=')[0] if '=' in line else line
+              self.wfile.write(f"{key}=<REDACTED>\n".encode())
+            else:
+              self.wfile.write(line.encode())
       except Exception as e:
-        self.wfile.write(f"Debug error: {e}\n".encode())
+        self.wfile.write(f"ERROR reading habitat-parsed.env: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== SYSTEMD SESSION SERVICE FILES ===\n")
+      try:
+        r=subprocess.run(['ls','-la','/etc/systemd/system/'],capture_output=True,timeout=5)
+        for line in r.stdout.decode().split('\n'):
+          if 'openclaw' in line:
+            self.wfile.write(f"{line}\n".encode())
+      except Exception as e:
+        self.wfile.write(f"ERROR: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== SESSION STATE DIRECTORIES ===\n")
+      try:
+        import glob
+        # Get username from env
+        username="bot"
+        try:
+          with open('/etc/habitat-parsed.env','r') as f:
+            for line in f:
+              if line.startswith('USERNAME='):
+                username=line.split('=',1)[1].strip().strip('"')
+                break
+        except:pass
+        state_base=f"/home/{username}/.openclaw-sessions"
+        self.wfile.write(f"State base: {state_base}\n".encode())
+        if os.path.exists(state_base):
+          r=subprocess.run(['ls','-laR',state_base],capture_output=True,timeout=5)
+          self.wfile.write(r.stdout[-4096:])
+        else:
+          self.wfile.write(b"State directory does not exist yet\n")
+      except Exception as e:
+        self.wfile.write(f"ERROR: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== SESSION SERVICE STATUS ===\n")
+      for svc in ['clawdbot','openclaw-browser','openclaw-documents','openclaw-containers']:
+        try:
+          r=subprocess.run(['systemctl','status',svc,'--no-pager'],capture_output=True,timeout=5)
+          self.wfile.write(f"\n--- {svc} ---\n".encode())
+          self.wfile.write(r.stdout[-2048:])
+        except Exception as e:
+          self.wfile.write(f"{svc}: error getting status: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== SESSION SERVICE LOGS (journalctl) ===\n")
+      try:
+        r=subprocess.run(['journalctl','-u','openclaw-browser','-u','openclaw-documents','-u','openclaw-containers','--since','30 min ago','-n','100','--no-pager'],capture_output=True,timeout=10)
+        self.wfile.write(r.stdout[-8192:])
+      except Exception as e:
+        self.wfile.write(f"ERROR: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== CLAWDBOT LOGS ===\n")
+      try:
+        r=subprocess.run(['journalctl','-u','clawdbot','--since','30 min ago','-n','50','--no-pager'],capture_output=True,timeout=10)
+        self.wfile.write(r.stdout[-4096:])
+      except Exception as e:
+        self.wfile.write(f"ERROR: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== INIT STATUS FILES ===\n")
+      for f in ['/var/lib/init-status/stage','/var/lib/init-status/phase','/var/lib/init-status/setup-complete','/var/lib/init-status/safe-mode','/var/lib/init-status/needs-post-boot-check']:
+        try:
+          if os.path.exists(f):
+            with open(f,'r') as fh:
+              content=fh.read().strip()[:100]
+            self.wfile.write(f"{f}: exists, content='{content}'\n".encode())
+          else:
+            self.wfile.write(f"{f}: NOT FOUND\n".encode())
+        except Exception as e:
+          self.wfile.write(f"{f}: error: {e}\n".encode())
     elif self.path=='/config/status':
       # Unauthenticated endpoint - returns only api_uploaded status (no sensitive data)
       self.send_json(200,get_config_upload_status())
