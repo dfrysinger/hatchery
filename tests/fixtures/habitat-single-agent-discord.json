@@ -1,0 +1,21 @@
+{
+  "name": "TestHabitat-SingleDiscord",
+  "platform": "discord",
+  "destructMinutes": 60,
+  "bgColor": "5865F2",
+  "agents": [
+    {
+      "agent": "DiscordBot",
+      "model": "anthropic/claude-opus-4-5",
+      "tokens": {
+        "discord": "TEST_DISCORD_TOKEN_1"
+      }
+    }
+  ],
+  "platforms": {
+    "discord": {
+      "ownerId": "987654321",
+      "serverId": "1234567890"
+    }
+  }
+}

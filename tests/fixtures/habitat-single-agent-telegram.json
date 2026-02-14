@@ -1,0 +1,20 @@
+{
+  "name": "TestHabitat-SingleTelegram",
+  "platform": "telegram",
+  "destructMinutes": 60,
+  "bgColor": "2C5282",
+  "agents": [
+    {
+      "agent": "TestBot",
+      "model": "anthropic/claude-sonnet-4",
+      "tokens": {
+        "telegram": "TEST_BOT_TOKEN_1"
+      }
+    }
+  ],
+  "platforms": {
+    "telegram": {
+      "ownerId": "123456789"
+    }
+  }
+}

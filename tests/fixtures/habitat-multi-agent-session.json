@@ -1,0 +1,39 @@
+{
+  "name": "TestHabitat-MultiSession",
+  "platform": "telegram",
+  "destructMinutes": 60,
+  "bgColor": "2C5282",
+  "isolation": "session",
+  "sharedPaths": ["/home/bot/shared"],
+  "agents": [
+    {
+      "agent": "Agent1",
+      "model": "anthropic/claude-opus-4-5",
+      "isolationGroup": "group-a",
+      "tokens": {
+        "telegram": "TEST_BOT_TOKEN_1"
+      }
+    },
+    {
+      "agent": "Agent2",
+      "model": "anthropic/claude-opus-4-5",
+      "isolationGroup": "group-a",
+      "tokens": {
+        "telegram": "TEST_BOT_TOKEN_2"
+      }
+    },
+    {
+      "agent": "Agent3",
+      "model": "anthropic/claude-opus-4-5",
+      "isolationGroup": "group-b",
+      "tokens": {
+        "telegram": "TEST_BOT_TOKEN_3"
+      }
+    }
+  ],
+  "platforms": {
+    "telegram": {
+      "ownerId": "123456789"
+    }
+  }
+}
