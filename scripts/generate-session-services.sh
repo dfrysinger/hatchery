@@ -193,14 +193,14 @@ for group in "${SESSION_GROUPS[@]}"; do
   "channels": {
     "telegram": {
       "enabled": $([ "$PLATFORM" = "telegram" ] || [ "$PLATFORM" = "both" ] && echo true || echo false),
-      "ownerId": "${telegram_owner_id}",
       "dmPolicy": "allowlist",
       "allowFrom": ["${telegram_owner_id}"],
       "accounts": {${telegram_accounts_json}}
     },
     "discord": {
       "enabled": $([ "$PLATFORM" = "discord" ] || [ "$PLATFORM" = "both" ] && echo true || echo false),
-      "ownerId": "${discord_owner_id}",
+      "groupPolicy": "allowlist",
+      "dm": {"enabled": true, "policy": "allowlist", "allowFrom": ["${discord_owner_id}"]},
       "accounts": {${discord_accounts_json}}
     }
   },
