@@ -261,7 +261,7 @@ class TestSessionServicesPermissions(unittest.TestCase):
         return result
 
     def test_config_directory_permissions(self):
-        """Config directories must be 777 (writable by service user for OpenClaw config persistence)."""
+        """Config directories must be 750 (owner rwx, group rx, others none - security)."""
         env = {
             "HABITAT_NAME": "TestHabitat",
             "USERNAME": "testuser",
@@ -282,12 +282,12 @@ class TestSessionServicesPermissions(unittest.TestCase):
         config_dir = os.path.join(self.output_dir, "browser")
         self.assertTrue(os.path.isdir(config_dir))
         
-        # Check directory permissions (777 = rwxrwxrwx - OpenClaw needs to create temp files for atomic writes)
+        # Check directory permissions (750 = rwxr-x--- - secure: only owner can write)
         mode = os.stat(config_dir).st_mode & 0o777
-        self.assertEqual(mode, 0o777, f"Config dir should be 777, got {oct(mode)}")
+        self.assertEqual(mode, 0o750, f"Config dir should be 750, got {oct(mode)}")
 
     def test_config_file_permissions(self):
-        """Config files must be 666 (writable by service user for OpenClaw config persistence)."""
+        """Config files must be 600 (owner rw only - contains sensitive bot tokens)."""
         env = {
             "HABITAT_NAME": "TestHabitat",
             "USERNAME": "testuser",
@@ -308,9 +308,9 @@ class TestSessionServicesPermissions(unittest.TestCase):
         config_file = os.path.join(self.output_dir, "browser", "openclaw.session.json")
         self.assertTrue(os.path.isfile(config_file))
         
-        # Check file permissions (666 = rw-rw-rw- - OpenClaw needs to persist auto-enable changes)
+        # Check file permissions (600 = rw------- - secure: config contains bot tokens)
         mode = os.stat(config_file).st_mode & 0o777
-        self.assertEqual(mode, 0o666, f"Config file should be 666, got {oct(mode)}")
+        self.assertEqual(mode, 0o600, f"Config file should be 600, got {oct(mode)}")
 
 
 class TestSessionServicesNames(unittest.TestCase):
@@ -479,8 +479,12 @@ class TestSessionServicesAgentDir(unittest.TestCase):
         )
         return result
 
-    def test_agent_has_agentdir(self):
-        """Each agent must have agentDir pointing to state_dir/agents/<agentId>/agent."""
+    def test_agent_has_required_fields(self):
+        """Each agent must have required fields (id, name, model, workspace).
+        
+        Note: agentDir is NOT included because it causes session path validation
+        issues. OpenClaw uses OPENCLAW_STATE_DIR env var instead.
+        """
         env = {
             "HABITAT_NAME": "TestHabitat",
             "USERNAME": "testuser",
@@ -502,19 +506,20 @@ class TestSessionServicesAgentDir(unittest.TestCase):
         with open(config_file) as f:
             config = json.load(f)
         
-        # Check that agent has agentDir
+        # Check that agent has required fields
         agents = config["agents"]["list"]
         self.assertEqual(len(agents), 1)
         agent = agents[0]
-        self.assertIn("agentDir", agent, "Agent must have agentDir")
-        
-        # agentDir should point to state_dir/agents/<agentId>/agent
-        expected_suffix = "/.openclaw-sessions/browser/agents/agent1/agent"
-        self.assertTrue(agent["agentDir"].endswith(expected_suffix),
-                        f"agentDir should end with {expected_suffix}, got {agent['agentDir']}")
+        self.assertIn("id", agent, "Agent must have id")
+        self.assertIn("name", agent, "Agent must have name")
+        self.assertIn("model", agent, "Agent must have model")
+        self.assertIn("workspace", agent, "Agent must have workspace")
 
     def test_agent_directories_created(self):
-        """Script must create agent/sessions directories within state_dir."""
+        """Script must create agent directory structure within state_dir.
+        
+        Note: sessions/ directory is created by OpenClaw at runtime, not setup.
+        """
         env = {
             "HABITAT_NAME": "TestHabitat",
             "USERNAME": "testuser",
@@ -535,10 +540,9 @@ class TestSessionServicesAgentDir(unittest.TestCase):
         # Check that agent directories were created
         state_dir = os.path.join(self.test_dir, ".openclaw-sessions", "browser")
         agent_dir = os.path.join(state_dir, "agents", "agent1", "agent")
-        sessions_dir = os.path.join(state_dir, "agents", "agent1", "sessions")
         
         self.assertTrue(os.path.isdir(agent_dir), f"Missing agent dir: {agent_dir}")
-        self.assertTrue(os.path.isdir(sessions_dir), f"Missing sessions dir: {sessions_dir}")
+        # Note: sessions/ is created by OpenClaw at runtime, not by the setup script
 
 
 class TestSessionServicesPlugins(unittest.TestCase):
