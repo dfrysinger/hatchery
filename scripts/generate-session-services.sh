@@ -264,6 +264,9 @@ Environment=PATH=/usr/bin:/usr/local/bin
 Environment=DISPLAY=:10
 Environment=OPENCLAW_CONFIG_PATH=${group_dir}/openclaw.session.json
 Environment=OPENCLAW_STATE_DIR=${state_dir}
+Environment=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+Environment=GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+Environment=BRAVE_API_KEY=${BRAVE_API_KEY:-}
 
 [Install]
 WantedBy=multi-user.target

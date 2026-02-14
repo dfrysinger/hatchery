@@ -391,6 +391,10 @@ SVC
 systemctl daemon-reload
 # --- Agent Isolation: wire isolation scripts into pipeline ---
 if [ "$ISOLATION_DEFAULT" = "session" ]; then
+  # Export API keys for session services
+  export ANTHROPIC_API_KEY="$AK"
+  export GOOGLE_API_KEY="$GK"
+  export BRAVE_API_KEY="$BK"
   bash /usr/local/sbin/generate-session-services.sh || { echo "FATAL: session isolation setup failed" >&2; exit 1; }
 elif [ "$ISOLATION_DEFAULT" = "container" ]; then
   bash /usr/local/sbin/generate-docker-compose.sh || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
