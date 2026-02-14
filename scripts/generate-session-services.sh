@@ -145,11 +145,11 @@ for group in "${SESSION_GROUPS[@]}"; do
             is_default="false"
             [ $agent_count_in_group -eq 0 ] && is_default="true"
             # Include agentDir pointing to state_dir so sessions are stored correctly
-            agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\",\"agentDir\":\"${state_dir}/agents/agent${i}/agent\"}"
+            # agentDir should be the parent; OpenClaw creates its own subdirs (sessions/, etc.)
+            agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\",\"agentDir\":\"${state_dir}/agents/agent${i}\"}"
             
-            # Create agent directories including sessions (as root, will chown later)
-            mkdir -p "${state_dir}/agents/agent${i}/agent"
-            mkdir -p "${state_dir}/agents/agent${i}/sessions"
+            # Create agent directory (OpenClaw will create sessions/ inside)
+            mkdir -p "${state_dir}/agents/agent${i}"
             [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}"
             
             # Build Telegram account for this agent
