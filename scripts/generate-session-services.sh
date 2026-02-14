@@ -144,9 +144,9 @@ for group in "${SESSION_GROUPS[@]}"; do
             [ $agent_count_in_group -gt 0 ] && agent_list_json="${agent_list_json},"
             is_default="false"
             [ $agent_count_in_group -eq 0 ] && is_default="true"
-            # Include agentDir pointing to state_dir so sessions are stored correctly
-            # agentDir should be the parent; OpenClaw creates its own subdirs (sessions/, etc.)
-            agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\",\"agentDir\":\"${state_dir}/agents/agent${i}\"}"
+            # Don't set agentDir - rely on OPENCLAW_STATE_DIR env var instead
+            # agentDir in config causes session path validation issues
+            agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\"}"
             
             # Create agent directory (OpenClaw will create sessions/ inside)
             mkdir -p "${state_dir}/agents/agent${i}"
