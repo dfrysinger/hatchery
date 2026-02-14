@@ -104,14 +104,19 @@ mkdir -p "$OUTPUT_DIR"
 echo "Generating session services for ${#SESSION_GROUPS[@]} group(s)..."
 
 # --- Generate per-group service and config ---
+# Ensure parent state directory exists and is owned by service user
+STATE_BASE="${HOME_DIR}/.openclaw-sessions"
+mkdir -p "$STATE_BASE"
+[ -z "${DRY_RUN:-}" ] && chown "${SVC_USER}:${SVC_USER}" "$STATE_BASE" && chmod 755 "$STATE_BASE"
+
 group_index=0
 for group in "${SESSION_GROUPS[@]}"; do
     port=$((BASE_PORT + group_index))
     group_dir="${OUTPUT_DIR}/${group}"
-    state_dir="${HOME_DIR}/.openclaw-sessions/${group}"
+    state_dir="${STATE_BASE}/${group}"
     mkdir -p "$group_dir"
     mkdir -p "$state_dir"
-    [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir"
+    [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 755 "$state_dir"
     # Config dir needs to be readable by service user
     chmod 755 "$group_dir"
 
@@ -142,9 +147,10 @@ for group in "${SESSION_GROUPS[@]}"; do
             # Include agentDir pointing to state_dir so sessions are stored correctly
             agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\",\"agentDir\":\"${state_dir}/agents/agent${i}/agent\"}"
             
-            # Create agent directories including sessions
+            # Create agent directories including sessions (as root, will chown later)
             mkdir -p "${state_dir}/agents/agent${i}/agent"
             mkdir -p "${state_dir}/agents/agent${i}/sessions"
+            [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}"
             
             # Build Telegram account for this agent
             if [ -n "$agent_bot_token" ]; then
@@ -219,7 +225,13 @@ SESSIONCFG
     # Make config AND directory writable by service user (OpenClaw needs to persist config changes)
     chmod 777 "$group_dir"
     chmod 666 "${group_dir}/openclaw.session.json"
-    [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}"
+    # Final ownership fix for entire state tree (ensure all subdirs are accessible)
+    if [ -z "${DRY_RUN:-}" ]; then
+        chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}"
+        chmod -R u+rwX "${state_dir}"
+        echo "  [${group}] state_dir permissions:"
+        ls -la "${state_dir}" 2>&1 | head -5
+    fi
 
     # Generate systemd service
     cat > "${OUTPUT_DIR}/openclaw-${group}.service" <<SVCFILE
