@@ -59,9 +59,47 @@ def validate_config_upload(data):
   """Validate config upload request data."""
   errors=[]
   if "habitat" in data and not isinstance(data["habitat"],dict):errors.append("habitat must be an object")
+  if "globals" in data and not isinstance(data["globals"],dict):errors.append("globals must be an object")
   if "agents" in data and not isinstance(data["agents"],dict):errors.append("agents must be an object")
   if "apply" in data and not isinstance(data["apply"],bool):errors.append("apply must be a boolean")
   return errors
+
+# Valid global fields that can be merged into habitat
+GLOBAL_FIELDS = [
+  "globalIdentity", "globalSoul", "globalAgents", "globalBoot",
+  "globalBootstrap", "globalTools", "globalUser"
+]
+
+def merge_globals_into_habitat(globals_data):
+  """Merge globals into existing habitat.json.
+  
+  Reads /etc/habitat.json, merges the global fields, writes back.
+  Only merges known global fields to prevent injection of other config.
+  """
+  if not os.path.exists(HABITAT_PATH):
+    return {"ok":False,"error":"No habitat.json exists to merge into"}
+  
+  try:
+    with open(HABITAT_PATH,'r') as f:
+      habitat=json.load(f)
+  except Exception as e:
+    return {"ok":False,"error":f"Failed to read habitat.json: {e}"}
+  
+  # Only merge known global fields
+  merged_fields=[]
+  for field in GLOBAL_FIELDS:
+    if field in globals_data:
+      habitat[field]=globals_data[field]
+      merged_fields.append(field)
+  
+  # Write merged habitat back
+  try:
+    with open(HABITAT_PATH,'w') as f:
+      json.dump(habitat,f,indent=2)
+    os.chmod(HABITAT_PATH,0o600)
+    return {"ok":True,"merged_fields":merged_fields}
+  except Exception as e:
+    return {"ok":False,"error":f"Failed to write merged habitat: {e}"}
 
 def write_config_file(path,data):
   """Write config data to file with secure permissions."""
@@ -441,8 +479,17 @@ class H(http.server.BaseHTTPRequestHandler):
           self.send_json(500,{"ok":False,"error":f"Failed to write agents: {result.get('error')}"});return
         files_written.append(AGENTS_PATH)
       
+      # Merge globals into existing habitat (for two-phase provisioning)
+      merged_fields=[]
+      if "globals" in data:
+        result=merge_globals_into_habitat(data["globals"])
+        if not result["ok"]:
+          self.send_json(500,{"ok":False,"error":f"Failed to merge globals: {result.get('error')}"});return
+        merged_fields=result.get("merged_fields",[])
+        files_written.append(f"{HABITAT_PATH} (merged: {', '.join(merged_fields)})")
+      
       # Write upload marker if any files were written
-      if files_written:
+      if files_written or merged_fields:
         write_upload_marker()
       
       # Apply if requested
