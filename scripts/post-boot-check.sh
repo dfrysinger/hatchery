@@ -21,17 +21,26 @@
 # =============================================================================
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+
+# Source habitat config with verbose logging for debugging
+LOG="/var/log/post-boot-check.log"
+if [ -f /etc/habitat-parsed.env ]; then
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Sourcing /etc/habitat-parsed.env (size: $(stat -c%s /etc/habitat-parsed.env 2>/dev/null || echo unknown))" >> "$LOG"
+  source /etc/habitat-parsed.env
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) After source: ISOLATION_DEFAULT='${ISOLATION_DEFAULT:-}' ISOLATION_GROUPS='${ISOLATION_GROUPS:-}'" >> "$LOG"
+else
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) WARNING: /etc/habitat-parsed.env not found" >> "$LOG"
+fi
+
 AC=${AGENT_COUNT:-1}
 H="/home/$USERNAME"
 TG="/usr/local/bin/tg-notify.sh"
-LOG="/var/log/post-boot-check.log"
 
 # Determine isolation mode
 ISOLATION="${ISOLATION_DEFAULT:-none}"
 GROUPS="${ISOLATION_GROUPS:-}"
 
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) post-boot-check starting (isolation=$ISOLATION, groups=$GROUPS)" >> "$LOG"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) post-boot-check starting (isolation=$ISOLATION, groups=$GROUPS, agent_count=$AC)" >> "$LOG"
 
 [ ! -f /var/lib/init-status/needs-post-boot-check ] && {
   exit 0

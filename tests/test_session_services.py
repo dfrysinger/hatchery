@@ -143,8 +143,8 @@ class TestSessionServicesConfig(unittest.TestCase):
             self.assertEqual(binding["match"]["channel"], "telegram")
             self.assertIn("accountId", binding["match"])
 
-    def test_session_config_has_owner_id(self):
-        """Session config must include Telegram owner ID for DM policy."""
+    def test_session_config_has_allowfrom(self):
+        """Session config must include allowFrom for DM policy."""
         env = {
             "HABITAT_NAME": "TestHabitat",
             "USERNAME": "testuser",
@@ -166,10 +166,12 @@ class TestSessionServicesConfig(unittest.TestCase):
         with open(config_path) as f:
             config = json.load(f)
         
-        # Verify owner ID in telegram config
+        # Verify allowFrom in telegram config (NOT ownerId - that's invalid)
         telegram = config["channels"]["telegram"]
-        self.assertIn("ownerId", telegram, "Config missing 'channels.telegram.ownerId'")
-        self.assertEqual(telegram["ownerId"], "123456789")
+        self.assertIn("allowFrom", telegram, "Config missing 'channels.telegram.allowFrom'")
+        self.assertIn("123456789", telegram["allowFrom"])
+        # Ensure ownerId is NOT present (it's an invalid key that causes OpenClaw errors)
+        self.assertNotIn("ownerId", telegram, "Config should NOT have invalid 'ownerId' key")
 
     def test_multiple_groups_separate_configs(self):
         """Each isolation group gets its own config with only its agents."""
@@ -259,7 +261,7 @@ class TestSessionServicesPermissions(unittest.TestCase):
         return result
 
     def test_config_directory_permissions(self):
-        """Config directories must be 755 (readable by service user)."""
+        """Config directories must be 777 (writable by service user for OpenClaw config persistence)."""
         env = {
             "HABITAT_NAME": "TestHabitat",
             "USERNAME": "testuser",
@@ -280,12 +282,12 @@ class TestSessionServicesPermissions(unittest.TestCase):
         config_dir = os.path.join(self.output_dir, "browser")
         self.assertTrue(os.path.isdir(config_dir))
         
-        # Check directory permissions (755 = rwxr-xr-x)
+        # Check directory permissions (777 = rwxrwxrwx - OpenClaw needs to create temp files for atomic writes)
         mode = os.stat(config_dir).st_mode & 0o777
-        self.assertEqual(mode, 0o755, f"Config dir should be 755, got {oct(mode)}")
+        self.assertEqual(mode, 0o777, f"Config dir should be 777, got {oct(mode)}")
 
     def test_config_file_permissions(self):
-        """Config files must be 644 (readable by service user)."""
+        """Config files must be 666 (writable by service user for OpenClaw config persistence)."""
         env = {
             "HABITAT_NAME": "TestHabitat",
             "USERNAME": "testuser",
@@ -306,9 +308,9 @@ class TestSessionServicesPermissions(unittest.TestCase):
         config_file = os.path.join(self.output_dir, "browser", "openclaw.session.json")
         self.assertTrue(os.path.isfile(config_file))
         
-        # Check file permissions (644 = rw-r--r--)
+        # Check file permissions (666 = rw-rw-rw- - OpenClaw needs to persist auto-enable changes)
         mode = os.stat(config_file).st_mode & 0o777
-        self.assertEqual(mode, 0o644, f"Config file should be 644, got {oct(mode)}")
+        self.assertEqual(mode, 0o666, f"Config file should be 666, got {oct(mode)}")
 
 
 class TestSessionServicesNames(unittest.TestCase):
@@ -442,6 +444,196 @@ class TestPostBootCheckIsolation(unittest.TestCase):
         # Empty string with IFS split gives array with one empty element
         # But for our purposes, we check the actual group names
         self.assertIn("count=", result.stdout)
+
+
+class TestSessionServicesAgentDir(unittest.TestCase):
+    """Test that session services include agentDir for proper session storage."""
+
+    def setUp(self):
+        """Set up test environment."""
+        self.test_dir = tempfile.mkdtemp()
+        self.output_dir = os.path.join(self.test_dir, "systemd")
+        os.makedirs(self.output_dir)
+        
+        self.script_path = os.path.join(
+            os.path.dirname(__file__), "..", "scripts", "generate-session-services.sh"
+        )
+
+    def tearDown(self):
+        """Clean up test directory."""
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def run_script_with_env(self, env_vars):
+        """Run generate-session-services.sh with given environment."""
+        env = os.environ.copy()
+        env.update(env_vars)
+        env["SESSION_OUTPUT_DIR"] = self.output_dir
+        env["HOME_DIR"] = self.test_dir
+        env["DRY_RUN"] = "1"
+        
+        result = subprocess.run(
+            ["bash", self.script_path],
+            env=env,
+            capture_output=True,
+            text=True
+        )
+        return result
+
+    def test_agent_has_agentdir(self):
+        """Each agent must have agentDir pointing to state_dir/agents/<agentId>/agent."""
+        env = {
+            "HABITAT_NAME": "TestHabitat",
+            "USERNAME": "testuser",
+            "AGENT_COUNT": "1",
+            "ISOLATION_DEFAULT": "session",
+            "ISOLATION_GROUPS": "browser",
+            "PLATFORM": "telegram",
+            "TELEGRAM_OWNER_ID": "123456789",
+            "AGENT1_NAME": "test-agent",
+            "AGENT1_BOT_TOKEN": "111111:AAAA",
+            "AGENT1_ISOLATION_GROUP": "browser",
+            "AGENT1_MODEL": "anthropic/claude-sonnet-4-5",
+        }
+        
+        result = self.run_script_with_env(env)
+        self.assertEqual(result.returncode, 0, f"Script failed: {result.stderr}")
+        
+        config_file = os.path.join(self.output_dir, "browser", "openclaw.session.json")
+        with open(config_file) as f:
+            config = json.load(f)
+        
+        # Check that agent has agentDir
+        agents = config["agents"]["list"]
+        self.assertEqual(len(agents), 1)
+        agent = agents[0]
+        self.assertIn("agentDir", agent, "Agent must have agentDir")
+        
+        # agentDir should point to state_dir/agents/<agentId>/agent
+        expected_suffix = "/.openclaw-sessions/browser/agents/agent1/agent"
+        self.assertTrue(agent["agentDir"].endswith(expected_suffix),
+                        f"agentDir should end with {expected_suffix}, got {agent['agentDir']}")
+
+    def test_agent_directories_created(self):
+        """Script must create agent/sessions directories within state_dir."""
+        env = {
+            "HABITAT_NAME": "TestHabitat",
+            "USERNAME": "testuser",
+            "AGENT_COUNT": "1",
+            "ISOLATION_DEFAULT": "session",
+            "ISOLATION_GROUPS": "browser",
+            "PLATFORM": "telegram",
+            "TELEGRAM_OWNER_ID": "123456789",
+            "AGENT1_NAME": "test-agent",
+            "AGENT1_BOT_TOKEN": "111111:AAAA",
+            "AGENT1_ISOLATION_GROUP": "browser",
+            "AGENT1_MODEL": "anthropic/claude-sonnet-4-5",
+        }
+        
+        result = self.run_script_with_env(env)
+        self.assertEqual(result.returncode, 0, f"Script failed: {result.stderr}")
+        
+        # Check that agent directories were created
+        state_dir = os.path.join(self.test_dir, ".openclaw-sessions", "browser")
+        agent_dir = os.path.join(state_dir, "agents", "agent1", "agent")
+        sessions_dir = os.path.join(state_dir, "agents", "agent1", "sessions")
+        
+        self.assertTrue(os.path.isdir(agent_dir), f"Missing agent dir: {agent_dir}")
+        self.assertTrue(os.path.isdir(sessions_dir), f"Missing sessions dir: {sessions_dir}")
+
+
+class TestSessionServicesPlugins(unittest.TestCase):
+    """Test that session services include plugins section with enabled providers."""
+
+    def setUp(self):
+        """Set up test environment."""
+        self.test_dir = tempfile.mkdtemp()
+        self.output_dir = os.path.join(self.test_dir, "systemd")
+        os.makedirs(self.output_dir)
+        
+        self.script_path = os.path.join(
+            os.path.dirname(__file__), "..", "scripts", "generate-session-services.sh"
+        )
+
+    def tearDown(self):
+        """Clean up test directory."""
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def run_script_with_env(self, env_vars):
+        """Run generate-session-services.sh with given environment."""
+        env = os.environ.copy()
+        env.update(env_vars)
+        env["SESSION_OUTPUT_DIR"] = self.output_dir
+        env["HOME_DIR"] = self.test_dir
+        env["DRY_RUN"] = "1"
+        
+        result = subprocess.run(
+            ["bash", self.script_path],
+            env=env,
+            capture_output=True,
+            text=True
+        )
+        return result
+
+    def test_telegram_plugin_enabled(self):
+        """Telegram plugin must be enabled when PLATFORM=telegram."""
+        env = {
+            "HABITAT_NAME": "TestHabitat",
+            "USERNAME": "testuser",
+            "AGENT_COUNT": "1",
+            "ISOLATION_DEFAULT": "session",
+            "ISOLATION_GROUPS": "browser",
+            "PLATFORM": "telegram",
+            "TELEGRAM_OWNER_ID": "123456789",
+            "AGENT1_NAME": "test-agent",
+            "AGENT1_BOT_TOKEN": "111111:AAAA",
+            "AGENT1_ISOLATION_GROUP": "browser",
+            "AGENT1_MODEL": "anthropic/claude-sonnet-4-5",
+        }
+        
+        result = self.run_script_with_env(env)
+        self.assertEqual(result.returncode, 0, f"Script failed: {result.stderr}")
+        
+        config_file = os.path.join(self.output_dir, "browser", "openclaw.session.json")
+        with open(config_file) as f:
+            config = json.load(f)
+        
+        # Check plugins section exists with telegram enabled
+        self.assertIn("plugins", config, "Config must have plugins section")
+        self.assertIn("entries", config["plugins"], "plugins must have entries")
+        self.assertIn("telegram", config["plugins"]["entries"], "plugins.entries must have telegram")
+        self.assertTrue(config["plugins"]["entries"]["telegram"]["enabled"],
+                        "telegram plugin must be enabled when PLATFORM=telegram")
+
+    def test_both_plugins_enabled(self):
+        """Both telegram and discord plugins must be enabled when PLATFORM=both."""
+        env = {
+            "HABITAT_NAME": "TestHabitat",
+            "USERNAME": "testuser",
+            "AGENT_COUNT": "1",
+            "ISOLATION_DEFAULT": "session",
+            "ISOLATION_GROUPS": "browser",
+            "PLATFORM": "both",
+            "TELEGRAM_OWNER_ID": "123456789",
+            "DISCORD_OWNER_ID": "987654321",
+            "AGENT1_NAME": "test-agent",
+            "AGENT1_BOT_TOKEN": "111111:AAAA",
+            "AGENT1_DISCORD_TOKEN": "discord_token_here",
+            "AGENT1_ISOLATION_GROUP": "browser",
+            "AGENT1_MODEL": "anthropic/claude-sonnet-4-5",
+        }
+        
+        result = self.run_script_with_env(env)
+        self.assertEqual(result.returncode, 0, f"Script failed: {result.stderr}")
+        
+        config_file = os.path.join(self.output_dir, "browser", "openclaw.session.json")
+        with open(config_file) as f:
+            config = json.load(f)
+        
+        # Check both plugins are enabled
+        self.assertTrue(config["plugins"]["entries"]["telegram"]["enabled"],
+                        "telegram plugin must be enabled when PLATFORM=both")
+        self.assertTrue(config["plugins"]["entries"]["discord"]["enabled"],
+                        "discord plugin must be enabled when PLATFORM=both")
 
 
 if __name__ == "__main__":

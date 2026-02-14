@@ -139,7 +139,12 @@ for group in "${SESSION_GROUPS[@]}"; do
             [ $agent_count_in_group -gt 0 ] && agent_list_json="${agent_list_json},"
             is_default="false"
             [ $agent_count_in_group -eq 0 ] && is_default="true"
-            agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\"}"
+            # Include agentDir pointing to state_dir so sessions are stored correctly
+            agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\",\"agentDir\":\"${state_dir}/agents/agent${i}/agent\"}"
+            
+            # Create agent directories including sessions
+            mkdir -p "${state_dir}/agents/agent${i}/agent"
+            mkdir -p "${state_dir}/agents/agent${i}/sessions"
             
             # Build Telegram account for this agent
             if [ -n "$agent_bot_token" ]; then
@@ -156,10 +161,8 @@ for group in "${SESSION_GROUPS[@]}"; do
                 [ -n "$discord_accounts_json" ] && discord_accounts_json="${discord_accounts_json},"
                 discord_accounts_json="${discord_accounts_json}\"agent${i}\":{\"name\":\"${agent_name}\",\"botToken\":\"${agent_dc_token}\"}"
                 
-                # Build Discord binding if not already added
-                if [ -z "$agent_bot_token" ]; then
-                    [ -n "$bindings_json" ] && bindings_json="${bindings_json},"
-                fi
+                # Build Discord binding (always add comma if bindings already exist)
+                [ -n "$bindings_json" ] && bindings_json="${bindings_json},"
                 bindings_json="${bindings_json}{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"discord\",\"accountId\":\"agent${i}\"}}"
             fi
             
@@ -204,11 +207,19 @@ for group in "${SESSION_GROUPS[@]}"; do
       "accounts": {${discord_accounts_json}}
     }
   },
-  "bindings": [${bindings_json}]
+  "bindings": [${bindings_json}],
+  "plugins": {
+    "entries": {
+      "telegram": {"enabled": $([ "$PLATFORM" = "telegram" ] || [ "$PLATFORM" = "both" ] && echo true || echo false)},
+      "discord": {"enabled": $([ "$PLATFORM" = "discord" ] || [ "$PLATFORM" = "both" ] && echo true || echo false)}
+    }
+  }
 }
 SESSIONCFG
-    # Make config readable by service user
-    chmod 644 "${group_dir}/openclaw.session.json"
+    # Make config AND directory writable by service user (OpenClaw needs to persist config changes)
+    chmod 777 "$group_dir"
+    chmod 666 "${group_dir}/openclaw.session.json"
+    [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}"
 
     # Generate systemd service
     cat > "${OUTPUT_DIR}/openclaw-${group}.service" <<SVCFILE

@@ -399,11 +399,38 @@ class H(http.server.BaseHTTPRequestHandler):
       if not ok:
         self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
-      for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:
+      # Include all relevant logs for debugging
+      for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/post-boot-check.log','/var/log/cloud-init-output.log']:
         try:
           self.wfile.write(f"\n=== {lf} ===\n".encode())
           with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
         except:self.wfile.write(f"  (not found)\n".encode())
+      # Include session isolation debug info
+      self.wfile.write(b"\n=== Session Isolation Debug ===\n")
+      try:
+        # Show isolation config
+        isolation_mode="none"
+        isolation_groups=""
+        with open('/etc/habitat-parsed.env','r') as f:
+          for line in f:
+            if line.startswith('ISOLATION_DEFAULT='):isolation_mode=line.strip()
+            if line.startswith('ISOLATION_GROUPS='):isolation_groups=line.strip()
+        self.wfile.write(f"Config: {isolation_mode}, {isolation_groups}\n".encode())
+        # Show session service status
+        for svc in ['clawdbot','openclaw-browser','openclaw-documents','openclaw-containers']:
+          try:
+            r=subprocess.run(['systemctl','is-active',svc],capture_output=True,timeout=5)
+            status=r.stdout.decode().strip()
+          except:status='unknown'
+          self.wfile.write(f"Service {svc}: {status}\n".encode())
+        # Show recent openclaw logs
+        try:
+          r=subprocess.run(['journalctl','-u','openclaw-browser','-u','openclaw-documents','--since','10 min ago','-n','50','--no-pager'],capture_output=True,timeout=10)
+          self.wfile.write(b"\n=== Recent OpenClaw Session Logs ===\n")
+          self.wfile.write(r.stdout[-4096:])
+        except:self.wfile.write(b"(failed to get journalctl)\n")
+      except Exception as e:
+        self.wfile.write(f"Debug error: {e}\n".encode())
     elif self.path=='/config/status':
       # Unauthenticated endpoint - returns only api_uploaded status (no sensitive data)
       self.send_json(200,get_config_upload_status())
