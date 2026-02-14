@@ -1,0 +1,30 @@
+{
+  "name": "SafeModeTest",
+  "platform": "telegram",
+  "destructMinutes": 30,
+  "bgColor": "FF0000",
+  "isolation": "session",
+  "agents": [
+    {
+      "agent": "FailBot1",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "will-fail",
+      "tokens": {
+        "telegram": "INVALID_TOKEN_WILL_FAIL"
+      }
+    },
+    {
+      "agent": "FailBot2", 
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "will-fail",
+      "tokens": {
+        "telegram": "ANOTHER_INVALID_TOKEN"
+      }
+    }
+  ],
+  "platforms": {
+    "telegram": {
+      "ownerId": "123456789"
+    }
+  }
+}
