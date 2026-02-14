@@ -148,8 +148,19 @@ for group in "${SESSION_GROUPS[@]}"; do
             # agentDir in config causes session path validation issues
             agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\"}"
             
-            # Create agent directory (OpenClaw will create sessions/ inside)
-            mkdir -p "${state_dir}/agents/agent${i}"
+            # Create agent directory structure (OpenClaw will create sessions/ inside)
+            mkdir -p "${state_dir}/agents/agent${i}/agent"
+            
+            # Copy auth-profiles.json from main agent directory if it exists
+            main_auth="${HOME_DIR}/.openclaw/agents/agent${i}/agent/auth-profiles.json"
+            session_auth="${state_dir}/agents/agent${i}/agent/auth-profiles.json"
+            if [ -f "$main_auth" ]; then
+                cp "$main_auth" "$session_auth"
+                echo "  [agent${i}] Copied auth-profiles.json from main agent dir"
+            else
+                echo "  [agent${i}] WARNING: No auth-profiles.json found at $main_auth"
+            fi
+            
             [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}"
             
             # Build Telegram account for this agent
