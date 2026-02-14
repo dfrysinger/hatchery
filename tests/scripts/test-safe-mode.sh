@@ -197,6 +197,63 @@ test_tries_tokens_in_order() {
 }
 test_tries_tokens_in_order
 
+# Test: Cross-platform fallback (TG fails, DC succeeds)
+test_cross_platform_fallback() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    # Mock: All Telegram tokens fail, Discord token works
+    mock_validate_telegram_token() { return 1; }
+    mock_validate_discord_token() {
+      [ "$1" = "DISCORD_TOKEN_VALID" ] && return 0 || return 1
+    }
+    export -f mock_validate_telegram_token mock_validate_discord_token
+    VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
+    VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
+    
+    result=$(find_working_platform_and_token)
+    if [ "$result" = "discord:DISCORD_TOKEN_VALID" ]; then
+      pass "cross_platform_fallback: found Discord after Telegram failed"
+    else
+      fail "cross_platform_fallback: expected 'discord:DISCORD_TOKEN_VALID', got '$result'"
+    fi
+  else
+    fail "cross_platform_fallback: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_cross_platform_fallback
+
+# Test: Returns platform:token format
+test_platform_token_format() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    mock_validate_telegram_token() {
+      [ "$1" = "TOKEN_2_VALID" ] && return 0 || return 1
+    }
+    export -f mock_validate_telegram_token
+    VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
+    
+    result=$(find_working_platform_and_token)
+    if [[ "$result" == "telegram:"* ]]; then
+      pass "platform_token_format: returns 'platform:token' format"
+    else
+      fail "platform_token_format: expected 'telegram:...' format, got '$result'"
+    fi
+  else
+    fail "platform_token_format: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_platform_token_format
+
 # =============================================================================
 # API KEY FALLBACK TESTS
 # =============================================================================
@@ -292,6 +349,42 @@ test_falls_back_to_gemini() {
   cleanup_test_env
 }
 test_falls_back_to_gemini
+
+# Test: Tries providers in correct order (Anthropic → OpenAI → Google)
+test_api_provider_order() {
+  setup_test_env
+  export ANTHROPIC_API_KEY="KEY_A"
+  export OPENAI_API_KEY="KEY_O"
+  export GOOGLE_API_KEY="KEY_G"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    PROVIDERS_TRIED=()
+    mock_validate_api_key() {
+      PROVIDERS_TRIED+=("$1")
+      return 1  # All fail
+    }
+    export -f mock_validate_api_key
+    export PROVIDERS_TRIED
+    VALIDATE_API_KEY_FN="mock_validate_api_key"
+    
+    find_working_api_provider >/dev/null
+    
+    if [ "${PROVIDERS_TRIED[0]}" = "anthropic" ] && \
+       [ "${PROVIDERS_TRIED[1]}" = "openai" ] && \
+       [ "${PROVIDERS_TRIED[2]}" = "google" ]; then
+      pass "api_provider_order: correct order anthropic→openai→google"
+    else
+      fail "api_provider_order: wrong order: ${PROVIDERS_TRIED[*]}"
+    fi
+  else
+    fail "api_provider_order: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_api_provider_order
 
 # Test: Returns error when all providers fail
 test_all_providers_fail() {
