@@ -438,7 +438,7 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
       # Include all relevant logs for debugging
-      for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/post-boot-check.log','/var/log/cloud-init-output.log']:
+      for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/post-boot-check.log','/var/log/safe-mode-recovery.log','/var/log/cloud-init-output.log']:
         try:
           self.wfile.write(f"\n=== {lf} ===\n".encode())
           with open(lf,'r') as f:self.wfile.write(f.read()[-16384:].encode())  # Increased to 16KB
