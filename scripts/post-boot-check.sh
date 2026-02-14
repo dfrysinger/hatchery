@@ -161,38 +161,85 @@ if [ "$HEALTHY" = "true" ]; then
   HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
   $TG "[OK] ${HN}${HDOM} fully operational. Full config applied (isolation=$ISOLATION). All systems ready." || true
 else
-  log "FAILURE - entering SAFE MODE"
-  
-  # Restore minimal config
-  cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
-  chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
-  chmod 600 "$H/.openclaw/openclaw.json"
+  log "FAILURE - entering SAFE MODE with smart recovery"
   touch /var/lib/init-status/safe-mode
   
+  # Source smart recovery functions
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "$SCRIPT_DIR/safe-mode-recovery.sh" ]; then
+    source "$SCRIPT_DIR/safe-mode-recovery.sh"
+  elif [ -f "/usr/local/bin/safe-mode-recovery.sh" ]; then
+    source "/usr/local/bin/safe-mode-recovery.sh"
+  fi
+  
+  # Try smart recovery (token hunting + API fallback)
+  SMART_RECOVERY_SUCCESS=false
+  if type run_smart_recovery &>/dev/null; then
+    log "Attempting smart recovery (token hunting + API fallback)..."
+    export HOME_DIR="$H"
+    export USERNAME="$USERNAME"
+    export RECOVERY_LOG="$LOG"
+    
+    if recovery_result=$(run_smart_recovery 2>&1); then
+      log "Smart recovery succeeded: $recovery_result"
+      SMART_RECOVERY_SUCCESS=true
+    else
+      log "Smart recovery failed, falling back to minimal config"
+    fi
+  else
+    log "Smart recovery not available, using minimal config"
+  fi
+  
+  # If smart recovery failed, fall back to minimal config
+  if [ "$SMART_RECOVERY_SUCCESS" = "false" ]; then
+    log "Restoring minimal config..."
+    cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+    chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
+    chmod 600 "$H/.openclaw/openclaw.json"
+  fi
+  
   # Create SAFE_MODE.md for each agent
+  RECOVERY_STATUS="minimal config"
+  [ "$SMART_RECOVERY_SUCCESS" = "true" ] && RECOVERY_STATUS="smart recovery (found working credentials)"
+  
   for si in $(seq 1 $AC); do
     cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<SAFEMD
 # SAFE MODE - Full config failed health checks
 
-The full openclaw config failed to start. You are running minimal config.
+The full openclaw config failed to start. Recovery method: **${RECOVERY_STATUS}**
 
 **Isolation mode:** $ISOLATION
 **Session groups:** $SESSION_GROUPS
+**Smart recovery:** $SMART_RECOVERY_SUCCESS
+
+## What Happened
+
+1. Full config was applied after reboot
+2. Health checks failed (services didn't respond)
+3. Safe mode activated with ${RECOVERY_STATUS}
+4. You're now running on port 18789
 
 ## Troubleshooting
 
 Check logs:
 \`\`\`bash
 cat /var/log/post-boot-check.log
+cat /var/log/safe-mode-recovery.log
 journalctl -u clawdbot -n 100
 $([ "$ISOLATION" = "session" ] && echo "systemctl status openclaw-browser openclaw-documents")
-$([ "$ISOLATION" = "container" ] && echo "docker-compose -f /etc/openclaw/docker-compose.yml logs")
 \`\`\`
 
 Try full config again:
 \`\`\`bash
 sudo /usr/local/bin/try-full-config.sh
 \`\`\`
+
+## Smart Recovery Details
+
+Safe mode now automatically:
+- Tries all bot tokens until one works
+- Falls back through API providers (Anthropic → OpenAI → Gemini)
+- Generates emergency config with working credentials
 SAFEMD
     chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
   done
