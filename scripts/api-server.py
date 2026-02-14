@@ -39,21 +39,78 @@ def check_service(name):
   except:return False
 
 def get_status():
-  s,p=0,1
-  try:
-    with open('/var/lib/init-status/stage','r') as f:s=int(f.read().strip())
-    with open('/var/lib/init-status/phase','r') as f:p=int(f.read().strip())
-  except:pass
+  # Check completion markers first to determine smart defaults
   p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
   p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
   setup_done=os.path.exists('/var/lib/init-status/setup-complete')
-  bot_online=check_service('clawdbot')
+  needs_check=os.path.exists('/var/lib/init-status/needs-post-boot-check')
+  
+  # Smart defaults based on completion state (handles transient read failures during reboot)
+  # needs-post-boot-check exists during reboot until post-boot-check.sh completes
+  if setup_done and not needs_check:
+    s,p=11,2  # Ready state (fully booted)
+  elif setup_done and needs_check:
+    s,p=10,2  # Rebooting (setup done but post-boot-check pending)
+  elif p2_done:
+    s,p=10,2  # Phase 2 done, finalizing
+  elif p1_done:
+    s,p=4,2   # Phase 1 done, starting phase 2
+  else:
+    s,p=0,1   # Initial state
+  
+  # Try to read actual values (overrides defaults if successful)
+  try:
+    with open('/var/lib/init-status/stage','r') as f:
+      val=f.read().strip()
+      if val:s=int(val)
+    with open('/var/lib/init-status/phase','r') as f:
+      val=f.read().strip()
+      if val:p=int(val)
+  except:pass
+  
+  # Check bot status based on isolation mode
+  # Read isolation config from habitat-parsed.env
+  isolation_mode="none"
+  isolation_groups=[]
+  try:
+    with open('/etc/habitat-parsed.env','r') as f:
+      for line in f:
+        if line.startswith('ISOLATION_DEFAULT='):
+          isolation_mode=line.split('=',1)[1].strip().strip('"')
+        elif line.startswith('ISOLATION_GROUPS='):
+          groups_str=line.split('=',1)[1].strip().strip('"')
+          if groups_str:
+            isolation_groups=groups_str.split(',')
+  except:pass
+  
+  # Determine bot_online based on isolation mode
+  if isolation_mode=="session" and isolation_groups:
+    # Session isolation: check if ANY session service is running
+    bot_online=any(check_service(f'openclaw-{g}') for g in isolation_groups)
+  elif isolation_mode=="container":
+    # Container isolation: check containers service
+    bot_online=check_service('openclaw-containers')
+  else:
+    # No isolation: check main clawdbot
+    bot_online=check_service('clawdbot')
+  
   svc={}
   if p2_done or setup_done:
-    for sv in ['clawdbot','xrdp','desktop','x11vnc']:svc[sv]=check_service(sv)
+    # Include isolation services in status
+    base_services=['xrdp','desktop','x11vnc']
+    if isolation_mode=="session" and isolation_groups:
+      for g in isolation_groups:
+        svc[f'openclaw-{g}']=check_service(f'openclaw-{g}')
+    elif isolation_mode=="container":
+      svc['openclaw-containers']=check_service('openclaw-containers')
+    else:
+      svc['clawdbot']=check_service('clawdbot')
+    for sv in base_services:
+      svc[sv]=check_service(sv)
   desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
   safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
-  return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online,"safe_mode":safe_mode,"services":svc if svc else None}
+  rebooting=setup_done and needs_check  # System rebooted, waiting for post-boot-check
+  return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online and not needs_check,"rebooting":rebooting,"safe_mode":safe_mode,"services":svc if svc else None}
 
 def validate_config_upload(data):
   """Validate config upload request data."""
@@ -61,6 +118,7 @@ def validate_config_upload(data):
   if "habitat" in data and not isinstance(data["habitat"],dict):errors.append("habitat must be an object")
   if "globals" in data and not isinstance(data["globals"],dict):errors.append("globals must be an object")
   if "agents" in data and not isinstance(data["agents"],dict):errors.append("agents must be an object")
+  if "globals" in data and not isinstance(data["globals"],dict):errors.append("globals must be an object")
   if "apply" in data and not isinstance(data["apply"],bool):errors.append("apply must be a boolean")
   return errors
 
@@ -379,11 +437,100 @@ class H(http.server.BaseHTTPRequestHandler):
       if not ok:
         self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       self.send_response(200);self.send_header('Content-type','text/plain');self.end_headers()
-      for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/cloud-init-output.log']:
+      # Include all relevant logs for debugging
+      for lf in ['/var/log/bootstrap.log','/var/log/phase1.log','/var/log/phase2.log','/var/log/post-boot-check.log','/var/log/cloud-init-output.log']:
         try:
           self.wfile.write(f"\n=== {lf} ===\n".encode())
-          with open(lf,'r') as f:self.wfile.write(f.read()[-8192:].encode())
+          with open(lf,'r') as f:self.wfile.write(f.read()[-16384:].encode())  # Increased to 16KB
         except:self.wfile.write(f"  (not found)\n".encode())
+      
+      # Enhanced debug info for isolation issues
+      self.wfile.write(b"\n=== FILE EXISTENCE CHECKS ===\n")
+      for f in ['/etc/droplet.env','/etc/habitat-parsed.env','/etc/habitat.json','/etc/agents.json']:
+        try:
+          import stat
+          st=os.stat(f)
+          self.wfile.write(f"{f}: exists, size={st.st_size}, mode={oct(st.st_mode)}\n".encode())
+        except:self.wfile.write(f"{f}: NOT FOUND\n".encode())
+      
+      self.wfile.write(b"\n=== /etc/habitat-parsed.env FULL CONTENTS (secrets redacted) ===\n")
+      try:
+        with open('/etc/habitat-parsed.env','r') as f:
+          for line in f:
+            # Redact sensitive lines
+            if any(x in line.upper() for x in ['TOKEN','SECRET','KEY','PASSWORD']):
+              key=line.split('=')[0] if '=' in line else line
+              self.wfile.write(f"{key}=<REDACTED>\n".encode())
+            else:
+              self.wfile.write(line.encode())
+      except Exception as e:
+        self.wfile.write(f"ERROR reading habitat-parsed.env: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== SYSTEMD SESSION SERVICE FILES ===\n")
+      try:
+        r=subprocess.run(['ls','-la','/etc/systemd/system/'],capture_output=True,timeout=5)
+        for line in r.stdout.decode().split('\n'):
+          if 'openclaw' in line:
+            self.wfile.write(f"{line}\n".encode())
+      except Exception as e:
+        self.wfile.write(f"ERROR: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== SESSION STATE DIRECTORIES ===\n")
+      try:
+        import glob
+        # Get username from env
+        username="bot"
+        try:
+          with open('/etc/habitat-parsed.env','r') as f:
+            for line in f:
+              if line.startswith('USERNAME='):
+                username=line.split('=',1)[1].strip().strip('"')
+                break
+        except:pass
+        state_base=f"/home/{username}/.openclaw-sessions"
+        self.wfile.write(f"State base: {state_base}\n".encode())
+        if os.path.exists(state_base):
+          r=subprocess.run(['ls','-laR',state_base],capture_output=True,timeout=5)
+          self.wfile.write(r.stdout[-4096:])
+        else:
+          self.wfile.write(b"State directory does not exist yet\n")
+      except Exception as e:
+        self.wfile.write(f"ERROR: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== SESSION SERVICE STATUS ===\n")
+      for svc in ['clawdbot','openclaw-browser','openclaw-documents','openclaw-containers']:
+        try:
+          r=subprocess.run(['systemctl','status',svc,'--no-pager'],capture_output=True,timeout=5)
+          self.wfile.write(f"\n--- {svc} ---\n".encode())
+          self.wfile.write(r.stdout[-2048:])
+        except Exception as e:
+          self.wfile.write(f"{svc}: error getting status: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== SESSION SERVICE LOGS (journalctl) ===\n")
+      try:
+        r=subprocess.run(['journalctl','-u','openclaw-browser','-u','openclaw-documents','-u','openclaw-containers','--since','30 min ago','-n','100','--no-pager'],capture_output=True,timeout=10)
+        self.wfile.write(r.stdout[-8192:])
+      except Exception as e:
+        self.wfile.write(f"ERROR: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== CLAWDBOT LOGS ===\n")
+      try:
+        r=subprocess.run(['journalctl','-u','clawdbot','--since','30 min ago','-n','50','--no-pager'],capture_output=True,timeout=10)
+        self.wfile.write(r.stdout[-4096:])
+      except Exception as e:
+        self.wfile.write(f"ERROR: {e}\n".encode())
+      
+      self.wfile.write(b"\n=== INIT STATUS FILES ===\n")
+      for f in ['/var/lib/init-status/stage','/var/lib/init-status/phase','/var/lib/init-status/setup-complete','/var/lib/init-status/safe-mode','/var/lib/init-status/needs-post-boot-check']:
+        try:
+          if os.path.exists(f):
+            with open(f,'r') as fh:
+              content=fh.read().strip()[:100]
+            self.wfile.write(f"{f}: exists, content='{content}'\n".encode())
+          else:
+            self.wfile.write(f"{f}: NOT FOUND\n".encode())
+        except Exception as e:
+          self.wfile.write(f"{f}: error: {e}\n".encode())
     elif self.path=='/config/status':
       # Unauthenticated endpoint - returns only api_uploaded status (no sensitive data)
       self.send_json(200,get_config_upload_status())
@@ -465,8 +612,33 @@ class H(http.server.BaseHTTPRequestHandler):
       
       files_written=[]
       
-      # Write habitat config
-      if "habitat" in data:
+      # Merge globals into existing habitat on disk
+      # Flow: YAML embeds minimal habitat → Shortcut sends globals to merge
+      if "globals" in data:
+        globals_data = data["globals"]
+        if isinstance(globals_data, dict):
+          # Read existing habitat from disk
+          try:
+            with open(HABITAT_PATH, 'r') as f:
+              habitat = json.load(f)
+          except FileNotFoundError:
+            self.send_json(400,{"ok":False,"error":"No existing habitat.json to merge globals into"});return
+          except json.JSONDecodeError as e:
+            self.send_json(500,{"ok":False,"error":f"Existing habitat.json is invalid: {e}"});return
+          
+          # Merge globals into habitat (globals don't overwrite existing keys)
+          for key, value in globals_data.items():
+            if key not in habitat:
+              habitat[key] = value
+          
+          # Write merged habitat back
+          result=write_config_file(HABITAT_PATH, habitat)
+          if not result["ok"]:
+            self.send_json(500,{"ok":False,"error":f"Failed to write merged habitat: {result.get('error')}"});return
+          files_written.append(HABITAT_PATH + " (merged)")
+      
+      # Write habitat config (if provided directly, overwrites)
+      elif "habitat" in data:
         result=write_config_file(HABITAT_PATH,data["habitat"])
         if not result["ok"]:
           self.send_json(500,{"ok":False,"error":f"Failed to write habitat: {result.get('error')}"});return

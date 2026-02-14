@@ -9,7 +9,7 @@ bootcmd:
   - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&[ ! -f /var/lib/init-status/boot-complete ]&&{ echo 11>/var/lib/init-status/stage;echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready\">>/var/log/init-stages.log;touch /var/lib/init-status/boot-complete;}||true"]
 write_files:
   - path: /etc/hatchery-version
-    content: "main"
+    content: "feature/shortcut-api-testing"
   - path: /etc/droplet.env
     owner: root:root
     permissions: "0600"
@@ -116,8 +116,8 @@ write_files:
       notify(){ [ -x /usr/local/bin/tg-notify.sh ]&&/usr/local/bin/tg-notify.sh "$1" 2>/dev/null||true;}
       fetch(){ local u="$1" d="$2" i;for i in 1 2 3;do curl -fSL --max-time 60 -o "$d" "$u"&&return 0;sleep $((i*5));done;notify "bootstrap: fetch failed -- $u";return 1;}
       mkdir -p "$DIR";T=$(mktemp)
-      if [ "$VER" = "main" ];then
-        log "Fetching main";fetch "https://github.com/${REPO}/archive/refs/heads/main.tar.gz" "$T"
+      if [[ "$VER" == "main" ]] || [[ "$VER" == feature/* ]] || [[ "$VER" == fix/* ]];then
+        log "Fetching branch $VER";fetch "https://github.com/${REPO}/archive/refs/heads/${VER}.tar.gz" "$T"
         tar -xzf "$T" --strip-components=1 -C "$DIR"
       else
         log "Fetching v${VER}";S=$(mktemp);BU="https://github.com/${REPO}/releases/download/v${VER}"

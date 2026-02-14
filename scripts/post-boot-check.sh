@@ -6,50 +6,149 @@
 #           config to full config, validates health, and enters safe mode
 #           if full config fails health checks.
 #
-# Inputs:   /etc/droplet.env -- all B64-encoded secrets and config
-#           /etc/habitat-parsed.env -- parsed habitat config
-#           $HOME/.openclaw/openclaw.full.json -- full config to apply
-#           /var/lib/init-status/needs-post-boot-check -- trigger file
-#
-# Outputs:  /var/lib/init-status/setup-complete -- on success
-#           /var/lib/init-status/safe-mode -- on failure (fallback to minimal)
-#           SAFE_MODE.md in agent workspaces -- on failure
-#
-# Dependencies: tg-notify.sh, systemctl, curl
-#
-# Original: /usr/local/bin/post-boot-check.sh (in hatch.yaml write_files)
+# Inputs:   /etc/droplet.env, /etc/habitat-parsed.env
+# Outputs:  /var/lib/init-status/setup-complete or safe-mode markers
 # =============================================================================
-set -a; source /etc/droplet.env; set +a
+
+LOG="/var/log/post-boot-check.log"
+
+log() {
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"
+}
+
+log "========== POST-BOOT-CHECK STARTING =========="
+
+# Source environment
+if [ -f /etc/droplet.env ]; then
+  set -a; source /etc/droplet.env; set +a
+else
+  log "ERROR: /etc/droplet.env not found"
+  exit 1
+fi
+
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+
+if [ -f /etc/habitat-parsed.env ]; then
+  source /etc/habitat-parsed.env
+else
+  log "ERROR: /etc/habitat-parsed.env not found"
+  exit 1
+fi
+
+# Set working variables
 AC=${AGENT_COUNT:-1}
 H="/home/$USERNAME"
 TG="/usr/local/bin/tg-notify.sh"
-LOG="/var/log/post-boot-check.log"
-[ ! -f /var/lib/init-status/needs-post-boot-check ] && {
+ISOLATION="${ISOLATION_DEFAULT:-none}"
+# NOTE: Do NOT use "GROUPS" - it's a bash built-in array variable that causes conflicts
+SESSION_GROUPS="${ISOLATION_GROUPS:-}"
+
+log "Config: isolation=$ISOLATION groups=$SESSION_GROUPS agents=$AC"
+
+# Check for trigger file
+if [ ! -f /var/lib/init-status/needs-post-boot-check ]; then
+  log "No trigger file - exiting"
   exit 0
-}
+fi
+
+log "Trigger file found, waiting 15s for services to settle..."
 sleep 15
+
+# Check for full config
 if [ ! -f "$H/.openclaw/openclaw.full.json" ]; then
+  log "No full config found - exiting"
   rm -f /var/lib/init-status/needs-post-boot-check
   exit 0
 fi
+
+# Apply full config
+log "Applying full config..."
 cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
 chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
 chmod 600 "$H/.openclaw/openclaw.json"
-systemctl restart clawdbot
+
+# Health check function for a single service/port
+check_service_health() {
+  local service="$1"
+  local port="$2"
+  local max_attempts="${3:-12}"
+  
+  log "Health check: $service on port $port"
+  
+  for i in $(seq 1 $max_attempts); do
+    sleep 5
+    
+    # Check systemd status
+    local active=$(systemctl is-active "$service" 2>&1)
+    if [ "$active" != "active" ]; then
+      log "  attempt $i/$max_attempts: not active ($active)"
+      continue
+    fi
+    
+    # Try curl
+    if curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
+      log "  HEALTHY after $i attempts"
+      return 0
+    fi
+    log "  attempt $i/$max_attempts: curl failed"
+  done
+  
+  log "  FAILED after $max_attempts attempts"
+  return 1
+}
+
 HEALTHY=false
-for i in $(seq 1 12); do
-  sleep 5
-  if ! systemctl is-active --quiet clawdbot; then
-    continue
+
+if [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
+  log "Session isolation mode"
+  
+  # Ensure state directories have correct permissions
+  STATE_BASE="$H/.openclaw-sessions"
+  if [ -d "$STATE_BASE" ]; then
+    chown -R $USERNAME:$USERNAME "$STATE_BASE" 2>/dev/null || true
+    chmod -R u+rwX "$STATE_BASE" 2>/dev/null || true
   fi
-  if curl -sf http://127.0.0.1:18789/ >> "$LOG" 2>&1; then
+  
+  # Parse groups and restart services
+  IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+  log "Processing ${#GROUP_ARRAY[@]} group(s): ${GROUP_ARRAY[*]}"
+  
+  for group in "${GROUP_ARRAY[@]}"; do
+    log "Restarting openclaw-${group}.service"
+    systemctl restart "openclaw-${group}.service" 2>&1 || true
+  done
+  
+  # Check if at least one session service is healthy
+  BASE_PORT=18790
+  group_index=0
+  for group in "${GROUP_ARRAY[@]}"; do
+    port=$((BASE_PORT + group_index))
+    if check_service_health "openclaw-${group}.service" "$port" 12; then
+      HEALTHY=true
+      log "Session service healthy: $group"
+      break
+    fi
+    group_index=$((group_index + 1))
+  done
+
+elif [ "$ISOLATION" = "container" ]; then
+  log "Container isolation mode"
+  systemctl restart openclaw-containers.service 2>/dev/null || true
+  sleep 10
+  if check_service_health "openclaw-containers.service" 18790 12; then
     HEALTHY=true
-    break
   fi
-done
+
+else
+  log "Standard mode (no isolation)"
+  systemctl restart clawdbot 2>&1 || true
+  if check_service_health "clawdbot" 18789 12; then
+    HEALTHY=true
+  fi
+fi
+
 if [ "$HEALTHY" = "true" ]; then
+  log "SUCCESS - marking setup complete"
   rm -f /var/lib/init-status/needs-post-boot-check
   rm -f /var/lib/init-status/safe-mode
   for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
@@ -59,24 +158,62 @@ if [ "$HEALTHY" = "true" ]; then
   touch /var/lib/init-status/boot-complete
   HN="${HABITAT_NAME:-default}"
   HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-  $TG "[OK] ${HN}${HDOM} fully operational. Full config applied. All systems ready." || true
+  $TG "[OK] ${HN}${HDOM} fully operational. Full config applied (isolation=$ISOLATION). All systems ready." || true
 else
+  log "FAILURE - entering SAFE MODE"
+  
+  # Restore minimal config
   cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
   chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
   chmod 600 "$H/.openclaw/openclaw.json"
   touch /var/lib/init-status/safe-mode
+  
+  # Create SAFE_MODE.md for each agent
   for si in $(seq 1 $AC); do
-  cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<'SAFEMD'
+    cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<SAFEMD
 # SAFE MODE - Full config failed health checks
+
 The full openclaw config failed to start. You are running minimal config.
-Try: sudo /usr/local/bin/try-full-config.sh
-Check: journalctl -u clawdbot -n 100
-If that fails, check openclaw.full.json for errors.
+
+**Isolation mode:** $ISOLATION
+**Session groups:** $SESSION_GROUPS
+
+## Troubleshooting
+
+Check logs:
+\`\`\`bash
+cat /var/log/post-boot-check.log
+journalctl -u clawdbot -n 100
+$([ "$ISOLATION" = "session" ] && echo "systemctl status openclaw-browser openclaw-documents")
+$([ "$ISOLATION" = "container" ] && echo "docker-compose -f /etc/openclaw/docker-compose.yml logs")
+\`\`\`
+
+Try full config again:
+\`\`\`bash
+sudo /usr/local/bin/try-full-config.sh
+\`\`\`
 SAFEMD
-  chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
-done
+    chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
+  done
+  
+  # Stop any session/container services and start clawdbot as fallback
+  if [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
+    log "Stopping session services for safe mode fallback"
+    IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+    for group in "${GROUP_ARRAY[@]}"; do
+      systemctl stop "openclaw-${group}.service" 2>/dev/null || true
+    done
+  elif [ "$ISOLATION" = "container" ]; then
+    log "Stopping container service for safe mode fallback"
+    systemctl stop openclaw-containers.service 2>/dev/null || true
+  fi
+  
+  log "Starting clawdbot as safe mode fallback"
   systemctl restart clawdbot
   sleep 5
+  
   rm -f /var/lib/init-status/needs-post-boot-check
-  $TG "[SAFE MODE] Running minimal config. Full config failed health checks. Bot is attempting repairs." || true
+  $TG "[SAFE MODE] ${HABITAT_NAME:-default} running minimal config. Full config failed (isolation=$ISOLATION). Check /var/log/post-boot-check.log" || true
 fi
+
+log "========== POST-BOOT-CHECK COMPLETE =========="
