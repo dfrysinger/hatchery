@@ -22,10 +22,50 @@ set -e
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 if ! python3 /usr/local/bin/parse-habitat.py; then
-  echo 'HABITAT_NAME="broken"' > /etc/habitat-parsed.env
-  echo 'AGENT_COUNT=1' >> /etc/habitat-parsed.env
-  echo 'AGENT1_NAME="Claude"' >> /etc/habitat-parsed.env
-  python3 -c "import base64,json,os;h=json.loads(base64.b64decode(os.environ.get('HABITAT_B64','')).decode());a=h.get('agents',[{}])[0];print('AGENT1_BOT_TOKEN=\"{}\"'.format(a.get('botToken','')))" >> /etc/habitat-parsed.env 2>/dev/null || true
+  # Fallback: extract minimal config directly from HABITAT_B64 for safe-mode
+  # Handles both v1 (botToken, discordBotToken) and v2 (tokens.telegram, tokens.discord) schemas
+  python3 << 'FALLBACK_PY' >> /etc/habitat-parsed.env 2>/dev/null || true
+import base64, json, os, sys
+try:
+    h = json.loads(base64.b64decode(os.environ.get('HABITAT_B64', '')).decode())
+except:
+    h = {}
+print('HABITAT_NAME="broken"')
+print('AGENT_COUNT=1')
+
+# Agent 1 config
+a = h.get('agents', [{}])[0] if h.get('agents') else {}
+name = a.get('name', 'Claude')
+print(f'AGENT1_NAME="{name}"')
+
+# Platform detection (v2: platforms.X, v1: discord/telegram presence)
+plat = h.get('platform', '')
+if not plat:
+    if h.get('platforms', {}).get('discord') or h.get('discord'):
+        plat = 'discord'
+    elif h.get('platforms', {}).get('telegram') or a.get('botToken') or a.get('tokens', {}).get('telegram'):
+        plat = 'telegram'
+    else:
+        plat = 'telegram'  # default
+print(f'PLATFORM="{plat}"')
+
+# Telegram token: v2 (tokens.telegram) > v1 (botToken)
+tg_tok = a.get('tokens', {}).get('telegram', '') or a.get('botToken', '')
+print(f'AGENT1_BOT_TOKEN="{tg_tok}"')
+
+# Discord token: v2 (tokens.discord) > v1 (discordBotToken)
+dc_tok = a.get('tokens', {}).get('discord', '') or a.get('discordBotToken', '')
+print(f'AGENT1_DISCORD_BOT_TOKEN="{dc_tok}"')
+
+# Owner IDs - v2: platforms.X.ownerId, v1: discord{OwnerId,GuildId}
+dc_owner = h.get('platforms', {}).get('discord', {}).get('ownerId', '') or h.get('discordOwnerId', '') or h.get('discord', {}).get('ownerId', '')
+dc_guild = h.get('platforms', {}).get('discord', {}).get('guildId', '') or h.get('discordGuildId', '') or h.get('discord', {}).get('guildId', '')
+tg_owner = h.get('platforms', {}).get('telegram', {}).get('ownerId', '') or h.get('telegram', {}).get('ownerId', '')
+print(f'DISCORD_OWNER_ID="{dc_owner}"')
+print(f'DISCORD_GUILD_ID="{dc_guild}"')
+if tg_owner:
+    print(f'TELEGRAM_USER_ID="{tg_owner}"')
+FALLBACK_PY
 fi
 source /etc/habitat-parsed.env
 S="/usr/local/bin/set-stage.sh"

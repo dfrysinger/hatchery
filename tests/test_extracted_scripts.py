@@ -519,6 +519,62 @@ class TestSetCouncilGroup:
         )
 
 
+class TestPhase1SafeModeFallback:
+    """Test safe-mode fallback extracts tokens from v1 and v2 habitat schemas."""
+
+    def test_fallback_code_exists(self):
+        """phase1-critical.sh should have a fallback when parse-habitat.py fails."""
+        path = os.path.join(SCRIPTS_DIR, "phase1-critical.sh")
+        if not os.path.isfile(path):
+            pytest.skip("phase1-critical.sh does not exist")
+        with open(path, "r") as f:
+            content = f.read()
+        # Should have fallback code that extracts from HABITAT_B64
+        assert "if ! python3 /usr/local/bin/parse-habitat.py" in content
+        assert "FALLBACK_PY" in content or "HABITAT_B64" in content
+
+    def test_fallback_extracts_discord_tokens(self):
+        """Fallback should extract AGENT1_DISCORD_BOT_TOKEN."""
+        path = os.path.join(SCRIPTS_DIR, "phase1-critical.sh")
+        if not os.path.isfile(path):
+            pytest.skip("phase1-critical.sh does not exist")
+        with open(path, "r") as f:
+            content = f.read()
+        # Must extract Discord token for safe-mode to work with Discord habitats
+        assert "AGENT1_DISCORD_BOT_TOKEN" in content
+
+    def test_fallback_extracts_v2_tokens(self):
+        """Fallback should handle v2 schema (tokens.telegram, tokens.discord)."""
+        path = os.path.join(SCRIPTS_DIR, "phase1-critical.sh")
+        if not os.path.isfile(path):
+            pytest.skip("phase1-critical.sh does not exist")
+        with open(path, "r") as f:
+            content = f.read()
+        # v2 schema uses tokens.{platform} nested structure
+        assert "tokens" in content, "Fallback must handle v2 tokens.X schema"
+
+    def test_fallback_extracts_owner_ids(self):
+        """Fallback should extract DISCORD_OWNER_ID and DISCORD_GUILD_ID."""
+        path = os.path.join(SCRIPTS_DIR, "phase1-critical.sh")
+        if not os.path.isfile(path):
+            pytest.skip("phase1-critical.sh does not exist")
+        with open(path, "r") as f:
+            content = f.read()
+        # Owner ID is needed for DM allowlist
+        assert "DISCORD_OWNER_ID" in content
+        assert "DISCORD_GUILD_ID" in content
+
+    def test_fallback_extracts_platform(self):
+        """Fallback should extract PLATFORM from habitat."""
+        path = os.path.join(SCRIPTS_DIR, "phase1-critical.sh")
+        if not os.path.isfile(path):
+            pytest.skip("phase1-critical.sh does not exist")
+        with open(path, "r") as f:
+            content = f.read()
+        # Platform detection is critical for enabling correct channel
+        assert 'PLATFORM=' in content
+
+
 # NOTE: TestScriptsMatchYaml removed -- with slim YAML approach, scripts are 
 # fetched from GitHub by bootstrap.sh, not embedded in hatch.yaml.
 # The scripts/ directory IS the source of truth now.
