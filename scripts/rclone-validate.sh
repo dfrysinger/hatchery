@@ -55,6 +55,7 @@ _validate_one_path() {
 
   # Reject obvious remote roots / no-path remotes
   if rclone_is_remote_path "$p"; then
+    # shellcheck disable=SC2221,SC2222  # Patterns are intentionally overlapping for readability
     case "$p" in
       *:|*:/*|*:/\*)
         # dropbox:, dropbox:/, dropbox:/*

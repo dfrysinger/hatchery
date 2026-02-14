@@ -15,6 +15,7 @@ set -euo pipefail
 QUIET="${1:-}"
 
 # Allowed ports (must match docs/ALLOWED_PORTS.md)
+# shellcheck disable=SC2034  # Referenced in docs, future use for validation
 ALLOWED_PORTS="22 80 443 3389 8080 18789"
 
 # Forbidden ports (security risk if exposed)

@@ -27,7 +27,8 @@ TG_OK=0; DC_OK=0
 # --- Telegram notification ---
 send_telegram() {
   local TBT="${AGENT1_BOT_TOKEN}"
-  local TUI=$(d "$TELEGRAM_USER_ID_B64")
+  local TUI
+  TUI=$(d "$TELEGRAM_USER_ID_B64")
   [ -z "$TBT" ] || [ -z "$TUI" ] && return 1
   curl -sf --max-time 10 "https://api.telegram.org/bot${TBT}/sendMessage" \
     -d "chat_id=${TUI}" \

@@ -36,7 +36,7 @@ atomic_write() {
   local path="$1"
   local content="$2"
 
-  python3 - "$path" <<'PY'
+  printf '%s' "$content" | python3 -c '
 import os, sys, tempfile
 path = sys.argv[1]
 content = sys.stdin.read()
@@ -65,7 +65,7 @@ finally:
         os.unlink(tmppath)
     except FileNotFoundError:
         pass
-PY
+' "$path"
 }
 
 LOCK_FILE="${SPRINT_STATE_LOCK_FILE:-${STATE_FILE}.lock}"

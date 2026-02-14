@@ -57,8 +57,10 @@ GT=$(cat $H/.openclaw/gateway-token.txt)
 AC=${AGENT_COUNT:-1}
 # Escape user-provided values for JSON safety
 TUI_ESC=$(json_escape "$TUI"); DGI_ESC=$(json_escape "$DGI"); DOI_ESC=$(json_escape "$DOI")
-CGI_ESC=$(json_escape "$CGI"); CGN_ESC=$(json_escape "$CGN"); GT_ESC=$(json_escape "$GT")
+CGI_ESC=$(json_escape "$CGI"); GT_ESC=$(json_escape "$GT")
 AK_ESC=$(json_escape "$AK"); GK_ESC=$(json_escape "$GK"); BK_ESC=$(json_escape "$BK")
+# shellcheck disable=SC2034  # Reserved for future Google Chat/OpenAI config
+CGN_ESC=$(json_escape "$CGN")
 OA_ESC=$(json_escape "$OA"); OR_ESC=$(json_escape "$OR"); OI_ESC=$(json_escape "$OI")
 mkdir -p $H/.openclaw/credentials
 for i in $(seq 1 $AC); do
@@ -400,9 +402,9 @@ elif [ "$ISOLATION_DEFAULT" = "container" ]; then
   bash /usr/local/sbin/generate-docker-compose.sh || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
 fi
 if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
-  R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
-  G=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc))
-  B=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc))
+  R=$(printf "%.5f" "$(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc)")
+  G=$(printf "%.5f" "$(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc)")
+  B=$(printf "%.5f" "$(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc)")
   DXML="$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml"
   mkdir -p "$(dirname "$DXML")"
   cat > "$DXML" <<BGXML

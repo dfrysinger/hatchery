@@ -26,7 +26,7 @@ chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
 chmod 600 "$H/.openclaw/openclaw.json"
 systemctl restart clawdbot
 HEALTHY=false
-for i in $(seq 1 12); do
+for _ in $(seq 1 12); do
   sleep 5
   if systemctl is-active --quiet clawdbot; then
     if curl -sf http://127.0.0.1:18789/ >/dev/null 2>&1; then

@@ -43,6 +43,7 @@ ISOLATION="${ISOLATION_DEFAULT:-none}"
 ISO_GROUPS="${ISOLATION_GROUPS:-}"
 SVC_USER="${USERNAME:-bot}"
 HABITAT="${HABITAT_NAME:-default}"
+# shellcheck disable=SC2034  # Reserved for future shared path mounting
 SHARED="${ISOLATION_SHARED_PATHS:-}"
 PLATFORM="${PLATFORM:-telegram}"
 OUTPUT_DIR="${SESSION_OUTPUT_DIR:-/etc/systemd/system}"
