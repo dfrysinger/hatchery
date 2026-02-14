@@ -156,6 +156,7 @@ for group in "${SESSION_GROUPS[@]}"; do
             session_auth="${state_dir}/agents/agent${i}/agent/auth-profiles.json"
             if [ -f "$main_auth" ]; then
                 cp "$main_auth" "$session_auth"
+                chmod 600 "$session_auth"  # Secure: contains API keys
                 echo "  [agent${i}] Copied auth-profiles.json from main agent dir"
             else
                 echo "  [agent${i}] WARNING: No auth-profiles.json found at $main_auth"
