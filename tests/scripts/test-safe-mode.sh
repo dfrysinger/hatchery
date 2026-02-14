@@ -663,6 +663,101 @@ test_full_recovery_bad_api_key() {
 test_full_recovery_bad_api_key
 
 # =============================================================================
+# RESILIENCE TESTS
+# =============================================================================
+echo ""
+echo "=== Resilience Tests ==="
+
+# Test: Config JSON validation
+test_config_json_validation() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    # Valid JSON
+    if validate_config_json '{"test": true}'; then
+      pass "config_json_validation: accepts valid JSON"
+    else
+      fail "config_json_validation: rejected valid JSON"
+    fi
+    
+    # Invalid JSON
+    if ! validate_config_json '{invalid json'; then
+      pass "config_json_validation: rejects invalid JSON"
+    else
+      fail "config_json_validation: accepted invalid JSON"
+    fi
+  else
+    fail "config_json_validation: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_config_json_validation
+
+# Test: Network check function exists
+test_network_check_exists() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    if type check_network &>/dev/null; then
+      pass "network_check_exists: check_network function exists"
+    else
+      fail "network_check_exists: check_network function not found"
+    fi
+  else
+    fail "network_check_exists: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_network_check_exists
+
+# Test: Full recovery escalation function exists
+test_full_recovery_escalation_exists() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    if type run_full_recovery_escalation &>/dev/null; then
+      pass "full_recovery_escalation_exists: function exists"
+    else
+      fail "full_recovery_escalation_exists: function not found"
+    fi
+  else
+    fail "full_recovery_escalation_exists: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_full_recovery_escalation_exists
+
+# Test: Notify user function
+test_notify_user_function() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    result=$(notify_user_emergency "Test message" 2>&1)
+    if [[ "$result" == *"Test message"* ]]; then
+      pass "notify_user_function: correctly outputs message in test mode"
+    else
+      fail "notify_user_function: expected message output, got '$result'"
+    fi
+  else
+    fail "notify_user_function: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_notify_user_function
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""
