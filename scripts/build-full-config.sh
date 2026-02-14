@@ -61,6 +61,7 @@ CGI_ESC=$(json_escape "$CGI"); GT_ESC=$(json_escape "$GT")
 AK_ESC=$(json_escape "$AK"); GK_ESC=$(json_escape "$GK"); BK_ESC=$(json_escape "$BK")
 # shellcheck disable=SC2034  # Reserved for future Google Chat/OpenAI config
 CGN_ESC=$(json_escape "$CGN")
+# shellcheck disable=SC2034  # Reserved for future OpenAI OAuth config
 OA_ESC=$(json_escape "$OA"); OR_ESC=$(json_escape "$OR"); OI_ESC=$(json_escape "$OI")
 mkdir -p $H/.openclaw/credentials
 for i in $(seq 1 $AC); do

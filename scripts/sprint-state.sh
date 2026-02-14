@@ -87,7 +87,8 @@ with_lock() {
 read_state_or_init_empty() {
   if [ -f "$STATE_FILE" ]; then
     if ! jq -e . "$STATE_FILE" >/dev/null 2>&1; then
-      local bad="${STATE_FILE}.corrupt.$(date -u +%Y%m%dT%H%M%SZ)"
+      local bad
+      bad="${STATE_FILE}.corrupt.$(date -u +%Y%m%dT%H%M%SZ)"
       mv -f "$STATE_FILE" "$bad" 2>/dev/null || true
       echo "[sprint-state] WARN: corrupt state file quarantined to $bad" >&2
       echo '{"sprint":null,"started":null,"tasks":{}}'
