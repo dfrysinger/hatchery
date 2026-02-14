@@ -148,10 +148,11 @@ AC=${AGENT_COUNT:-1}
 H="/home/$USERNAME"
 TG="/usr/local/bin/tg-notify.sh"
 ISOLATION="${ISOLATION_DEFAULT:-none}"
-GROUPS="${ISOLATION_GROUPS:-}"
+# NOTE: Do NOT use "GROUPS" - it's a bash built-in array variable that causes conflicts
+SESSION_GROUPS="${ISOLATION_GROUPS:-}"
 
 log "=== WORKING VARIABLES ==="
-log "AC=$AC H=$H ISOLATION=$ISOLATION GROUPS=$GROUPS"
+log "AC=$AC H=$H ISOLATION=$ISOLATION SESSION_GROUPS=$SESSION_GROUPS"
 
 # Check for trigger file
 log "=== TRIGGER FILE CHECK ==="
@@ -218,9 +219,9 @@ HEALTHY=false
 
 log "=== SERVICE HEALTH CHECKS ==="
 log "Isolation mode: '$ISOLATION'"
-log "Groups: '$GROUPS'"
+log "Session groups: '$SESSION_GROUPS'"
 
-if [ "$ISOLATION" = "session" ] && [ -n "$GROUPS" ]; then
+if [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
   log "SESSION ISOLATION MODE"
   
   # List session service files
@@ -244,7 +245,7 @@ if [ "$ISOLATION" = "session" ] && [ -n "$GROUPS" ]; then
   fi
   
   # Parse groups and restart services
-  IFS=',' read -ra GROUP_ARRAY <<< "$GROUPS"
+  IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
   log "Parsed ${#GROUP_ARRAY[@]} groups: ${GROUP_ARRAY[*]}"
   
   for group in "${GROUP_ARRAY[@]}"; do
@@ -314,7 +315,7 @@ if [ "$HEALTHY" = "true" ]; then
   touch /var/lib/init-status/boot-complete
   HN="${HABITAT_NAME:-default}"
   HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-  $TG "[OK] ${HN}${HDOM} fully operational. Full config applied (isolation=$ISOLATION, groups=$GROUPS). All systems ready." || true
+  $TG "[OK] ${HN}${HDOM} fully operational. Full config applied (isolation=$ISOLATION, groups=$SESSION_GROUPS). All systems ready." || true
 else
   log "FAILURE - entering SAFE MODE"
   cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
@@ -328,7 +329,7 @@ else
 The full openclaw config failed to start. You are running minimal config.
 
 **Isolation mode:** $ISOLATION
-**Groups:** $GROUPS
+**Session groups:** $SESSION_GROUPS
 
 ## Debug Info
 - Check \`/var/log/post-boot-check.log\` for detailed diagnostics
@@ -355,7 +356,7 @@ SAFEMD
   systemctl restart clawdbot
   sleep 5
   rm -f /var/lib/init-status/needs-post-boot-check
-  $TG "[SAFE MODE] ${HABITAT_NAME:-default} running minimal config. Full config failed (isolation=$ISOLATION, groups=$GROUPS). Check /var/log/post-boot-check.log" || true
+  $TG "[SAFE MODE] ${HABITAT_NAME:-default} running minimal config. Full config failed (isolation=$ISOLATION, groups=$SESSION_GROUPS). Check /var/log/post-boot-check.log" || true
 fi
 
 log "========== POST-BOOT-CHECK COMPLETE =========="
