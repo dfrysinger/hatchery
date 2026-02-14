@@ -83,6 +83,14 @@ if [ "$ISOLATION" = "session" ] && [ -n "$GROUPS" ]; then
   # Session isolation mode: restart and check session services
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Session isolation mode - checking session services" >> "$LOG"
   
+  # Ensure state directories have correct permissions before starting
+  STATE_BASE="$H/.openclaw-sessions"
+  if [ -d "$STATE_BASE" ]; then
+    chown -R $USERNAME:$USERNAME "$STATE_BASE" 2>/dev/null || true
+    chmod -R u+rwX "$STATE_BASE" 2>/dev/null || true
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Fixed permissions on $STATE_BASE" >> "$LOG"
+  fi
+  
   # Restart all session services
   IFS=',' read -ra GROUP_ARRAY <<< "$GROUPS"
   for group in "${GROUP_ARRAY[@]}"; do
