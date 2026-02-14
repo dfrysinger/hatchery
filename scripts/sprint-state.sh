@@ -36,7 +36,7 @@ atomic_write() {
   local path="$1"
   local content="$2"
 
-  python3 - "$path" <<'PY'
+  printf '%s' "$content" | python3 -c '
 import os, sys, tempfile
 path = sys.argv[1]
 content = sys.stdin.read()
@@ -65,7 +65,7 @@ finally:
         os.unlink(tmppath)
     except FileNotFoundError:
         pass
-PY
+' "$path"
 }
 
 LOCK_FILE="${SPRINT_STATE_LOCK_FILE:-${STATE_FILE}.lock}"
@@ -87,7 +87,8 @@ with_lock() {
 read_state_or_init_empty() {
   if [ -f "$STATE_FILE" ]; then
     if ! jq -e . "$STATE_FILE" >/dev/null 2>&1; then
-      local bad="${STATE_FILE}.corrupt.$(date -u +%Y%m%dT%H%M%SZ)"
+      local bad
+      bad="${STATE_FILE}.corrupt.$(date -u +%Y%m%dT%H%M%SZ)"
       mv -f "$STATE_FILE" "$bad" 2>/dev/null || true
       echo "[sprint-state] WARN: corrupt state file quarantined to $bad" >&2
       echo '{"sprint":null,"started":null,"tasks":{}}'

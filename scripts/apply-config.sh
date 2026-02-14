@@ -35,13 +35,15 @@ fi
 
 # If agents.json exists, export it as AGENT_LIB_B64
 if [ -f /etc/agents.json ]; then
-    export AGENT_LIB_B64=$(base64 -w0 /etc/agents.json)
+    AGENT_LIB_B64=$(base64 -w0 /etc/agents.json)
+    export AGENT_LIB_B64
     echo "Loaded agent library from /etc/agents.json ($(wc -c < /etc/agents.json) bytes)"
 fi
 
 # If habitat.json exists, export it as HABITAT_B64
 if [ -f /etc/habitat.json ]; then
-    export HABITAT_B64=$(base64 -w0 /etc/habitat.json)
+    HABITAT_B64=$(base64 -w0 /etc/habitat.json)
+    export HABITAT_B64
     echo "Loaded habitat config from /etc/habitat.json ($(wc -c < /etc/habitat.json) bytes)"
 fi
 

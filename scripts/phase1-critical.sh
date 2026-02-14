@@ -262,7 +262,7 @@ systemctl enable clawdbot
 systemctl start clawdbot
 ufw allow 18789/tcp
 BOT_OK=false
-for i in {1..30}; do
+for _ in {1..30}; do
   if systemctl is-active --quiet clawdbot; then
     BOT_OK=true
     break
@@ -278,7 +278,6 @@ else
 fi
 touch /var/lib/init-status/phase1-complete
 echo "$START" > /var/lib/init-status/phase1-time
-END=$(date +%s)
 /usr/local/bin/set-phase.sh 2 "background-setup"
 nohup /usr/local/sbin/phase2-background.sh >> /var/log/phase2.log 2>&1 &
 disown

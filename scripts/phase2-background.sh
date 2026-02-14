@@ -112,9 +112,9 @@ SVC
 mkdir -p $H/.config/xfce4/xfconf/xfce-perchannel-xml
 # Write desktop background config BEFORE starting desktop service (fixes race condition)
 if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
-  R=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc))
-  G=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc))
-  B=$(printf "%.5f" $(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc))
+  R=$(printf "%.5f" "$(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc)")
+  G=$(printf "%.5f" "$(echo "scale=5; $((16#${BG_COLOR:2:2}))/255" | bc)")
+  B=$(printf "%.5f" "$(echo "scale=5; $((16#${BG_COLOR:4:2}))/255" | bc)")
   cat > "$H/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<BGXML
 <?xml version="1.0"?><channel name="xfce4-desktop" version="1.0"><property name="backdrop" type="empty"><property name="screen0" type="empty"><property name="monitorscreen" type="empty"><property name="workspace0" type="empty"><property name="color-style" type="int" value="0"/><property name="image-style" type="int" value="0"/><property name="rgba1" type="array"><value type="double" value="${R}"/><value type="double" value="${G}"/><value type="double" value="${B}"/><value type="double" value="1"/></property></property></property></property></property></channel>
 BGXML
@@ -263,7 +263,7 @@ systemctl start clawdbot-sync.timer 2>/dev/null || true
 # Start desktop services now that everything is installed
 systemctl start xvfb
 # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
-for i in {1..30}; do
+for _ in {1..30}; do
   if [ -f /tmp/xvfb.pid ]; then
     XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
     # Verify PID exists AND process is actually Xvfb (not a recycled PID)

@@ -79,7 +79,8 @@ check_service_health() {
     sleep 5
     
     # Check systemd status
-    local active=$(systemctl is-active "$service" 2>&1)
+    local active
+    active=$(systemctl is-active "$service" 2>&1)
     if [ "$active" != "active" ]; then
       log "  attempt $i/$max_attempts: not active ($active)"
       continue
