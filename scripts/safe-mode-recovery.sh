@@ -164,31 +164,101 @@ find_working_platform_and_token() {
 # API Key Fallback Functions
 # =============================================================================
 
+# Check if OAuth profile exists and is valid in auth-profiles.json
+check_oauth_profile() {
+  local provider="$1"
+  local auth_file="${AUTH_PROFILES_PATH:-}"
+  
+  # Skip OAuth check in test mode unless explicitly testing OAuth
+  if [ "${TEST_MODE:-}" = "1" ] && [ "${TEST_OAUTH:-}" != "1" ]; then
+    return 1
+  fi
+  
+  # Find auth-profiles.json
+  if [ -z "$auth_file" ]; then
+    local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
+    for path in \
+      "$home/.openclaw/agents/agent1/agent/auth-profiles.json" \
+      "$home/.openclaw/agent/auth-profiles.json"; do
+      [ -f "$path" ] && auth_file="$path" && break
+    done
+  fi
+  
+  [ -z "$auth_file" ] || [ ! -f "$auth_file" ] && return 1
+  
+  # Map provider name to auth-profiles key
+  local profile_key=""
+  case "$provider" in
+    anthropic) profile_key="anthropic:default" ;;
+    openai)    profile_key="openai-codex:default" ;;
+    google)    profile_key="google:default" ;;
+    *)         return 1 ;;
+  esac
+  
+  # Check if profile exists and has access token
+  local access_token
+  access_token=$(jq -r ".profiles[\"$profile_key\"].access // empty" "$auth_file" 2>/dev/null)
+  
+  if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
+    # Check if expired (if expires field exists)
+    local expires
+    expires=$(jq -r ".profiles[\"$profile_key\"].expires // empty" "$auth_file" 2>/dev/null)
+    if [ -n "$expires" ] && [ "$expires" != "null" ]; then
+      local now=$(date +%s)
+      local exp_ts=$((expires / 1000))  # Convert ms to seconds if needed
+      [ "$exp_ts" -lt 1000000000000 ] || exp_ts=$((expires / 1000))
+      if [ "$now" -lt "$exp_ts" ]; then
+        echo "oauth"
+        return 0
+      fi
+    else
+      # No expiry, assume valid
+      echo "oauth"
+      return 0
+    fi
+  fi
+  
+  return 1
+}
+
 # Find a working API provider (Anthropic → OpenAI → Gemini)
+# Checks both OAuth (auth-profiles.json) and API keys
 find_working_api_provider() {
-  # Try Anthropic first
-  local key="${ANTHROPIC_API_KEY:-}"
-  if [ -n "$key" ] && $VALIDATE_API_KEY_FN "anthropic" "$key"; then
-    echo "anthropic"
-    return 0
-  fi
+  local providers=("anthropic" "openai" "google")
   
-  # Fall back to OpenAI
-  key="${OPENAI_API_KEY:-}"
-  if [ -n "$key" ] && $VALIDATE_API_KEY_FN "openai" "$key"; then
-    echo "openai"
-    return 0
-  fi
-  
-  # Fall back to Google/Gemini
-  key="${GOOGLE_API_KEY:-}"
-  if [ -n "$key" ] && $VALIDATE_API_KEY_FN "google" "$key"; then
-    echo "google"
-    return 0
-  fi
+  for provider in "${providers[@]}"; do
+    # First check OAuth profile
+    if check_oauth_profile "$provider" >/dev/null 2>&1; then
+      echo "$provider"
+      return 0
+    fi
+    
+    # Then check API key
+    local key=""
+    case "$provider" in
+      anthropic) key="${ANTHROPIC_API_KEY:-}" ;;
+      openai)    key="${OPENAI_API_KEY:-}" ;;
+      google)    key="${GOOGLE_API_KEY:-}" ;;
+    esac
+    
+    if [ -n "$key" ] && $VALIDATE_API_KEY_FN "$provider" "$key"; then
+      echo "$provider"
+      return 0
+    fi
+  done
   
   echo ""
   return 1
+}
+
+# Get auth type for a provider (oauth or apikey)
+get_auth_type_for_provider() {
+  local provider="$1"
+  if check_oauth_profile "$provider" >/dev/null 2>&1; then
+    echo "oauth"
+  else
+    echo "apikey"
+  fi
 }
 
 # Get the API key for a provider
@@ -224,24 +294,31 @@ generate_emergency_config() {
   local provider="$3"
   local api_key="$4"
   local agent_name="${5:-RecoveryBot}"
+  local auth_type="${6:-apikey}"  # oauth or apikey
   
   local model=$(get_default_model_for_provider "$provider")
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
   local gateway_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-token-$(date +%s)")
   
-  # Build env section based on provider
+  # Build env section based on provider and auth type
   local env_json=""
-  case "$provider" in
-    anthropic)
-      env_json="\"ANTHROPIC_API_KEY\": \"${api_key}\""
-      ;;
-    openai)
-      env_json="\"OPENAI_API_KEY\": \"${api_key}\""
-      ;;
-    google)
-      env_json="\"GOOGLE_API_KEY\": \"${api_key}\""
-      ;;
-  esac
+  if [ "$auth_type" = "oauth" ]; then
+    # OAuth - no API key needed in env, uses auth-profiles.json
+    env_json=""
+  else
+    # API key auth
+    case "$provider" in
+      anthropic)
+        env_json="\"ANTHROPIC_API_KEY\": \"${api_key}\""
+        ;;
+      openai)
+        env_json="\"OPENAI_API_KEY\": \"${api_key}\""
+        ;;
+      google)
+        env_json="\"GOOGLE_API_KEY\": \"${api_key}\""
+        ;;
+    esac
+  fi
   
   # Build channel config
   local telegram_config="\"telegram\": { \"enabled\": false }"
@@ -344,12 +421,13 @@ run_smart_recovery() {
   fi
   
   local api_key=$(get_api_key_for_provider "$provider")
-  log_recovery "Found working API provider: $provider"
+  local auth_type=$(get_auth_type_for_provider "$provider")
+  log_recovery "Found working API provider: $provider (auth: $auth_type)"
   
   # Step 3: Generate emergency config
   log_recovery "Step 3: Generating emergency config..."
   local agent_name="${AGENT1_NAME:-RecoveryBot}"
-  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "$agent_name")
+  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "$agent_name" "$auth_type")
   
   # Step 4: Write emergency config
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"

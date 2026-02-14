@@ -414,6 +414,96 @@ test_all_providers_fail() {
 }
 test_all_providers_fail
 
+# Test: OAuth profile detection
+test_oauth_profile_detection() {
+  setup_test_env
+  export TEST_OAUTH=1  # Enable OAuth checking for this test
+  
+  # Create mock auth-profiles.json with OAuth token
+  mkdir -p "$TEST_TMPDIR/.openclaw/agents/agent1/agent"
+  cat > "$TEST_TMPDIR/.openclaw/agents/agent1/agent/auth-profiles.json" <<'EOF'
+{
+  "version": 1,
+  "profiles": {
+    "openai-codex:default": {
+      "type": "oauth",
+      "provider": "openai-codex",
+      "access": "valid-oauth-token",
+      "refresh": "refresh-token",
+      "expires": 9999999999999
+    }
+  }
+}
+EOF
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    # No API keys set - should find OAuth
+    unset ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY
+    export HOME_DIR="$TEST_TMPDIR"
+    
+    result=$(check_oauth_profile "openai")
+    if [ "$result" = "oauth" ]; then
+      pass "oauth_profile_detection: found OpenAI OAuth profile"
+    else
+      fail "oauth_profile_detection: expected 'oauth', got '$result'"
+    fi
+  else
+    fail "oauth_profile_detection: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_oauth_profile_detection
+
+# Test: OAuth preferred over API key
+test_oauth_preferred_over_apikey() {
+  setup_test_env
+  export TEST_OAUTH=1  # Enable OAuth checking for this test
+  
+  # Create mock auth-profiles.json with OAuth token
+  mkdir -p "$TEST_TMPDIR/.openclaw/agents/agent1/agent"
+  cat > "$TEST_TMPDIR/.openclaw/agents/agent1/agent/auth-profiles.json" <<'EOF'
+{
+  "version": 1,
+  "profiles": {
+    "anthropic:default": {
+      "type": "oauth",
+      "provider": "anthropic",
+      "access": "valid-oauth-token",
+      "expires": 9999999999999
+    }
+  }
+}
+EOF
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    # Set API key too - OAuth should be preferred
+    export ANTHROPIC_API_KEY="also-valid-key"
+    export HOME_DIR="$TEST_TMPDIR"
+    
+    # Mock: API key validation would pass
+    mock_validate_api_key() { return 0; }
+    export -f mock_validate_api_key
+    VALIDATE_API_KEY_FN="mock_validate_api_key"
+    
+    auth_type=$(get_auth_type_for_provider "anthropic")
+    if [ "$auth_type" = "oauth" ]; then
+      pass "oauth_preferred_over_apikey: OAuth selected over API key"
+    else
+      fail "oauth_preferred_over_apikey: expected 'oauth', got '$auth_type'"
+    fi
+  else
+    fail "oauth_preferred_over_apikey: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_oauth_preferred_over_apikey
+
 # =============================================================================
 # EMERGENCY CONFIG GENERATION TESTS
 # =============================================================================
