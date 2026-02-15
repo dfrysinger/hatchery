@@ -445,6 +445,58 @@ find_working_model_for_provider() {
 # API Key Fallback Functions
 # =============================================================================
 
+# Test if an OAuth token actually works by making an API call
+# This catches cases where the access token is expired AND refresh token is also expired
+# Returns: 0 if token works, 1 if it fails
+# Echoes: error message on failure
+test_oauth_token() {
+  local provider="$1"
+  local access_token="$2"
+  
+  if [ "${TEST_MODE:-}" = "1" ]; then
+    echo "test-mode"
+    return 1
+  fi
+  
+  local http_code response
+  
+  case "$provider" in
+    openai-codex|openai)
+      # Test with models endpoint (lightweight, just needs auth)
+      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
+        -H "Authorization: Bearer ${access_token}" \
+        "https://api.openai.com/v1/models" 2>/dev/null)
+      ;;
+    anthropic)
+      # Anthropic OAuth - test with a minimal request
+      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
+        -H "Authorization: Bearer ${access_token}" \
+        -H "anthropic-version: 2023-06-01" \
+        "https://api.anthropic.com/v1/models" 2>/dev/null)
+      ;;
+    google)
+      # Google OAuth
+      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
+        -H "Authorization: Bearer ${access_token}" \
+        "https://generativelanguage.googleapis.com/v1/models" 2>/dev/null)
+      ;;
+    *)
+      echo "unknown provider"
+      return 1
+      ;;
+  esac
+  
+  http_code=$(echo "$response" | tail -1)
+  
+  case "$http_code" in
+    200) return 0 ;;  # Token works
+    401) echo "401 unauthorized - token/refresh expired"; return 1 ;;
+    403) echo "403 forbidden"; return 1 ;;
+    000) echo "timeout"; return 1 ;;
+    *)   echo "http ${http_code}"; return 1 ;;
+  esac
+}
+
 # Check if OAuth profile exists and is valid in auth-profiles.json
 # Returns: "oauth:<actual_provider>" on success (provider name may differ from input)
 # For openai input, returns "oauth:openai-codex" since that's the OAuth provider name
@@ -509,6 +561,7 @@ check_oauth_profile() {
     # Check if expired (if expires field exists)
     local expires
     expires=$(jq -r ".profiles[\"$profile_key\"].expires // empty" "$auth_file" 2>/dev/null)
+    local is_expired=0
     if [ -n "$expires" ] && [ "$expires" != "null" ] && [ "$expires" != "0" ]; then
       local now=$(date +%s)
       local exp_ts=$((expires / 1000))  # Convert ms to seconds if needed
@@ -516,17 +569,32 @@ check_oauth_profile() {
       
       if [ "$now" -lt "$exp_ts" ]; then
         log_recovery "    OAuth token valid (expires in $((exp_ts - now))s)"
+        # Token not expired - should work
         echo "oauth:$actual_provider"
         return 0
       else
         log_recovery "    OAuth token EXPIRED (expired $((now - exp_ts))s ago)"
-        # Token expired - but we have refresh token, so still usable by OpenClaw
-        # OpenClaw will refresh it automatically when it starts
+        is_expired=1
+      fi
+    fi
+    
+    # Token expired or no expiry info - TEST if it actually works
+    # Make a real API call to see if token is valid or can be refreshed
+    if [ "$is_expired" -eq 1 ]; then
+      log_recovery "    Testing OAuth token with API call..."
+      local test_result
+      test_result=$(test_oauth_token "$actual_provider" "$access_token")
+      if [ $? -eq 0 ]; then
+        log_recovery "    OAuth token WORKS (refresh succeeded or token still valid)"
         echo "oauth:$actual_provider"
         return 0
+      else
+        log_recovery "    OAuth token FAILED: $test_result"
+        log_recovery "    Skipping $actual_provider OAuth - refresh token may be expired"
+        return 1
       fi
     else
-      # No expiry or expiry=0, assume valid
+      # No expiry info, assume valid
       log_recovery "    OAuth token has no expiry, assuming valid"
       echo "oauth:$actual_provider"
       return 0
