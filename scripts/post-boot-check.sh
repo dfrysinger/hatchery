@@ -95,11 +95,11 @@ check_service_health() {
       # Wait a moment for Telegram connection attempts to complete
       sleep 3
       
-      if check_telegram_connectivity "$service"; then
-        log "  HEALTHY (HTTP + Telegram verified)"
+      if check_channel_connectivity "$service"; then
+        log "  HEALTHY (HTTP + channel connectivity verified)"
         return 0
       else
-        log "  HTTP OK but Telegram connectivity failed"
+        log "  HTTP OK but channel connectivity failed"
         return 1
       fi
     fi
@@ -110,21 +110,29 @@ check_service_health() {
   return 1
 }
 
-# Check Telegram connectivity by examining service logs for connection errors
-check_telegram_connectivity() {
+# Check channel connectivity by examining service logs for connection errors
+# Supports: Telegram, Discord, and generic channel errors
+# Extensible: add new platform patterns to the grep expressions
+check_channel_connectivity() {
   local service="$1"
   local today=$(date +%Y-%m-%d)
   local openclaw_log="/tmp/openclaw/openclaw-${today}.log"
   
-  log "  Checking Telegram connectivity for $service..."
+  # Platform-specific error patterns (case-insensitive)
+  # Telegram: getMe failed, 404 Not Found, telegram error
+  # Discord: disallowed intents, Invalid token, Unauthorized, discord error
+  # Generic: channel.*failed, connection.*refused
+  local ERROR_PATTERNS="(getMe.*failed|telegram.*error|telegram.*failed|404.*Not Found|disallowed intents|Invalid.*token|discord.*error|discord.*failed|Unauthorized|channel.*failed|connection.*refused)"
   
-  # Check journalctl for recent Telegram errors (last 60 seconds)
+  log "  Checking channel connectivity for $service..."
+  
+  # Check journalctl for recent channel errors (last 60 seconds)
   local journal_errors
   journal_errors=$(journalctl -u "$service" --since "1 minute ago" --no-pager 2>/dev/null | \
-    grep -iE "(getMe.*failed|telegram.*error|telegram.*failed|404.*Not Found)" | head -5)
+    grep -iE "$ERROR_PATTERNS" | head -5)
   
   if [ -n "$journal_errors" ]; then
-    log "  Found Telegram errors in journal:"
+    log "  Found channel errors in journal:"
     echo "$journal_errors" | while read line; do log "    $line"; done
     return 1
   fi
@@ -132,19 +140,19 @@ check_telegram_connectivity() {
   # Also check OpenClaw log file if it exists
   if [ -f "$openclaw_log" ]; then
     local log_errors
-    # Look for recent errors (files created in last 2 minutes)
+    # Look for recent errors in last 100 lines
     log_errors=$(tail -100 "$openclaw_log" 2>/dev/null | \
-      grep -iE "(getMe.*failed|telegram.*error|Call to 'getMe' failed)" | head -5)
+      grep -iE "$ERROR_PATTERNS" | head -5)
     
     if [ -n "$log_errors" ]; then
-      log "  Found Telegram errors in OpenClaw log:"
+      log "  Found channel errors in OpenClaw log:"
       echo "$log_errors" | while read line; do log "    $line"; done
       return 1
     fi
   fi
   
-  # No errors found - Telegram connectivity looks good
-  log "  No Telegram connection errors detected"
+  # No errors found - channel connectivity looks good
+  log "  No channel connection errors detected"
   return 0
 }
 
@@ -207,6 +215,11 @@ if [ "$HEALTHY" = "true" ]; then
   echo '11' > /var/lib/init-status/stage
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready" >> /var/log/init-stages.log
   touch /var/lib/init-status/boot-complete
+  
+  # Update bot display names with habitat name (may have been missed during initial boot)
+  log "Updating bot display names..."
+  /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || log "Warning: rename-bots.sh failed (non-fatal)"
+  
   HN="${HABITAT_NAME:-default}"
   HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
   $TG "[OK] ${HN}${HDOM} fully operational. Full config applied (isolation=$ISOLATION). All systems ready." || true
@@ -321,6 +334,10 @@ SAFEMD
   log "Starting clawdbot as safe mode fallback"
   systemctl restart clawdbot
   sleep 5
+  
+  # Update bot display names with habitat name (important after recovery)
+  log "Updating bot display names after recovery..."
+  /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || log "Warning: rename-bots.sh failed (non-fatal)"
   
   rm -f /var/lib/init-status/needs-post-boot-check
   $TG "[SAFE MODE] ${HABITAT_NAME:-default} running minimal config. Full config failed (isolation=$ISOLATION). Check /var/log/post-boot-check.log" || true

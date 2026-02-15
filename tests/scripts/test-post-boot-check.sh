@@ -190,26 +190,27 @@ else
 fi
 
 # =============================================================================
-# Test: Telegram connectivity check function
+# Test: Channel connectivity check function (Telegram + Discord + generic)
 # =============================================================================
 echo ""
-echo "=== Test: Telegram connectivity check ==="
+echo "=== Test: Channel connectivity check ==="
 
 # Create mock log directory and file
 MOCK_LOG_DIR=$(mktemp -d)
 MOCK_DATE=$(date +%Y-%m-%d)
 MOCK_LOG="$MOCK_LOG_DIR/openclaw-${MOCK_DATE}.log"
 
-# Source the check_telegram_connectivity function from post-boot-check.sh
-# We'll redefine it here to use our mock paths
-check_telegram_connectivity_mock() {
+# Platform-agnostic connectivity check (mirrors post-boot-check.sh)
+check_channel_connectivity_mock() {
   local service="$1"
   local openclaw_log="$2"
   
-  # Check for Telegram errors in the log
+  # Same patterns as post-boot-check.sh
+  local ERROR_PATTERNS="(getMe.*failed|telegram.*error|telegram.*failed|404.*Not Found|disallowed intents|Invalid.*token|discord.*error|discord.*failed|Unauthorized|channel.*failed|connection.*refused)"
+  
   if [ -f "$openclaw_log" ]; then
     local log_errors
-    log_errors=$(grep -iE "(getMe.*failed|telegram.*error|Call to 'getMe' failed)" "$openclaw_log" 2>/dev/null | head -5)
+    log_errors=$(grep -iE "$ERROR_PATTERNS" "$openclaw_log" 2>/dev/null | head -5)
     
     if [ -n "$log_errors" ]; then
       return 1
@@ -223,19 +224,19 @@ check_telegram_connectivity_mock() {
 echo "Clean startup, waiting for messages..." > "$MOCK_LOG"
 echo "Telegram: connected successfully" >> "$MOCK_LOG"
 
-if check_telegram_connectivity_mock "test-service" "$MOCK_LOG"; then
-  pass "telegram_check: passes when no errors in log"
+if check_channel_connectivity_mock "test-service" "$MOCK_LOG"; then
+  pass "channel_check: passes when no errors in log"
 else
-  fail "telegram_check: should pass when log has no errors"
+  fail "channel_check: should pass when log has no errors"
 fi
 
-# Test 2: getMe error in log - should fail
+# Test 2: Telegram getMe error - should fail
 echo "2025-01-01 Call to 'getMe' failed! (404: Not Found)" >> "$MOCK_LOG"
 
-if check_telegram_connectivity_mock "test-service" "$MOCK_LOG"; then
-  fail "telegram_check: should fail when getMe error in log"
+if check_channel_connectivity_mock "test-service" "$MOCK_LOG"; then
+  fail "channel_check: should fail on Telegram getMe error"
 else
-  pass "telegram_check: correctly detects getMe failure"
+  pass "channel_check: correctly detects Telegram getMe failure"
 fi
 
 # Test 3: Generic Telegram error - should fail
@@ -243,10 +244,43 @@ MOCK_LOG2="$MOCK_LOG_DIR/openclaw-${MOCK_DATE}-2.log"
 echo "Starting up..." > "$MOCK_LOG2"
 echo "telegram error: connection refused" >> "$MOCK_LOG2"
 
-if check_telegram_connectivity_mock "test-service" "$MOCK_LOG2"; then
-  fail "telegram_check: should fail on telegram error"
+if check_channel_connectivity_mock "test-service" "$MOCK_LOG2"; then
+  fail "channel_check: should fail on Telegram error"
 else
-  pass "telegram_check: correctly detects generic telegram error"
+  pass "channel_check: correctly detects generic Telegram error"
+fi
+
+# Test 4: Discord disallowed intents - should fail
+MOCK_LOG3="$MOCK_LOG_DIR/openclaw-${MOCK_DATE}-3.log"
+echo "Starting up..." > "$MOCK_LOG3"
+echo "Used disallowed intents" >> "$MOCK_LOG3"
+
+if check_channel_connectivity_mock "test-service" "$MOCK_LOG3"; then
+  fail "channel_check: should fail on Discord disallowed intents"
+else
+  pass "channel_check: correctly detects Discord disallowed intents"
+fi
+
+# Test 5: Discord invalid token - should fail
+MOCK_LOG4="$MOCK_LOG_DIR/openclaw-${MOCK_DATE}-4.log"
+echo "Starting up..." > "$MOCK_LOG4"
+echo "Error: Invalid token provided" >> "$MOCK_LOG4"
+
+if check_channel_connectivity_mock "test-service" "$MOCK_LOG4"; then
+  fail "channel_check: should fail on Discord invalid token"
+else
+  pass "channel_check: correctly detects Discord invalid token"
+fi
+
+# Test 6: Discord error - should fail
+MOCK_LOG5="$MOCK_LOG_DIR/openclaw-${MOCK_DATE}-5.log"
+echo "Starting up..." > "$MOCK_LOG5"
+echo "discord error: gateway connection failed" >> "$MOCK_LOG5"
+
+if check_channel_connectivity_mock "test-service" "$MOCK_LOG5"; then
+  fail "channel_check: should fail on Discord error"
+else
+  pass "channel_check: correctly detects Discord gateway error"
 fi
 
 # Cleanup
