@@ -303,15 +303,41 @@ EOF
 ## What To Do
 
 ### If you are the Coordinator (Agent${coordinator_num}):
-1. Review errors above
-2. Compare "Intended Configuration" with "Actual Results"
-3. Fix any discrepancies (bad tokens, missing configs, etc.)
-4. Verify fixes by checking service status
+You are responsible for investigating and fixing boot issues. Follow this checklist:
+
+**1. Diagnose the Problem:**
+\`\`\`bash
+# Check which services are running
+systemctl is-active clawdbot openclaw-browser openclaw-documents 2>/dev/null
+# Check recent errors
+journalctl -u clawdbot --since "5 minutes ago" | grep -i error
+# Check Telegram token validity (replace TOKEN)
+curl -s "https://api.telegram.org/botTOKEN/getMe" | jq .ok
+\`\`\`
+
+**2. Common Fixes:**
+- **Bad Telegram token:** Token shows "404 Not Found" - token is invalid/revoked. Alert user.
+- **Bad Discord token:** "disallowed intents" or "Unauthorized" - check Discord Developer Portal settings.
+- **Service won't start:** Check logs with \`journalctl -u <service> -n 50\`
+- **API key issues:** Verify provider keys in \`~/.openclaw/openclaw.json\`
+
+**3. After Fixing:**
+\`\`\`bash
+sudo systemctl restart clawdbot
+# Verify it's working
+sleep 10 && systemctl is-active clawdbot
+\`\`\`
+
+**4. Escalate to User if:**
+- Token needs to be regenerated (you can't do this)
+- API key is invalid/expired
+- Problem persists after 2 fix attempts
 
 ### If you are NOT the Coordinator:
 - Agent${coordinator_num} (${coordinator_name}) is handling this
-- Take no repair action
+- Take no repair action unless coordinator is offline
 - Continue normal operation if your systems are working
+- If coordinator appears stuck (>5 min no progress), you may take over
 EOF
 }
 
