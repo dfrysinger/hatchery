@@ -156,3 +156,9 @@ esac
 
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Config apply complete"
 echo "========================================"
+
+# Send Telegram notification that config was applied
+TG="/usr/local/bin/tg-notify.sh"
+if [ -x "$TG" ]; then
+    $TG "📄 Config applied! Bot personality loaded. OpenClaw restarted." || true
+fi

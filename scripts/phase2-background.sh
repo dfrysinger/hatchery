@@ -290,6 +290,6 @@ DURATION=$((END - START))
 TG="/usr/local/bin/tg-notify.sh"
 HN="${HABITAT_NAME:-default}"
 HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-$TG "♻️ ${HN}${HDOM} ready. Rebooting... Back in ~30s!" || true
+$TG "♻️ Install complete. Rebooting to apply full config..." || true
 sleep 5
 reboot

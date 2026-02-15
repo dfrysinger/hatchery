@@ -507,7 +507,7 @@ EOF
   if [ -n "$failures" ]; then
     # Normal mode WITH errors
     cat <<EOF
-⚠️ <b>[${habitat_name}]</b> Boot complete with errors
+⚠️ <b>[${habitat_name}]</b> Online with errors
 
 <b>Coordinator:</b> Agent${coordinator_num} (${coordinator_name})
 
@@ -516,7 +516,7 @@ EOF
   else
     # Normal mode, all OK
     cat <<EOF
-✅ <b>[${habitat_name}]</b> Boot complete
+✅ <b>[${habitat_name}]</b> Ready!
 
 EOF
     # List agents if more than one
@@ -530,7 +530,7 @@ EOF
     else
       local name_var="AGENT1_NAME"
       local name="${!name_var:-Agent1}"
-      echo "${name} is ready."
+      echo "${name} ready."
     fi
   fi
 }
