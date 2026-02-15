@@ -323,18 +323,18 @@ get_user_preferred_provider() {
 }
 
 # Build ordered list of providers to try
-# Order: user's default → openai → google → anthropic (ensures all are tried)
+# Order: user's default → anthropic → openai → google (skipping user's default in fallback)
 get_provider_order() {
   local user_pref=$(get_user_preferred_provider)
-  local all_providers=("anthropic" "openai" "google")
   local ordered=()
   
   # Add user's preference first
   ordered+=("$user_pref")
   
-  # Add remaining providers (openai, then google, then anthropic as fallback)
-  for p in "openai" "google" "anthropic"; do
-    # Skip if already added
+  # Add remaining providers in fixed order: anthropic → openai → google
+  # (skipping whichever was the user's default)
+  for p in "anthropic" "openai" "google"; do
+    # Skip if already added (user's default)
     [[ " ${ordered[*]} " =~ " $p " ]] && continue
     ordered+=("$p")
   done
@@ -343,7 +343,7 @@ get_provider_order() {
 }
 
 # Find a working API provider
-# Order: User's default provider → OpenAI → Gemini → Anthropic
+# Order: User's default provider → Anthropic → OpenAI → Google (skipping user's default)
 # Checks both OAuth (auth-profiles.json) and API keys
 find_working_api_provider() {
   local providers=($(get_provider_order))
