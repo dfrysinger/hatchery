@@ -353,9 +353,191 @@ test_falls_back_to_gemini() {
 }
 test_falls_back_to_gemini
 
-# Test: Tries providers in correct order (Anthropic → OpenAI → Google)
+# Test: Provider order respects user's default (anthropic model → anthropic first)
+test_api_provider_order_user_default_anthropic() {
+  setup_test_env
+  export AGENT1_MODEL="anthropic/claude-opus-4-5"
+  export ANTHROPIC_API_KEY="KEY_A"
+  export OPENAI_API_KEY="KEY_O"
+  export GOOGLE_API_KEY="KEY_G"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    PROVIDERS_TRIED=()
+    mock_validate_api_key() {
+      PROVIDERS_TRIED+=("$1")
+      return 1  # All fail
+    }
+    export -f mock_validate_api_key
+    export PROVIDERS_TRIED
+    VALIDATE_API_KEY_FN="mock_validate_api_key"
+    
+    find_working_api_provider >/dev/null
+    
+    # With anthropic model, order should be: anthropic → openai → google
+    if [ "${PROVIDERS_TRIED[0]}" = "anthropic" ]; then
+      pass "api_provider_order_user_default_anthropic: anthropic tried first"
+    else
+      fail "api_provider_order_user_default_anthropic: expected anthropic first, got ${PROVIDERS_TRIED[0]}"
+    fi
+  else
+    fail "api_provider_order_user_default_anthropic: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_api_provider_order_user_default_anthropic
+
+# Test: Provider order respects user's default (openai model → openai first)
+test_api_provider_order_user_default_openai() {
+  setup_test_env
+  export AGENT1_MODEL="openai/gpt-4o"
+  export ANTHROPIC_API_KEY="KEY_A"
+  export OPENAI_API_KEY="KEY_O"
+  export GOOGLE_API_KEY="KEY_G"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    PROVIDERS_TRIED=()
+    mock_validate_api_key() {
+      PROVIDERS_TRIED+=("$1")
+      return 1  # All fail
+    }
+    export -f mock_validate_api_key
+    export PROVIDERS_TRIED
+    VALIDATE_API_KEY_FN="mock_validate_api_key"
+    
+    find_working_api_provider >/dev/null
+    
+    # With openai model, order should be: openai → google → anthropic
+    if [ "${PROVIDERS_TRIED[0]}" = "openai" ]; then
+      pass "api_provider_order_user_default_openai: openai tried first"
+    else
+      fail "api_provider_order_user_default_openai: expected openai first, got ${PROVIDERS_TRIED[0]}"
+    fi
+  else
+    fail "api_provider_order_user_default_openai: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_api_provider_order_user_default_openai
+
+# Test: Provider order respects user's default (google model → google first)
+test_api_provider_order_user_default_google() {
+  setup_test_env
+  export AGENT1_MODEL="google/gemini-2.0-flash"
+  export ANTHROPIC_API_KEY="KEY_A"
+  export OPENAI_API_KEY="KEY_O"
+  export GOOGLE_API_KEY="KEY_G"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    PROVIDERS_TRIED=()
+    mock_validate_api_key() {
+      PROVIDERS_TRIED+=("$1")
+      return 1  # All fail
+    }
+    export -f mock_validate_api_key
+    export PROVIDERS_TRIED
+    VALIDATE_API_KEY_FN="mock_validate_api_key"
+    
+    find_working_api_provider >/dev/null
+    
+    # With google model, order should be: google → openai → anthropic
+    if [ "${PROVIDERS_TRIED[0]}" = "google" ]; then
+      pass "api_provider_order_user_default_google: google tried first"
+    else
+      fail "api_provider_order_user_default_google: expected google first, got ${PROVIDERS_TRIED[0]}"
+    fi
+  else
+    fail "api_provider_order_user_default_google: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_api_provider_order_user_default_google
+
+# Test: Model selection finds user's configured model for provider
+test_model_selection_finds_user_model() {
+  setup_test_env
+  export AGENT1_MODEL="anthropic/claude-opus-4-5"
+  export AGENT2_MODEL="openai/gpt-4o"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    model=$(find_working_model_for_provider "anthropic")
+    if [ "$model" = "anthropic/claude-opus-4-5" ]; then
+      pass "model_selection_finds_user_model: found user's anthropic model"
+    else
+      fail "model_selection_finds_user_model: expected 'anthropic/claude-opus-4-5', got '$model'"
+    fi
+  else
+    fail "model_selection_finds_user_model: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_model_selection_finds_user_model
+
+# Test: Model selection falls back to hardcoded when no user model for provider
+test_model_selection_fallback_to_hardcoded() {
+  setup_test_env
+  export AGENT1_MODEL="anthropic/claude-opus-4-5"
+  # No openai model configured
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    model=$(find_working_model_for_provider "openai")
+    if [ "$model" = "openai/gpt-4o" ]; then
+      pass "model_selection_fallback_to_hardcoded: fell back to hardcoded openai model"
+    else
+      fail "model_selection_fallback_to_hardcoded: expected 'openai/gpt-4o', got '$model'"
+    fi
+  else
+    fail "model_selection_fallback_to_hardcoded: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_model_selection_fallback_to_hardcoded
+
+# Test: Collects all configured models from habitat
+test_get_all_configured_models() {
+  setup_test_env
+  export AGENT_COUNT=3
+  export AGENT1_MODEL="anthropic/claude-opus-4-5"
+  export AGENT2_MODEL="openai/gpt-4o"
+  export AGENT3_MODEL="anthropic/claude-sonnet-4-5"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    models=$(get_all_configured_models)
+    # Should have 3 unique models (agent1, agent2, agent3)
+    model_count=$(echo "$models" | wc -w)
+    if [ "$model_count" -eq 3 ]; then
+      pass "get_all_configured_models: found all 3 models"
+    else
+      fail "get_all_configured_models: expected 3 models, got $model_count: $models"
+    fi
+  else
+    fail "get_all_configured_models: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_get_all_configured_models
+
+# Test: Tries providers in correct order (default - no model set)
 test_api_provider_order() {
   setup_test_env
+  # No AGENT1_MODEL set - should default to anthropic
   export ANTHROPIC_API_KEY="KEY_A"
   export OPENAI_API_KEY="KEY_O"
   export GOOGLE_API_KEY="KEY_G"

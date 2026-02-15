@@ -186,6 +186,49 @@ get_agent_model() {
   get_default_model_for_provider "$provider"
 }
 
+# Collect all unique models from habitat config
+# Returns models in order: agent1's model first, then others
+get_all_configured_models() {
+  local count="${AGENT_COUNT:-0}"
+  local models=()
+  local seen=()
+  
+  for i in $(seq 1 "$count"); do
+    local model_var="AGENT${i}_MODEL"
+    local model="${!model_var:-}"
+    
+    if [ -n "$model" ]; then
+      # Skip duplicates
+      if [[ ! " ${seen[*]} " =~ " $model " ]]; then
+        models+=("$model")
+        seen+=("$model")
+      fi
+    fi
+  done
+  
+  echo "${models[@]}"
+}
+
+# Find a working model for a provider
+# Order: User's configured models → hardcoded fallback
+# Returns the first model that matches the provider
+find_working_model_for_provider() {
+  local provider="$1"
+  local configured_models=($(get_all_configured_models))
+  
+  # Try configured models first (that match this provider)
+  for model in "${configured_models[@]}"; do
+    local model_provider=$(get_provider_from_model "$model")
+    if [ "$model_provider" = "$provider" ]; then
+      echo "$model"
+      return 0
+    fi
+  done
+  
+  # Fall back to hardcoded default for this provider
+  get_default_model_for_provider "$provider"
+}
+
 # =============================================================================
 # API Key Fallback Functions
 # =============================================================================
@@ -247,10 +290,63 @@ check_oauth_profile() {
   return 1
 }
 
-# Find a working API provider (Anthropic → OpenAI → Gemini)
+# Extract provider name from model string (e.g., "anthropic/claude-opus-4-5" → "anthropic")
+get_provider_from_model() {
+  local model="$1"
+  echo "${model%%/*}"
+}
+
+# Get user's preferred provider from their configured models
+# Returns the provider from AGENT1_MODEL, or first agent with a model
+get_user_preferred_provider() {
+  local count="${AGENT_COUNT:-0}"
+  
+  # Try AGENT1_MODEL first (primary agent)
+  local model="${AGENT1_MODEL:-}"
+  if [ -n "$model" ]; then
+    get_provider_from_model "$model"
+    return 0
+  fi
+  
+  # Fall back to first agent with a model configured
+  for i in $(seq 1 "$count"); do
+    local model_var="AGENT${i}_MODEL"
+    model="${!model_var:-}"
+    if [ -n "$model" ]; then
+      get_provider_from_model "$model"
+      return 0
+    fi
+  done
+  
+  # Default to anthropic if nothing configured
+  echo "anthropic"
+}
+
+# Build ordered list of providers to try
+# Order: user's default → openai → google → anthropic (ensures all are tried)
+get_provider_order() {
+  local user_pref=$(get_user_preferred_provider)
+  local all_providers=("anthropic" "openai" "google")
+  local ordered=()
+  
+  # Add user's preference first
+  ordered+=("$user_pref")
+  
+  # Add remaining providers (openai, then google, then anthropic as fallback)
+  for p in "openai" "google" "anthropic"; do
+    # Skip if already added
+    [[ " ${ordered[*]} " =~ " $p " ]] && continue
+    ordered+=("$p")
+  done
+  
+  echo "${ordered[@]}"
+}
+
+# Find a working API provider
+# Order: User's default provider → OpenAI → Gemini → Anthropic
 # Checks both OAuth (auth-profiles.json) and API keys
 find_working_api_provider() {
-  local providers=("anthropic" "openai" "google")
+  local providers=($(get_provider_order))
   
   for provider in "${providers[@]}"; do
     # First check OAuth profile
@@ -692,9 +788,10 @@ run_smart_recovery() {
   local auth_type=$(get_auth_type_for_provider "$provider")
   log_recovery "Using API provider: $provider (auth: $auth_type)"
   
-  # Get the model - prefer the working agent's configured model
-  local model=$(get_agent_model "$agent_num" "$provider")
+  # Get the model - try user's configured models first, then hardcoded fallback
+  local model=$(find_working_model_for_provider "$provider")
   log_recovery "Using model: $model"
+  log_recovery "  (User's configured models: $(get_all_configured_models))"
   
   # Step 3: Generate emergency config
   log_recovery "Step 3: Generating emergency config..."
