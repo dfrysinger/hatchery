@@ -61,61 +61,58 @@ write_diagnostics_summary() {
   {
     echo "🔍 Recovery diagnostics:"
     
-    # Telegram tokens
+    # Telegram tokens - one per line
+    echo "  Telegram:"
     if [ ${#DIAG_TELEGRAM_RESULTS[@]} -gt 0 ]; then
-      echo -n "  Telegram: "
-      local first=1
       for entry in "${DIAG_TELEGRAM_RESULTS[@]}"; do
         local name="${entry%%:*}"
         local rest="${entry#*:}"
         local icon="${rest%%:*}"
         local reason="${rest#*:}"
-        [ $first -eq 0 ] && echo -n ", "
-        echo -n "${name} ${icon}"
-        [ -n "$reason" ] && [ "$reason" != "valid" ] && echo -n " (${reason})"
-        first=0
+        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
+          echo "    ${icon} ${name} (${reason})"
+        else
+          echo "    ${icon} ${name}"
+        fi
       done
-      echo
     else
-      echo "  Telegram: none configured"
+      echo "    (none configured)"
     fi
     
-    # Discord tokens
+    # Discord tokens - one per line
+    echo "  Discord:"
     if [ ${#DIAG_DISCORD_RESULTS[@]} -gt 0 ]; then
-      echo -n "  Discord: "
-      local first=1
       for entry in "${DIAG_DISCORD_RESULTS[@]}"; do
         local name="${entry%%:*}"
         local rest="${entry#*:}"
         local icon="${rest%%:*}"
         local reason="${rest#*:}"
-        [ $first -eq 0 ] && echo -n ", "
-        echo -n "${name} ${icon}"
-        [ -n "$reason" ] && [ "$reason" != "valid" ] && echo -n " (${reason})"
-        first=0
+        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
+          echo "    ${icon} ${name} (${reason})"
+        else
+          echo "    ${icon} ${name}"
+        fi
       done
-      echo
     else
-      echo "  Discord: none configured"
+      echo "    (none configured)"
     fi
     
-    # API providers
+    # API providers - one per line
+    echo "  API:"
     if [ ${#DIAG_API_RESULTS[@]} -gt 0 ]; then
-      echo -n "  API: "
-      local first=1
       for entry in "${DIAG_API_RESULTS[@]}"; do
         local name="${entry%%:*}"
         local rest="${entry#*:}"
         local icon="${rest%%:*}"
         local reason="${rest#*:}"
-        [ $first -eq 0 ] && echo -n ", "
-        echo -n "${name} ${icon}"
-        [ -n "$reason" ] && [ "$reason" != "valid" ] && echo -n " (${reason})"
-        first=0
+        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
+          echo "    ${icon} ${name} (${reason})"
+        else
+          echo "    ${icon} ${name}"
+        fi
       done
-      echo
     else
-      echo "  API: none found"
+      echo "    (none found)"
     fi
     
     # Doctor status
@@ -591,6 +588,8 @@ check_oauth_profile() {
       else
         log_recovery "    OAuth token FAILED: $test_result"
         log_recovery "    Skipping $actual_provider OAuth - refresh token may be expired"
+        # Record the failure in diagnostics
+        diag_add "api" "$actual_provider" "❌" "OAuth expired"
         return 1
       fi
     else
