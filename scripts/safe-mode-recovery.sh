@@ -247,6 +247,8 @@ find_working_model_for_provider() {
 # =============================================================================
 
 # Check if OAuth profile exists and is valid in auth-profiles.json
+# Returns: "oauth:<actual_provider>" on success (provider name may differ from input)
+# For openai input, returns "oauth:openai-codex" since that's the OAuth provider name
 check_oauth_profile() {
   local provider="$1"
   local auth_file="${AUTH_PROFILES_PATH:-}"
@@ -276,13 +278,26 @@ check_oauth_profile() {
     return 1
   fi
   
-  # Map provider name to auth-profiles key
+  # Map provider name to auth-profiles key AND actual provider name for config
   local profile_key=""
+  local actual_provider="$provider"
   case "$provider" in
-    anthropic) profile_key="anthropic:default" ;;
-    openai)    profile_key="openai-codex:default" ;;
-    google)    profile_key="google:default" ;;
-    *)         return 1 ;;
+    anthropic) 
+      profile_key="anthropic:default"
+      actual_provider="anthropic"
+      ;;
+    openai|openai-codex)
+      # OpenAI OAuth uses "openai-codex" provider name in OpenClaw
+      profile_key="openai-codex:default"
+      actual_provider="openai-codex"
+      ;;
+    google)
+      profile_key="google:default"
+      actual_provider="google"
+      ;;
+    *)
+      return 1
+      ;;
   esac
   
   # Check if profile exists and has access token
@@ -290,7 +305,7 @@ check_oauth_profile() {
   access_token=$(jq -r ".profiles[\"$profile_key\"].access // empty" "$auth_file" 2>/dev/null)
   
   if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
-    log_recovery "    OAuth access token exists for $provider"
+    log_recovery "    OAuth access token exists for $provider (actual: $actual_provider)"
     
     # Check if expired (if expires field exists)
     local expires
@@ -302,19 +317,19 @@ check_oauth_profile() {
       
       if [ "$now" -lt "$exp_ts" ]; then
         log_recovery "    OAuth token valid (expires in $((exp_ts - now))s)"
-        echo "oauth"
+        echo "oauth:$actual_provider"
         return 0
       else
         log_recovery "    OAuth token EXPIRED (expired $((now - exp_ts))s ago)"
         # Token expired - but we have refresh token, so still usable by OpenClaw
         # OpenClaw will refresh it automatically when it starts
-        echo "oauth"
+        echo "oauth:$actual_provider"
         return 0
       fi
     else
       # No expiry or expiry=0, assume valid
       log_recovery "    OAuth token has no expiry, assuming valid"
-      echo "oauth"
+      echo "oauth:$actual_provider"
       return 0
     fi
   else
@@ -379,6 +394,7 @@ get_provider_order() {
 # Find a working API provider
 # Order: User's default provider → Anthropic → OpenAI → Google (skipping user's default)
 # Checks both OAuth (auth-profiles.json) and API keys
+# Returns: provider name (may be different from input, e.g., "openai-codex" for OAuth)
 find_working_api_provider() {
   local providers=($(get_provider_order))
   log_recovery "  Provider order: ${providers[*]}"
@@ -388,10 +404,12 @@ find_working_api_provider() {
     
     # First check OAuth profile
     local oauth_result
-    oauth_result=$(check_oauth_profile "$provider" 2>&1)
+    oauth_result=$(check_oauth_profile "$provider")
     if [ $? -eq 0 ]; then
-      log_recovery "    OAuth profile found for $provider"
-      echo "$provider"
+      # Parse "oauth:<actual_provider>" format
+      local actual_provider="${oauth_result#oauth:}"
+      log_recovery "    OAuth profile found for $provider → using $actual_provider"
+      echo "$actual_provider"
       return 0
     else
       log_recovery "    No OAuth for $provider"
@@ -427,7 +445,9 @@ find_working_api_provider() {
 # Get auth type for a provider (oauth or apikey)
 get_auth_type_for_provider() {
   local provider="$1"
-  if check_oauth_profile "$provider" >/dev/null 2>&1; then
+  local result
+  result=$(check_oauth_profile "$provider" 2>/dev/null)
+  if [ $? -eq 0 ] && [[ "$result" == oauth:* ]]; then
     echo "oauth"
   else
     echo "apikey"
@@ -449,10 +469,11 @@ get_api_key_for_provider() {
 get_default_model_for_provider() {
   local provider="$1"
   case "$provider" in
-    anthropic) echo "anthropic/claude-sonnet-4-5" ;;
-    openai)    echo "openai/gpt-4o" ;;
-    google)    echo "google/gemini-2.0-flash" ;;
-    *)         echo "anthropic/claude-sonnet-4-5" ;;
+    anthropic)     echo "anthropic/claude-sonnet-4-5" ;;
+    openai)        echo "openai/gpt-4o" ;;
+    openai-codex)  echo "openai-codex/gpt-4o" ;;
+    google)        echo "google/gemini-2.0-flash" ;;
+    *)             echo "anthropic/claude-sonnet-4-5" ;;
   esac
 }
 

@@ -696,10 +696,11 @@ EOF
     export HOME_DIR="$TEST_TMPDIR"
     
     result=$(check_oauth_profile "openai")
-    if [ "$result" = "oauth" ]; then
-      pass "oauth_profile_detection: found OpenAI OAuth profile"
+    # New format: "oauth:<actual_provider>" - openai maps to openai-codex
+    if [ "$result" = "oauth:openai-codex" ]; then
+      pass "oauth_profile_detection: found OpenAI OAuth profile → openai-codex"
     else
-      fail "oauth_profile_detection: expected 'oauth', got '$result'"
+      fail "oauth_profile_detection: expected 'oauth:openai-codex', got '$result'"
     fi
   else
     fail "oauth_profile_detection: safe-mode-recovery.sh not found"
