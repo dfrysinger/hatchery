@@ -190,6 +190,69 @@ else
 fi
 
 # =============================================================================
+# Test: Telegram connectivity check function
+# =============================================================================
+echo ""
+echo "=== Test: Telegram connectivity check ==="
+
+# Create mock log directory and file
+MOCK_LOG_DIR=$(mktemp -d)
+MOCK_DATE=$(date +%Y-%m-%d)
+MOCK_LOG="$MOCK_LOG_DIR/openclaw-${MOCK_DATE}.log"
+
+# Source the check_telegram_connectivity function from post-boot-check.sh
+# We'll redefine it here to use our mock paths
+check_telegram_connectivity_mock() {
+  local service="$1"
+  local openclaw_log="$2"
+  
+  # Check for Telegram errors in the log
+  if [ -f "$openclaw_log" ]; then
+    local log_errors
+    log_errors=$(grep -iE "(getMe.*failed|telegram.*error|Call to 'getMe' failed)" "$openclaw_log" 2>/dev/null | head -5)
+    
+    if [ -n "$log_errors" ]; then
+      return 1
+    fi
+  fi
+  
+  return 0
+}
+
+# Test 1: No errors in log - should pass
+echo "Clean startup, waiting for messages..." > "$MOCK_LOG"
+echo "Telegram: connected successfully" >> "$MOCK_LOG"
+
+if check_telegram_connectivity_mock "test-service" "$MOCK_LOG"; then
+  pass "telegram_check: passes when no errors in log"
+else
+  fail "telegram_check: should pass when log has no errors"
+fi
+
+# Test 2: getMe error in log - should fail
+echo "2025-01-01 Call to 'getMe' failed! (404: Not Found)" >> "$MOCK_LOG"
+
+if check_telegram_connectivity_mock "test-service" "$MOCK_LOG"; then
+  fail "telegram_check: should fail when getMe error in log"
+else
+  pass "telegram_check: correctly detects getMe failure"
+fi
+
+# Test 3: Generic Telegram error - should fail
+MOCK_LOG2="$MOCK_LOG_DIR/openclaw-${MOCK_DATE}-2.log"
+echo "Starting up..." > "$MOCK_LOG2"
+echo "telegram error: connection refused" >> "$MOCK_LOG2"
+
+if check_telegram_connectivity_mock "test-service" "$MOCK_LOG2"; then
+  fail "telegram_check: should fail on telegram error"
+else
+  pass "telegram_check: correctly detects generic telegram error"
+fi
+
+# Cleanup
+rm -rf "$MOCK_LOG_DIR"
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""

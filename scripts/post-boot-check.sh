@@ -68,6 +68,7 @@ chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
 chmod 600 "$H/.openclaw/openclaw.json"
 
 # Health check function for a single service/port
+# Now includes Telegram connectivity verification (not just HTTP gateway)
 check_service_health() {
   local service="$1"
   local port="$2"
@@ -86,16 +87,65 @@ check_service_health() {
       continue
     fi
     
-    # Try curl
+    # Try curl (HTTP gateway up)
     if curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
-      log "  HEALTHY after $i attempts"
-      return 0
+      log "  HTTP gateway responding after $i attempts"
+      
+      # Now verify Telegram connectivity by checking logs for errors
+      # Wait a moment for Telegram connection attempts to complete
+      sleep 3
+      
+      if check_telegram_connectivity "$service"; then
+        log "  HEALTHY (HTTP + Telegram verified)"
+        return 0
+      else
+        log "  HTTP OK but Telegram connectivity failed"
+        return 1
+      fi
     fi
     log "  attempt $i/$max_attempts: curl failed"
   done
   
   log "  FAILED after $max_attempts attempts"
   return 1
+}
+
+# Check Telegram connectivity by examining service logs for connection errors
+check_telegram_connectivity() {
+  local service="$1"
+  local today=$(date +%Y-%m-%d)
+  local openclaw_log="/tmp/openclaw/openclaw-${today}.log"
+  
+  log "  Checking Telegram connectivity for $service..."
+  
+  # Check journalctl for recent Telegram errors (last 60 seconds)
+  local journal_errors
+  journal_errors=$(journalctl -u "$service" --since "1 minute ago" --no-pager 2>/dev/null | \
+    grep -iE "(getMe.*failed|telegram.*error|telegram.*failed|404.*Not Found)" | head -5)
+  
+  if [ -n "$journal_errors" ]; then
+    log "  Found Telegram errors in journal:"
+    echo "$journal_errors" | while read line; do log "    $line"; done
+    return 1
+  fi
+  
+  # Also check OpenClaw log file if it exists
+  if [ -f "$openclaw_log" ]; then
+    local log_errors
+    # Look for recent errors (files created in last 2 minutes)
+    log_errors=$(tail -100 "$openclaw_log" 2>/dev/null | \
+      grep -iE "(getMe.*failed|telegram.*error|Call to 'getMe' failed)" | head -5)
+    
+    if [ -n "$log_errors" ]; then
+      log "  Found Telegram errors in OpenClaw log:"
+      echo "$log_errors" | while read line; do log "    $line"; done
+      return 1
+    fi
+  fi
+  
+  # No errors found - Telegram connectivity looks good
+  log "  No Telegram connection errors detected"
+  return 0
 }
 
 HEALTHY=false
