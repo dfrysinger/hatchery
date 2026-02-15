@@ -633,9 +633,16 @@ CRITMD
     (
       sleep 30  # Give gateway time to fully initialize
       log "Waking SafeModeBot to begin diagnosis..."
-      sudo -u "$USERNAME" openclaw system event \
-        --text "Safe Mode active. Read BOOT_REPORT.md in your workspace and diagnose what's broken. Explain the situation to the user and attempt repair if possible." \
-        --mode now >> "$LOG" 2>&1 || log "Warning: Failed to wake SafeModeBot"
+      # Read gateway token for CLI authentication
+      GATEWAY_TOKEN=""
+      [ -f "$H/.openclaw/gateway-token.txt" ] && GATEWAY_TOKEN=$(cat "$H/.openclaw/gateway-token.txt")
+      if [ -n "$GATEWAY_TOKEN" ]; then
+        sudo -u "$USERNAME" OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN" openclaw system event \
+          --text "Safe Mode active. Read BOOT_REPORT.md in your workspace and diagnose what's broken. Explain the situation to the user and attempt repair if possible." \
+          --mode now >> "$LOG" 2>&1 || log "Warning: Failed to wake SafeModeBot"
+      else
+        log "Warning: No gateway token found, cannot wake SafeModeBot"
+      fi
     ) &
   else
     echo '13' > /var/lib/init-status/stage
