@@ -474,27 +474,64 @@ send_boot_notification() {
 generate_notification_message() {
   local habitat_name="${HABITAT_NAME:-Unknown}"
   local failures=$(detect_component_failures)
+  local is_safe_mode="false"
+  [ -f "/var/lib/init-status/safe-mode" ] && is_safe_mode="true"
+  
+  # SAFE MODE notification - completely different message
+  if [ "$is_safe_mode" = "true" ]; then
+    cat <<EOF
+⚠️ <b>[${habitat_name}] SAFE MODE</b>
+
+Health check failed. SafeModeBot is online to diagnose.
+EOF
+    
+    # Add failure summary if available
+    if [ -n "$failures" ]; then
+      echo ""
+      echo "<b>What went wrong:</b>"
+      # Extract key failure info (first 2 lines)
+      echo "$failures" | head -2 | sed 's/^/• /'
+    fi
+    
+    echo ""
+    echo "See BOOT_REPORT.md for details."
+    return
+  fi
+  
+  # NORMAL MODE notification
   local coordinator_result=$(designate_coordinator)
   local coordinator_num="${coordinator_result%%:*}"
   local coordinator_name="${coordinator_result#*:}"
-  
-  local status_emoji="✅"
-  local status_text="Boot complete, all systems OK"
+  local count="${AGENT_COUNT:-1}"
   
   if [ -n "$failures" ]; then
-    status_emoji="⚠️"
-    status_text="Boot complete with errors"
-  fi
-  
-  cat <<EOF
-${status_emoji} <b>[${habitat_name}]</b> ${status_text}
+    # Normal mode WITH errors
+    cat <<EOF
+⚠️ <b>[${habitat_name}]</b> Boot complete with errors
 
 <b>Coordinator:</b> Agent${coordinator_num} (${coordinator_name})
-EOF
 
-  if [ -n "$failures" ]; then
-    echo ""
-    echo "See BOOT_REPORT.md for details."
+See BOOT_REPORT.md for details.
+EOF
+  else
+    # Normal mode, all OK
+    cat <<EOF
+✅ <b>[${habitat_name}]</b> Boot complete
+
+EOF
+    # List agents if more than one
+    if [ "$count" -gt 1 ]; then
+      echo "<b>All ${count} agents online:</b>"
+      for i in $(seq 1 "$count"); do
+        local name_var="AGENT${i}_NAME"
+        local name="${!name_var:-Agent${i}}"
+        echo "• ${name} ✓"
+      done
+    else
+      local name_var="AGENT1_NAME"
+      local name="${!name_var:-Agent1}"
+      echo "${name} is ready."
+    fi
   fi
 }
 

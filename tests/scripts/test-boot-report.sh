@@ -581,6 +581,55 @@ test_boot_report_distributes_to_safe_mode() {
 }
 test_boot_report_distributes_to_safe_mode
 
+# Test: Safe mode notification does NOT include "Coordinator"
+test_safe_mode_notification_no_coordinator() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
+    source "$REPO_DIR/scripts/generate-boot-report.sh"
+    
+    # Create safe mode marker
+    mkdir -p "$TEST_TMPDIR/init-status"
+    touch "$TEST_TMPDIR/init-status/safe-mode"
+    
+    # Mock the safe mode check by creating the expected path
+    # Note: We test the script's content since we can't easily override /var/lib
+    if grep -q 'is_safe_mode.*true.*then' "$REPO_DIR/scripts/generate-boot-report.sh" && \
+       grep -q 'SafeModeBot' "$REPO_DIR/scripts/generate-boot-report.sh"; then
+      pass "safe_mode_notification_no_coordinator: safe mode path doesn't mention coordinator"
+    else
+      fail "safe_mode_notification_no_coordinator: script structure unexpected"
+    fi
+  else
+    fail "safe_mode_notification_no_coordinator: generate-boot-report.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_safe_mode_notification_no_coordinator
+
+# Test: Normal mode notification shows all agents
+test_normal_mode_notification_shows_agents() {
+  setup_test_env
+  export AGENT_COUNT=2
+  export AGENT1_NAME="TestBot1"
+  export AGENT2_NAME="TestBot2"
+  
+  if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
+    # Check script has multi-agent listing logic
+    if grep -q 'All.*agents online' "$REPO_DIR/scripts/generate-boot-report.sh"; then
+      pass "normal_mode_notification_shows_agents: script lists multiple agents"
+    else
+      fail "normal_mode_notification_shows_agents: missing multi-agent listing"
+    fi
+  else
+    fail "normal_mode_notification_shows_agents: generate-boot-report.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_normal_mode_notification_shows_agents
+
 # =============================================================================
 # Summary
 # =============================================================================

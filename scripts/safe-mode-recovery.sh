@@ -736,8 +736,9 @@ run_smart_recovery() {
   log_recovery "  Provider: $provider (auth: $auth_type)"
   log_recovery "  Model: $(get_default_model_for_provider "$provider")"
   
-  # Try to notify user of recovery
-  notify_user_emergency "✅ Safe Mode recovery complete. Using $platform with $provider."
+  # Note: Don't send celebratory notification here - the boot report flow
+  # will send a proper safe mode notification with failure details.
+  # We only notify on critical failures, not on successful recovery.
   
   # Output result for callers
   echo "platform=$platform"

@@ -340,7 +340,8 @@ SAFEMD
   /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || log "Warning: rename-bots.sh failed (non-fatal)"
   
   rm -f /var/lib/init-status/needs-post-boot-check
-  $TG "[SAFE MODE] ${HABITAT_NAME:-default} running minimal config. Full config failed (isolation=$ISOLATION). Check /var/log/post-boot-check.log" || true
+  # Note: Don't send notification here - boot report flow will send 
+  # a proper safe mode notification with failure details
 fi
 
 # Generate boot report for all agents
