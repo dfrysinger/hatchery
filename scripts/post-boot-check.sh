@@ -200,21 +200,142 @@ check_api_key_validity() {
   return 1
 }
 
-# Check channel connectivity by examining service logs for connection errors
-# Supports: Telegram, Discord, and generic channel errors
-# Extensible: add new platform patterns to the grep expressions
+# Directly validate a Telegram token via getMe API call
+validate_telegram_token_direct() {
+  local token="$1"
+  [ -z "$token" ] && return 1
+  
+  local response
+  response=$(curl -sf --max-time 10 "https://api.telegram.org/bot${token}/getMe" 2>&1)
+  local exit_code=$?
+  
+  if [ $exit_code -eq 0 ] && echo "$response" | jq -e '.ok == true' >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  log "  Telegram token validation failed: $response"
+  return 1
+}
+
+# Directly validate a Discord token via /users/@me API call
+validate_discord_token_direct() {
+  local token="$1"
+  [ -z "$token" ] && return 1
+  
+  local response
+  response=$(curl -sf --max-time 10 \
+    -H "Authorization: Bot ${token}" \
+    "https://discord.com/api/v10/users/@me" 2>&1)
+  local exit_code=$?
+  
+  if [ $exit_code -eq 0 ] && echo "$response" | jq -e '.id' >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  log "  Discord token validation failed: $response"
+  return 1
+}
+
+# Check channel connectivity by:
+# 1. Making direct API calls to validate tokens (primary - most reliable)
+# 2. Checking service logs for connection errors (fallback/additional info)
 check_channel_connectivity() {
   local service="$1"
   local today=$(date +%Y-%m-%d)
   local openclaw_log="/tmp/openclaw/openclaw-${today}.log"
   
-  # Platform-specific error patterns (case-insensitive)
-  # Telegram: getMe failed, 404 Not Found, telegram error
-  # Discord: disallowed intents, Invalid token, Unauthorized, discord error
-  # Generic: channel.*failed, connection.*refused
-  local ERROR_PATTERNS="(getMe.*failed|telegram.*error|telegram.*failed|404.*Not Found|disallowed intents|Invalid.*token|discord.*error|discord.*failed|Unauthorized|channel.*failed|connection.*refused)"
-  
   log "  Checking channel connectivity for $service..."
+  
+  # Source environment to get token values
+  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  
+  local platform="${PLATFORM:-telegram}"
+  local token_found=false
+  local token_valid=false
+  
+  # Try to validate at least one token directly
+  local count="${AGENT_COUNT:-1}"
+  for i in $(seq 1 "$count"); do
+    if [ "$platform" = "telegram" ]; then
+      local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+      local token="${!token_var:-}"
+      [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
+      
+      if [ -n "$token" ]; then
+        token_found=true
+        if validate_telegram_token_direct "$token"; then
+          log "  Agent${i} Telegram token valid"
+          token_valid=true
+          break
+        else
+          log "  Agent${i} Telegram token INVALID"
+        fi
+      fi
+    elif [ "$platform" = "discord" ]; then
+      local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+      local token="${!token_var:-}"
+      
+      if [ -n "$token" ]; then
+        token_found=true
+        if validate_discord_token_direct "$token"; then
+          log "  Agent${i} Discord token valid"
+          token_valid=true
+          break
+        else
+          log "  Agent${i} Discord token INVALID"
+        fi
+      fi
+    fi
+  done
+  
+  # If no tokens found, check other platform as fallback
+  if [ "$token_found" = "false" ] || [ "$token_valid" = "false" ]; then
+    local fallback_platform=""
+    [ "$platform" = "telegram" ] && fallback_platform="discord"
+    [ "$platform" = "discord" ] && fallback_platform="telegram"
+    
+    for i in $(seq 1 "$count"); do
+      if [ "$fallback_platform" = "telegram" ]; then
+        local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+        local token="${!token_var:-}"
+        [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
+        
+        if [ -n "$token" ]; then
+          token_found=true
+          if validate_telegram_token_direct "$token"; then
+            log "  Agent${i} Telegram (fallback) token valid"
+            token_valid=true
+            break
+          fi
+        fi
+      elif [ "$fallback_platform" = "discord" ]; then
+        local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+        local token="${!token_var:-}"
+        
+        if [ -n "$token" ]; then
+          token_found=true
+          if validate_discord_token_direct "$token"; then
+            log "  Agent${i} Discord (fallback) token valid"
+            token_valid=true
+            break
+          fi
+        fi
+      fi
+    done
+  fi
+  
+  if [ "$token_found" = "false" ]; then
+    log "  WARNING: No chat tokens found in habitat config"
+    return 1
+  fi
+  
+  if [ "$token_valid" = "false" ]; then
+    log "  ERROR: All chat tokens are INVALID"
+    return 1
+  fi
+  
+  # Also check logs for additional error patterns (belt and suspenders)
+  local ERROR_PATTERNS="(getMe.*failed|telegram.*error|telegram.*failed|404.*Not Found|disallowed intents|Invalid.*token|discord.*error|discord.*failed|Unauthorized|channel.*failed|connection.*refused)"
   
   # Check journalctl for recent channel errors (last 60 seconds)
   local journal_errors
@@ -222,7 +343,7 @@ check_channel_connectivity() {
     grep -iE "$ERROR_PATTERNS" | head -5)
   
   if [ -n "$journal_errors" ]; then
-    log "  Found channel errors in journal:"
+    log "  Found channel errors in journal (token was valid but connection failed):"
     echo "$journal_errors" | while read line; do log "    $line"; done
     return 1
   fi
@@ -230,7 +351,6 @@ check_channel_connectivity() {
   # Also check OpenClaw log file if it exists
   if [ -f "$openclaw_log" ]; then
     local log_errors
-    # Look for recent errors in last 100 lines
     log_errors=$(tail -100 "$openclaw_log" 2>/dev/null | \
       grep -iE "$ERROR_PATTERNS" | head -5)
     
@@ -241,8 +361,7 @@ check_channel_connectivity() {
     fi
   fi
   
-  # No errors found - channel connectivity looks good
-  log "  No channel connection errors detected"
+  log "  Channel connectivity verified (direct token validation + no log errors)"
   return 0
 }
 
