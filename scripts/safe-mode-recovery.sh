@@ -495,14 +495,23 @@ test_oauth_token() {
 }
 
 # Check if OAuth profile exists and is valid in auth-profiles.json
-# Returns: "oauth:<actual_provider>" on success (provider name may differ from input)
-# For openai input, returns "oauth:openai-codex" since that's the OAuth provider name
+# Sets globals (avoids subshell issues with array modifications):
+#   OAUTH_CHECK_RESULT:   "oauth:<actual_provider>" on success, empty on failure  
+#   OAUTH_CHECK_REASON:   failure reason for diagnostics
+#   OAUTH_CHECK_PROVIDER: actual provider name (e.g., openai-codex for openai)
+# Returns: 0=success, 1=failure
 check_oauth_profile() {
   local provider="$1"
   local auth_file="${AUTH_PROFILES_PATH:-}"
   
+  # Reset globals
+  OAUTH_CHECK_RESULT=""
+  OAUTH_CHECK_REASON=""
+  OAUTH_CHECK_PROVIDER=""
+  
   # Skip OAuth check in test mode unless explicitly testing OAuth
   if [ "${TEST_MODE:-}" = "1" ] && [ "${TEST_OAUTH:-}" != "1" ]; then
+    OAUTH_CHECK_REASON="test-mode"
     return 1
   fi
   
@@ -523,6 +532,7 @@ check_oauth_profile() {
   
   if [ -z "$auth_file" ] || [ ! -f "$auth_file" ]; then
     log_recovery "  No auth-profiles.json found"
+    OAUTH_CHECK_REASON="no auth-profiles.json"
     return 1
   fi
   
@@ -544,9 +554,12 @@ check_oauth_profile() {
       actual_provider="google"
       ;;
     *)
+      OAUTH_CHECK_REASON="unknown provider"
       return 1
       ;;
   esac
+  
+  OAUTH_CHECK_PROVIDER="$actual_provider"
   
   # Check if profile exists and has access token
   local access_token
@@ -567,7 +580,7 @@ check_oauth_profile() {
       if [ "$now" -lt "$exp_ts" ]; then
         log_recovery "    OAuth token valid (expires in $((exp_ts - now))s)"
         # Token not expired - should work
-        echo "oauth:$actual_provider"
+        OAUTH_CHECK_RESULT="oauth:$actual_provider"
         return 0
       else
         log_recovery "    OAuth token EXPIRED (expired $((now - exp_ts))s ago)"
@@ -583,23 +596,23 @@ check_oauth_profile() {
       test_result=$(test_oauth_token "$actual_provider" "$access_token")
       if [ $? -eq 0 ]; then
         log_recovery "    OAuth token WORKS (refresh succeeded or token still valid)"
-        echo "oauth:$actual_provider"
+        OAUTH_CHECK_RESULT="oauth:$actual_provider"
         return 0
       else
         log_recovery "    OAuth token FAILED: $test_result"
         log_recovery "    Skipping $actual_provider OAuth - refresh token may be expired"
-        # Record the failure in diagnostics
-        diag_add "api" "$actual_provider" "❌" "OAuth expired"
+        OAUTH_CHECK_REASON="OAuth expired"
         return 1
       fi
     else
       # No expiry info, assume valid
       log_recovery "    OAuth token has no expiry, assuming valid"
-      echo "oauth:$actual_provider"
+      OAUTH_CHECK_RESULT="oauth:$actual_provider"
       return 0
     fi
   else
     log_recovery "    No OAuth access token for $provider"
+    OAUTH_CHECK_REASON="no token"
   fi
   
   return 1
@@ -660,6 +673,11 @@ get_provider_order() {
 # Global for API provider result
 FOUND_API_PROVIDER=""
 
+# Global for OAuth check result (avoids subshell issues)
+OAUTH_CHECK_RESULT=""       # "oauth:<provider>" on success, empty on failure
+OAUTH_CHECK_REASON=""       # failure reason for diagnostics
+OAUTH_CHECK_PROVIDER=""     # actual provider name (e.g., openai-codex for openai)
+
 # Default log_recovery to no-op if not defined (allows function use outside run_smart_recovery)
 type log_recovery &>/dev/null || log_recovery() { :; }
 
@@ -675,20 +693,30 @@ find_working_api_provider() {
   
   for provider in "${providers[@]}"; do
     log_recovery "  Checking provider: $provider"
+    local oauth_tried=0
+    local oauth_failed_reason=""
+    local oauth_provider=""
     
-    # First check OAuth profile
-    local oauth_result
-    oauth_result=$(check_oauth_profile "$provider")
-    if [ $? -eq 0 ]; then
+    # First check OAuth profile (NOT in subshell - uses globals)
+    check_oauth_profile "$provider"
+    local oauth_status=$?
+    
+    if [ $oauth_status -eq 0 ] && [ -n "$OAUTH_CHECK_RESULT" ]; then
       # Parse "oauth:<actual_provider>" format
-      local actual_provider="${oauth_result#oauth:}"
+      local actual_provider="${OAUTH_CHECK_RESULT#oauth:}"
       log_recovery "    OAuth profile found for $provider → using $actual_provider"
       diag_add "api" "$actual_provider" "✅" "OAuth"
       [ -z "$FOUND_API_PROVIDER" ] && FOUND_API_PROVIDER="$actual_provider"
       # Continue checking others for diagnostics, but we have our answer
       continue
     else
-      log_recovery "    No OAuth for $provider"
+      # OAuth failed - record details for diagnostic
+      if [ -n "$OAUTH_CHECK_PROVIDER" ]; then
+        oauth_tried=1
+        oauth_provider="$OAUTH_CHECK_PROVIDER"
+        oauth_failed_reason="${OAUTH_CHECK_REASON:-failed}"
+      fi
+      log_recovery "    No OAuth for $provider (reason: ${OAUTH_CHECK_REASON:-none})"
     fi
     
     # Then check API key
@@ -712,8 +740,12 @@ find_working_api_provider() {
       fi
     else
       log_recovery "    No API key for $provider"
-      # Only log "no key" if we also didn't find OAuth
-      if [ "$provider" != "openai" ] || [ -z "$FOUND_API_PROVIDER" ]; then
+      # Report OAuth failure if it was tried, otherwise "not configured"
+      if [ "$oauth_tried" -eq 1 ]; then
+        # OAuth was configured but failed
+        diag_add "api" "$oauth_provider" "❌" "$oauth_failed_reason"
+      else
+        # Neither OAuth nor API key configured
         diag_add "api" "$provider" "⚪" "not configured"
       fi
     fi
@@ -728,9 +760,8 @@ find_working_api_provider() {
 # Get auth type for a provider (oauth or apikey)
 get_auth_type_for_provider() {
   local provider="$1"
-  local result
-  result=$(check_oauth_profile "$provider" 2>/dev/null)
-  if [ $? -eq 0 ] && [[ "$result" == oauth:* ]]; then
+  check_oauth_profile "$provider" 2>/dev/null
+  if [ $? -eq 0 ] && [[ "$OAUTH_CHECK_RESULT" == oauth:* ]]; then
     echo "oauth"
   else
     echo "apikey"

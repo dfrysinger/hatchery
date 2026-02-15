@@ -695,12 +695,14 @@ EOF
     unset ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY
     export HOME_DIR="$TEST_TMPDIR"
     
-    result=$(check_oauth_profile "openai")
-    # New format: "oauth:<actual_provider>" - openai maps to openai-codex
-    if [ "$result" = "oauth:openai-codex" ]; then
+    # Call without subshell - uses globals
+    check_oauth_profile "openai"
+    local status=$?
+    # Check the global variable OAUTH_CHECK_RESULT
+    if [ $status -eq 0 ] && [ "$OAUTH_CHECK_RESULT" = "oauth:openai-codex" ]; then
       pass "oauth_profile_detection: found OpenAI OAuth profile → openai-codex"
     else
-      fail "oauth_profile_detection: expected 'oauth:openai-codex', got '$result'"
+      fail "oauth_profile_detection: expected 'oauth:openai-codex', got '$OAUTH_CHECK_RESULT' (status=$status)"
     fi
   else
     fail "oauth_profile_detection: safe-mode-recovery.sh not found"
