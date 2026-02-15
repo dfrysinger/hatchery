@@ -287,6 +287,83 @@ fi
 rm -rf "$MOCK_LOG_DIR"
 
 # =============================================================================
+# Test: API key validation check function
+# =============================================================================
+echo ""
+echo "=== Test: API key validation check ==="
+
+# Create mock log directory for API tests
+API_MOCK_LOG_DIR=$(mktemp -d)
+API_MOCK_DATE=$(date +%Y-%m-%d)
+
+# Mock API key validation function (mirrors post-boot-check.sh)
+check_api_key_validity_mock() {
+  local service="$1"
+  local openclaw_log="$2"
+  
+  # Same patterns as post-boot-check.sh
+  local AUTH_ERROR_PATTERNS="(authentication_error|Invalid.*bearer.*token|401|invalid.*api.*key|api.*key.*invalid)"
+  
+  if [ -f "$openclaw_log" ]; then
+    local auth_errors
+    auth_errors=$(grep -iE "$AUTH_ERROR_PATTERNS" "$openclaw_log" 2>/dev/null | head -5)
+    
+    if [ -n "$auth_errors" ]; then
+      return 1
+    fi
+  fi
+  
+  return 0
+}
+
+# Test 1: No errors - should pass
+API_MOCK_LOG1="$API_MOCK_LOG_DIR/openclaw-${API_MOCK_DATE}-1.log"
+echo "Starting up..." > "$API_MOCK_LOG1"
+echo "All systems normal" >> "$API_MOCK_LOG1"
+
+if check_api_key_validity_mock "test-service" "$API_MOCK_LOG1"; then
+  pass "api_key_check: passes when no auth errors in log"
+else
+  fail "api_key_check: should pass when no errors"
+fi
+
+# Test 2: Anthropic authentication_error - should fail
+API_MOCK_LOG2="$API_MOCK_LOG_DIR/openclaw-${API_MOCK_DATE}-2.log"
+echo "Starting up..." > "$API_MOCK_LOG2"
+echo "HTTP 401: authentication_error: Invalid bearer token" >> "$API_MOCK_LOG2"
+
+if check_api_key_validity_mock "test-service" "$API_MOCK_LOG2"; then
+  fail "api_key_check: should fail on authentication_error"
+else
+  pass "api_key_check: correctly detects authentication_error"
+fi
+
+# Test 3: Invalid API key - should fail
+API_MOCK_LOG3="$API_MOCK_LOG_DIR/openclaw-${API_MOCK_DATE}-3.log"
+echo "Starting up..." > "$API_MOCK_LOG3"
+echo "Error: Invalid API key provided" >> "$API_MOCK_LOG3"
+
+if check_api_key_validity_mock "test-service" "$API_MOCK_LOG3"; then
+  fail "api_key_check: should fail on invalid API key"
+else
+  pass "api_key_check: correctly detects invalid API key"
+fi
+
+# Test 4: HTTP 401 - should fail
+API_MOCK_LOG4="$API_MOCK_LOG_DIR/openclaw-${API_MOCK_DATE}-4.log"
+echo "Starting up..." > "$API_MOCK_LOG4"
+echo "Request failed with status 401" >> "$API_MOCK_LOG4"
+
+if check_api_key_validity_mock "test-service" "$API_MOCK_LOG4"; then
+  fail "api_key_check: should fail on 401 status"
+else
+  pass "api_key_check: correctly detects 401 status"
+fi
+
+# Cleanup API test logs
+rm -rf "$API_MOCK_LOG_DIR"
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""

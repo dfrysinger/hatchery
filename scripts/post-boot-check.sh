@@ -96,8 +96,14 @@ check_service_health() {
       sleep 3
       
       if check_channel_connectivity "$service"; then
-        log "  HEALTHY (HTTP + channel connectivity verified)"
-        return 0
+        # Also verify API key validity
+        if check_api_key_validity "$service"; then
+          log "  HEALTHY (HTTP + channel + API key verified)"
+          return 0
+        else
+          log "  HTTP + channel OK but API key validation failed"
+          return 1
+        fi
       else
         log "  HTTP OK but channel connectivity failed"
         return 1
@@ -107,6 +113,90 @@ check_service_health() {
   done
   
   log "  FAILED after $max_attempts attempts"
+  return 1
+}
+
+# Check API key validity by making a minimal API call
+# Returns 0 if at least one provider works, 1 if all fail
+check_api_key_validity() {
+  local service="$1"
+  local today=$(date +%Y-%m-%d)
+  local openclaw_log="/tmp/openclaw/openclaw-${today}.log"
+  
+  log "  Checking API key validity for $service..."
+  
+  # Check for authentication errors in journal (last 60 seconds)
+  local auth_errors
+  auth_errors=$(journalctl -u "$service" --since "1 minute ago" --no-pager 2>/dev/null | \
+    grep -iE "(authentication_error|Invalid.*bearer.*token|401|invalid.*api.*key|api.*key.*invalid)" | head -5)
+  
+  if [ -n "$auth_errors" ]; then
+    log "  Found API authentication errors in journal:"
+    echo "$auth_errors" | while read line; do log "    $line"; done
+    return 1
+  fi
+  
+  # Also check OpenClaw log file
+  if [ -f "$openclaw_log" ]; then
+    local log_auth_errors
+    log_auth_errors=$(tail -100 "$openclaw_log" 2>/dev/null | \
+      grep -iE "(authentication_error|Invalid.*bearer.*token|401|invalid.*api.*key|api.*key.*invalid)" | head -5)
+    
+    if [ -n "$log_auth_errors" ]; then
+      log "  Found API authentication errors in OpenClaw log:"
+      echo "$log_auth_errors" | while read line; do log "    $line"; done
+      return 1
+    fi
+  fi
+  
+  # Alternative: Make a direct API call to validate
+  # This is more reliable than log parsing but adds latency
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    local response
+    response=$(curl -sf --max-time 5 \
+      -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+      -H "anthropic-version: 2023-06-01" \
+      -H "content-type: application/json" \
+      -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
+      "https://api.anthropic.com/v1/messages" 2>&1)
+    
+    # Check for auth errors (401, invalid key)
+    if echo "$response" | grep -qiE "(authentication_error|invalid.*key|401)"; then
+      log "  Anthropic API key validation failed"
+      # Don't return yet - check other providers
+    else
+      log "  Anthropic API key validated OK"
+      return 0
+    fi
+  fi
+  
+  # Try OpenAI if Anthropic failed or not configured
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    local openai_response
+    openai_response=$(curl -sf --max-time 5 \
+      -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+      "https://api.openai.com/v1/models" 2>&1)
+    
+    if [ $? -eq 0 ] && ! echo "$openai_response" | grep -qiE "(invalid|401|unauthorized)"; then
+      log "  OpenAI API key validated OK"
+      return 0
+    fi
+  fi
+  
+  # Try Google/Gemini if others failed
+  if [ -n "${GOOGLE_API_KEY:-}" ]; then
+    local google_response
+    google_response=$(curl -sf --max-time 5 \
+      "https://generativelanguage.googleapis.com/v1/models?key=${GOOGLE_API_KEY}" 2>&1)
+    
+    if [ $? -eq 0 ] && ! echo "$google_response" | grep -qiE "(invalid|401|unauthorized)"; then
+      log "  Google API key validated OK"
+      return 0
+    fi
+  fi
+  
+  # All providers failed or no keys configured
+  log "  WARNING: No working API keys found"
   return 1
 }
 
