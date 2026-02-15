@@ -160,5 +160,5 @@ echo "========================================"
 # Send Telegram notification that config was applied
 TG="/usr/local/bin/tg-notify.sh"
 if [ -x "$TG" ]; then
-    $TG "📄 Config applied! Bot personality loaded. OpenClaw restarted." || true
+    $TG "🤖 Bot personality uploaded! OpenClaw restarted." || true
 fi
