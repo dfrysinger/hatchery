@@ -121,6 +121,15 @@ write_diagnostics_summary() {
       echo "  Doctor: ran (${DIAG_DOCTOR_RESULT:-no issues})"
     fi
     
+    # Network status
+    if [ -n "$DIAG_NETWORK_OK" ]; then
+      if [ "$DIAG_NETWORK_OK" = "yes" ]; then
+        echo "  Network: ✅ OK"
+      else
+        echo "  Network: ❌ Issues detected"
+      fi
+    fi
+    
   } > "$output_file"
   
   # Also return for inline use
@@ -853,9 +862,9 @@ generate_emergency_config() {
   local platform="$2"
   local provider="$3"
   local api_key="$4"
-  local agent_name="${5:-SafeModeBot}"  # Default to SafeModeBot, not agent's name
-  local auth_type="${6:-apikey}"  # oauth or apikey
-  local model="${7:-}"  # Use provided model or fall back to default
+  # $5 was agent_name - removed as SafeModeBot is always hardcoded
+  local auth_type="${5:-apikey}"  # oauth or apikey
+  local model="${6:-}"  # Use provided model or fall back to default
   
   [ -z "$model" ] && model=$(get_default_model_for_provider "$provider")
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
@@ -909,7 +918,7 @@ generate_emergency_config() {
   elif [ "$platform" = "discord" ]; then
     # Use correct OpenClaw schema for Discord
     local owner_id="${DISCORD_OWNER_ID:-}"
-    local guild_id="${DISCORD_GUILD_ID:-}"
+    # Note: guild_id removed - not used in emergency config (DM-only recovery)
     if [ -n "$owner_id" ]; then
       discord_config="\"discord\": {
         \"enabled\": true,
@@ -1188,7 +1197,7 @@ run_smart_recovery() {
   log_recovery "Step 3: Generating emergency config..."
   # Use SafeModeBot identity - don't inherit original agent's name/identity
   # The safe-mode workspace has its own IDENTITY.md and SOUL.md
-  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "SafeModeBot" "$auth_type" "$model")
+  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "$auth_type" "$model")
   
   # Validate config JSON
   if ! validate_config_json "$config"; then
