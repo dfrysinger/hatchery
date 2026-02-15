@@ -157,6 +157,22 @@ esac
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Config apply complete"
 echo "========================================"
 
+# Run health check to verify config works (triggers safe mode if broken)
+echo "Running gateway health check..."
+HEALTH_CHECK="/usr/local/bin/gateway-health-check.sh"
+if [ -x "$HEALTH_CHECK" ]; then
+    export HEALTH_CHECK_LOG="/var/log/apply-config.log"
+    bash "$HEALTH_CHECK"
+    HEALTH_EXIT=$?
+    if [ "$HEALTH_EXIT" -ne 0 ]; then
+        echo "WARNING: Health check failed (exit=$HEALTH_EXIT) - safe mode may be active"
+    else
+        echo "Health check passed"
+    fi
+else
+    echo "WARNING: gateway-health-check.sh not found, skipping health verification"
+fi
+
 # Send notification that config was applied
 TG="/usr/local/bin/tg-notify.sh"
 if [ -x "$TG" ]; then
