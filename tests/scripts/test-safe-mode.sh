@@ -99,10 +99,11 @@ test_finds_working_telegram_token() {
     VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
     
     result=$(find_working_telegram_token)
-    if [ "$result" = "TOKEN_2_VALID" ]; then
-      pass "finds_working_telegram_token: found TOKEN_2_VALID"
+    # New format: agent_num:token
+    if [ "$result" = "2:TOKEN_2_VALID" ]; then
+      pass "finds_working_telegram_token: found Agent2's token"
     else
-      fail "finds_working_telegram_token: expected TOKEN_2_VALID, got '$result'"
+      fail "finds_working_telegram_token: expected '2:TOKEN_2_VALID', got '$result'"
     fi
   else
     fail "finds_working_telegram_token: safe-mode-recovery.sh not found"
@@ -126,10 +127,11 @@ test_finds_working_discord_token() {
     VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
     
     result=$(find_working_discord_token)
-    if [ "$result" = "DISCORD_TOKEN_VALID" ]; then
-      pass "finds_working_discord_token: found DISCORD_TOKEN_VALID"
+    # New format: agent_num:token
+    if [ "$result" = "3:DISCORD_TOKEN_VALID" ]; then
+      pass "finds_working_discord_token: found Agent3's token"
     else
-      fail "finds_working_discord_token: expected DISCORD_TOKEN_VALID, got '$result'"
+      fail "finds_working_discord_token: expected '3:DISCORD_TOKEN_VALID', got '$result'"
     fi
   else
     fail "finds_working_discord_token: safe-mode-recovery.sh not found"
@@ -214,10 +216,11 @@ test_cross_platform_fallback() {
     VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
     
     result=$(find_working_platform_and_token)
-    if [ "$result" = "discord:DISCORD_TOKEN_VALID" ]; then
+    # New format: platform:agent_num:token
+    if [ "$result" = "discord:3:DISCORD_TOKEN_VALID" ]; then
       pass "cross_platform_fallback: found Discord after Telegram failed"
     else
-      fail "cross_platform_fallback: expected 'discord:DISCORD_TOKEN_VALID', got '$result'"
+      fail "cross_platform_fallback: expected 'discord:3:DISCORD_TOKEN_VALID', got '$result'"
     fi
   else
     fail "cross_platform_fallback: safe-mode-recovery.sh not found"

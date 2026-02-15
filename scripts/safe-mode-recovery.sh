@@ -104,6 +104,7 @@ validate_api_key() {
 # =============================================================================
 
 # Find a working Telegram token from all agents
+# Returns: agent_num:token (e.g., "2:abc123...")
 find_working_telegram_token() {
   local count="${AGENT_COUNT:-0}"
   
@@ -117,7 +118,7 @@ find_working_telegram_token() {
     [ -z "$token" ] && continue
     
     if $VALIDATE_TELEGRAM_TOKEN_FN "$token"; then
-      echo "$token"
+      echo "${i}:${token}"
       return 0
     fi
   done
@@ -127,6 +128,7 @@ find_working_telegram_token() {
 }
 
 # Find a working Discord token from all agents
+# Returns: agent_num:token (e.g., "2:abc123...")
 find_working_discord_token() {
   local count="${AGENT_COUNT:-0}"
   
@@ -137,7 +139,7 @@ find_working_discord_token() {
     [ -z "$token" ] && continue
     
     if $VALIDATE_DISCORD_TOKEN_FN "$token"; then
-      echo "$token"
+      echo "${i}:${token}"
       return 0
     fi
   done
@@ -147,21 +149,41 @@ find_working_discord_token() {
 }
 
 # Find a working platform and token
+# Returns: platform:agent_num:token (e.g., "telegram:2:abc123...")
 find_working_platform_and_token() {
-  local tg_token=$(find_working_telegram_token)
-  if [ -n "$tg_token" ]; then
-    echo "telegram:$tg_token"
+  local tg_result=$(find_working_telegram_token)
+  if [ -n "$tg_result" ]; then
+    echo "telegram:$tg_result"
     return 0
   fi
   
-  local dc_token=$(find_working_discord_token)
-  if [ -n "$dc_token" ]; then
-    echo "discord:$dc_token"
+  local dc_result=$(find_working_discord_token)
+  if [ -n "$dc_result" ]; then
+    echo "discord:$dc_result"
     return 0
   fi
   
   echo ""
   return 1
+}
+
+# Get the model for a specific agent from habitat config
+# Falls back to provider default if not found
+get_agent_model() {
+  local agent_num="$1"
+  local provider="$2"
+  
+  # Try to get the agent's configured model
+  local model_var="AGENT${agent_num}_MODEL"
+  local model="${!model_var:-}"
+  
+  if [ -n "$model" ]; then
+    echo "$model"
+    return 0
+  fi
+  
+  # Fall back to provider default
+  get_default_model_for_provider "$provider"
 }
 
 # =============================================================================
@@ -299,8 +321,9 @@ generate_emergency_config() {
   local api_key="$4"
   local agent_name="${5:-RecoveryBot}"
   local auth_type="${6:-apikey}"  # oauth or apikey
+  local model="${7:-}"  # Use provided model or fall back to default
   
-  local model=$(get_default_model_for_provider "$provider")
+  [ -z "$model" ] && model=$(get_default_model_for_provider "$provider")
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
   local gateway_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-token-$(date +%s)")
   
@@ -599,9 +622,12 @@ run_smart_recovery() {
     fi
   fi
   
+  # Parse platform:agent_num:token format
   local platform="${platform_token%%:*}"
-  local token="${platform_token#*:}"
-  log_recovery "Found working token for platform: $platform"
+  local rest="${platform_token#*:}"
+  local agent_num="${rest%%:*}"
+  local token="${rest#*:}"
+  log_recovery "Found working token for platform: $platform (agent${agent_num})"
   
   # Step 2: Find working API provider
   log_recovery "Step 2: Searching for working API provider..."
@@ -617,10 +643,15 @@ run_smart_recovery() {
   local auth_type=$(get_auth_type_for_provider "$provider")
   log_recovery "Using API provider: $provider (auth: $auth_type)"
   
+  # Get the model - prefer the working agent's configured model
+  local model=$(get_agent_model "$agent_num" "$provider")
+  log_recovery "Using model: $model"
+  
   # Step 3: Generate emergency config
   log_recovery "Step 3: Generating emergency config..."
-  local agent_name="${AGENT1_NAME:-RecoveryBot}"
-  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "$agent_name" "$auth_type")
+  local agent_name_var="AGENT${agent_num}_NAME"
+  local agent_name="${!agent_name_var:-RecoveryBot}"
+  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "$agent_name" "$auth_type" "$model")
   
   # Validate config JSON
   if ! validate_config_json "$config"; then
