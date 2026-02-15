@@ -59,16 +59,23 @@ SESSION_GROUPS="${ISOLATION_GROUPS:-}"
 log "Config: isolation=$ISOLATION groups=$SESSION_GROUPS agents=$AC"
 
 # =============================================================================
-# Loop Prevention (for ExecStartPost mode)
+# Recovery Attempt Tracking (prevents infinite loops)
 # =============================================================================
-# If we're already in safe mode and health check is running again, check if
-# we're healthy now. If still unhealthy, it's a critical failure (emergency
-# config doesn't work) - don't loop forever.
+# Allow up to 2 recovery attempts. This handles:
+# - SafeModeBot modifying config and breaking it (attempt 2 fixes)
+# - User breaking the emergency config (attempt 2 fixes)
+# - True critical failure (give up after 2 attempts)
+
+MAX_RECOVERY_ATTEMPTS=2
+RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts"
 
 ALREADY_IN_SAFE_MODE=false
+RECOVERY_ATTEMPTS=0
+
 if [ -f /var/lib/init-status/safe-mode ]; then
   ALREADY_IN_SAFE_MODE=true
-  log "NOTE: Already in safe mode from previous failure"
+  [ -f "$RECOVERY_COUNTER_FILE" ] && RECOVERY_ATTEMPTS=$(cat "$RECOVERY_COUNTER_FILE" 2>/dev/null || echo 0)
+  log "NOTE: Already in safe mode (recovery attempts: $RECOVERY_ATTEMPTS/$MAX_RECOVERY_ATTEMPTS)"
 fi
 
 # =============================================================================
@@ -414,20 +421,29 @@ fi
 if [ "$HEALTHY" = "true" ]; then
   log "SUCCESS - gateway healthy"
   rm -f /var/lib/init-status/safe-mode
+  rm -f "$RECOVERY_COUNTER_FILE"
   for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
   EXIT_CODE=0
 
-elif [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
-  # Already in safe mode but still failing - critical failure
-  log "CRITICAL: Still unhealthy after safe mode recovery"
-  log "Emergency config may be broken or network issues"
+elif [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECOVERY_ATTEMPTS" ]; then
+  # Already tried recovery multiple times - give up
+  log "CRITICAL: Still unhealthy after $RECOVERY_ATTEMPTS recovery attempts"
+  log "Emergency config may be fundamentally broken or network issues"
   touch /var/lib/init-status/gateway-failed
   echo '13' > /var/lib/init-status/stage
   EXIT_CODE=2  # Don't trigger restart loop
 
 else
-  # First failure - enter safe mode
+  # Either first failure OR in safe mode but haven't exhausted retries
+  # Re-run recovery (handles case where SafeModeBot broke the config)
+  if [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
+    log "Safe mode config unhealthy - re-running recovery (attempt $((RECOVERY_ATTEMPTS + 1))/$MAX_RECOVERY_ATTEMPTS)"
+  fi
+  
   enter_safe_mode
+  
+  # Increment recovery counter
+  echo "$((RECOVERY_ATTEMPTS + 1))" > "$RECOVERY_COUNTER_FILE"
   
   if [ "$RUN_MODE" = "execstartpost" ]; then
     # Let systemd handle restart via exit code
