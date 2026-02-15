@@ -631,6 +631,68 @@ test_normal_mode_notification_shows_agents() {
 test_normal_mode_notification_shows_agents
 
 # =============================================================================
+# Gateway Failure Tests
+# =============================================================================
+echo ""
+echo "=== Gateway Failure Tests ==="
+
+# Test: Gateway failure notification is different from safe mode
+test_gateway_failure_notification() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
+    # Check that script contains gateway failure handling
+    if grep -q 'gateway-failed' "$REPO_DIR/scripts/generate-boot-report.sh"; then
+      pass "gateway_failure_notification: script handles gateway-failed marker"
+    else
+      fail "gateway_failure_notification: script missing gateway-failed handling"
+    fi
+  else
+    fail "gateway_failure_notification: generate-boot-report.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_gateway_failure_notification
+
+# Test: Gateway failure shows CRITICAL emoji
+test_gateway_failure_critical_emoji() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
+    # Check that gateway failure uses critical red emoji
+    if grep -q '🔴.*CRITICAL' "$REPO_DIR/scripts/generate-boot-report.sh"; then
+      pass "gateway_failure_critical_emoji: uses 🔴 CRITICAL indicator"
+    else
+      fail "gateway_failure_critical_emoji: missing critical failure emoji"
+    fi
+  else
+    fail "gateway_failure_critical_emoji: generate-boot-report.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_gateway_failure_critical_emoji
+
+# Test: Gateway failure message indicates bot is offline
+test_gateway_failure_offline_message() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
+    if grep -q 'OFFLINE' "$REPO_DIR/scripts/generate-boot-report.sh"; then
+      pass "gateway_failure_offline_message: mentions bot is OFFLINE"
+    else
+      fail "gateway_failure_offline_message: missing OFFLINE indicator"
+    fi
+  else
+    fail "gateway_failure_offline_message: generate-boot-report.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_gateway_failure_offline_message
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""

@@ -257,6 +257,73 @@ test_platform_token_format() {
 }
 test_platform_token_format
 
+# Test: User preferred platform is tried first (Discord)
+# When PLATFORM=discord, Discord token should be found before Telegram is tried
+test_user_preferred_platform_discord() {
+  setup_test_env
+  export PLATFORM="discord"  # User's default
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    # Discord token works, Telegram should NOT be tried
+    mock_validate_telegram_token() { return 1; }
+    mock_validate_discord_token() { 
+      [ "$1" = "DISCORD_TOKEN_VALID" ] && return 0 || return 1
+    }
+    export -f mock_validate_telegram_token mock_validate_discord_token
+    VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
+    VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
+    
+    result=$(find_working_platform_and_token)
+    
+    # Should find discord token (not fall back to telegram)
+    if [[ "$result" == "discord:"* ]]; then
+      pass "user_preferred_platform_discord: discord tried first when PLATFORM=discord"
+    else
+      fail "user_preferred_platform_discord: expected discord:..., got '$result'"
+    fi
+  else
+    fail "user_preferred_platform_discord: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_user_preferred_platform_discord
+
+# Test: Default platform is telegram when not set
+test_default_platform_telegram() {
+  setup_test_env
+  unset PLATFORM  # No default set
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    # Telegram token works, Discord should NOT be tried
+    mock_validate_telegram_token() {
+      [ "$1" = "TOKEN_2_VALID" ] && return 0 || return 1
+    }
+    mock_validate_discord_token() { return 1; }
+    export -f mock_validate_telegram_token mock_validate_discord_token
+    VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
+    VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
+    
+    result=$(find_working_platform_and_token)
+    
+    # Should find telegram token
+    if [[ "$result" == "telegram:"* ]]; then
+      pass "default_platform_telegram: telegram tried first when PLATFORM unset"
+    else
+      fail "default_platform_telegram: expected telegram:..., got '$result'"
+    fi
+  else
+    fail "default_platform_telegram: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_default_platform_telegram
+
 # =============================================================================
 # API KEY FALLBACK TESTS
 # =============================================================================

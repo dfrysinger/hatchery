@@ -475,7 +475,23 @@ generate_notification_message() {
   local habitat_name="${HABITAT_NAME:-Unknown}"
   local failures=$(detect_component_failures)
   local is_safe_mode="false"
+  local is_gateway_failed="false"
   [ -f "/var/lib/init-status/safe-mode" ] && is_safe_mode="true"
+  [ -f "/var/lib/init-status/gateway-failed" ] && is_gateway_failed="true"
+  
+  # CRITICAL: Gateway failed to start at all
+  if [ "$is_gateway_failed" = "true" ]; then
+    cat <<EOF
+🔴 <b>[${habitat_name}] CRITICAL FAILURE</b>
+
+Gateway failed to start after multiple attempts.
+Bot is OFFLINE - no connectivity available.
+
+Check logs: <code>journalctl -u clawdbot -n 50</code>
+See CRITICAL_FAILURE.md for recovery steps.
+EOF
+    return
+  fi
   
   # SAFE MODE notification - completely different message
   if [ "$is_safe_mode" = "true" ]; then

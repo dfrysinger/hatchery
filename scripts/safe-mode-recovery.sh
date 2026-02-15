@@ -149,19 +149,32 @@ find_working_discord_token() {
 }
 
 # Find a working platform and token
+# Order: User's default platform (PLATFORM env var) first, then fallback platform
+# Tries ALL tokens from preferred platform before moving to fallback
 # Returns: platform:agent_num:token (e.g., "telegram:2:abc123...")
 find_working_platform_and_token() {
-  local tg_result=$(find_working_telegram_token)
-  if [ -n "$tg_result" ]; then
-    echo "telegram:$tg_result"
-    return 0
+  local user_platform="${PLATFORM:-telegram}"
+  local platforms=()
+  
+  # Build ordered list: user's default first, then the other
+  if [ "$user_platform" = "discord" ]; then
+    platforms=("discord" "telegram")
+  else
+    platforms=("telegram" "discord")
   fi
   
-  local dc_result=$(find_working_discord_token)
-  if [ -n "$dc_result" ]; then
-    echo "discord:$dc_result"
-    return 0
-  fi
+  for platform in "${platforms[@]}"; do
+    local result=""
+    case "$platform" in
+      telegram) result=$(find_working_telegram_token) ;;
+      discord)  result=$(find_working_discord_token) ;;
+    esac
+    
+    if [ -n "$result" ]; then
+      echo "${platform}:${result}"
+      return 0
+    fi
+  done
   
   echo ""
   return 1

@@ -424,6 +424,69 @@ SAFEMD
   systemctl restart clawdbot
   sleep 5
   
+  # Verify clawdbot actually started - prevent restart loops
+  CLAWDBOT_STARTED=false
+  for attempt in 1 2 3; do
+    if systemctl is-active --quiet clawdbot; then
+      CLAWDBOT_STARTED=true
+      log "Clawdbot started successfully (attempt $attempt)"
+      break
+    fi
+    log "Clawdbot not active, retry $attempt/3..."
+    systemctl restart clawdbot
+    sleep 5
+  done
+  
+  if [ "$CLAWDBOT_STARTED" = "false" ]; then
+    log "CRITICAL: Clawdbot failed to start after 3 attempts"
+    log "Gateway failure detected - safe mode bot unavailable"
+    touch /var/lib/init-status/gateway-failed
+    
+    # Create critical failure marker
+    for si in $(seq 1 $AC); do
+      cat > "$H/clawd/agents/agent${si}/CRITICAL_FAILURE.md" <<CRITMD
+# CRITICAL FAILURE - Gateway Won't Start
+
+The OpenClaw gateway (clawdbot) failed to start after multiple attempts.
+
+**Status:** Bot is OFFLINE - no Telegram/Discord connectivity
+
+## What to Check
+
+1. **Service status:**
+   \`\`\`bash
+   systemctl status clawdbot
+   journalctl -u clawdbot -n 50
+   \`\`\`
+
+2. **Config syntax:**
+   \`\`\`bash
+   cat ~/.openclaw/openclaw.json | jq .
+   \`\`\`
+
+3. **Port conflicts:**
+   \`\`\`bash
+   ss -tlnp | grep 18789
+   \`\`\`
+
+## Recovery
+
+Try manual restart:
+\`\`\`bash
+sudo systemctl restart clawdbot
+journalctl -u clawdbot -f
+\`\`\`
+
+Or restore minimal config:
+\`\`\`bash
+cp ~/.openclaw/openclaw.minimal.json ~/.openclaw/openclaw.json
+sudo systemctl restart clawdbot
+\`\`\`
+CRITMD
+      chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/CRITICAL_FAILURE.md"
+    done
+  fi
+  
   # Update bot display names with habitat name (important after recovery)
   log "Updating bot display names after recovery..."
   /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || log "Warning: rename-bots.sh failed (non-fatal)"
