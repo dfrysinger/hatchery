@@ -329,20 +329,43 @@ generate_emergency_config() {
   local discord_config="\"discord\": { \"enabled\": false }"
   
   if [ "$platform" = "telegram" ]; then
-    telegram_config="\"telegram\": {
-      \"enabled\": true,
-      \"botToken\": \"${token}\",
-      \"ownerId\": \"${TELEGRAM_OWNER_ID:-}\",
-      \"allowlist\": { \"mode\": \"owner\" }
-    }"
+    # Use correct OpenClaw schema: dmPolicy + allowFrom (not ownerId/allowlist)
+    local owner_id="${TELEGRAM_OWNER_ID:-}"
+    if [ -n "$owner_id" ]; then
+      telegram_config="\"telegram\": {
+        \"enabled\": true,
+        \"botToken\": \"${token}\",
+        \"dmPolicy\": \"allowlist\",
+        \"allowFrom\": [\"${owner_id}\"]
+      }"
+    else
+      # No owner ID - use pairing mode (safest default)
+      telegram_config="\"telegram\": {
+        \"enabled\": true,
+        \"botToken\": \"${token}\",
+        \"dmPolicy\": \"pairing\"
+      }"
+    fi
   elif [ "$platform" = "discord" ]; then
-    discord_config="\"discord\": {
-      \"enabled\": true,
-      \"botToken\": \"${token}\",
-      \"ownerId\": \"${DISCORD_OWNER_ID:-}\",
-      \"guildId\": \"${DISCORD_GUILD_ID:-}\",
-      \"allowlist\": { \"mode\": \"owner\" }
-    }"
+    # Use correct OpenClaw schema for Discord
+    local owner_id="${DISCORD_OWNER_ID:-}"
+    local guild_id="${DISCORD_GUILD_ID:-}"
+    if [ -n "$owner_id" ]; then
+      discord_config="\"discord\": {
+        \"enabled\": true,
+        \"token\": \"${token}\",
+        \"dm\": {
+          \"policy\": \"allowlist\",
+          \"allowFrom\": [\"${owner_id}\"]
+        }
+      }"
+    else
+      discord_config="\"discord\": {
+        \"enabled\": true,
+        \"token\": \"${token}\",
+        \"dm\": { \"policy\": \"pairing\" }
+      }"
+    fi
   fi
   
   cat <<EOF
