@@ -761,6 +761,207 @@ test_notify_user_function() {
 test_notify_user_function
 
 # =============================================================================
+# SAFE MODE WORKSPACE TESTS
+# =============================================================================
+echo ""
+echo "=== Safe Mode Workspace Tests ==="
+
+# Test: Emergency config uses safe-mode agent ID
+test_emergency_config_uses_safe_mode_agent_id() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    config=$(generate_emergency_config "TOKEN" "telegram" "anthropic" "KEY" "OriginalName")
+    
+    agent_id=$(echo "$config" | jq -r '.agents.list[0].id')
+    if [ "$agent_id" = "safe-mode" ]; then
+      pass "emergency_config_uses_safe_mode_agent_id: agent id is 'safe-mode'"
+    else
+      fail "emergency_config_uses_safe_mode_agent_id: expected 'safe-mode', got '$agent_id'"
+    fi
+  else
+    fail "emergency_config_uses_safe_mode_agent_id: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_emergency_config_uses_safe_mode_agent_id
+
+# Test: Emergency config uses SafeModeBot name
+test_emergency_config_uses_safemode_name() {
+  setup_test_env
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    # Even if we pass an agent name, it should use SafeModeBot
+    config=$(generate_emergency_config "TOKEN" "telegram" "anthropic" "KEY" "SomeOtherAgent")
+    
+    agent_name=$(echo "$config" | jq -r '.agents.list[0].name')
+    if [ "$agent_name" = "SafeModeBot" ]; then
+      pass "emergency_config_uses_safemode_name: agent name is 'SafeModeBot'"
+    else
+      fail "emergency_config_uses_safemode_name: expected 'SafeModeBot', got '$agent_name'"
+    fi
+  else
+    fail "emergency_config_uses_safemode_name: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_emergency_config_uses_safemode_name
+
+# Test: Emergency config uses safe-mode workspace path
+test_emergency_config_uses_safe_mode_workspace() {
+  setup_test_env
+  export HOME_DIR="$TEST_TMPDIR/home"
+  mkdir -p "$HOME_DIR"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    config=$(generate_emergency_config "TOKEN" "telegram" "anthropic" "KEY" "Agent")
+    
+    workspace=$(echo "$config" | jq -r '.agents.list[0].workspace')
+    if [[ "$workspace" == */clawd/agents/safe-mode ]]; then
+      pass "emergency_config_uses_safe_mode_workspace: workspace ends with '/clawd/agents/safe-mode'"
+    else
+      fail "emergency_config_uses_safe_mode_workspace: expected '*/clawd/agents/safe-mode', got '$workspace'"
+    fi
+  else
+    fail "emergency_config_uses_safe_mode_workspace: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_emergency_config_uses_safe_mode_workspace
+
+# Test: setup_safe_mode_workspace creates directory structure
+test_setup_safe_mode_workspace_creates_structure() {
+  setup_test_env
+  export HOME_DIR="$TEST_TMPDIR/home"
+  export USERNAME="testbot"
+  mkdir -p "$HOME_DIR"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    setup_safe_mode_workspace >/dev/null 2>&1
+    
+    if [ -d "$HOME_DIR/clawd/agents/safe-mode" ]; then
+      pass "setup_safe_mode_workspace_creates_structure: safe-mode directory exists"
+    else
+      fail "setup_safe_mode_workspace_creates_structure: safe-mode directory not created"
+    fi
+    
+    if [ -d "$HOME_DIR/clawd/agents/safe-mode/memory" ]; then
+      pass "setup_safe_mode_workspace_creates_structure: memory directory exists"
+    else
+      fail "setup_safe_mode_workspace_creates_structure: memory directory not created"
+    fi
+  else
+    fail "setup_safe_mode_workspace_creates_structure: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_setup_safe_mode_workspace_creates_structure
+
+# Test: setup_safe_mode_workspace creates IDENTITY.md
+test_setup_safe_mode_workspace_creates_identity() {
+  setup_test_env
+  export HOME_DIR="$TEST_TMPDIR/home"
+  export USERNAME="testbot"
+  mkdir -p "$HOME_DIR"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    setup_safe_mode_workspace >/dev/null 2>&1
+    
+    identity_file="$HOME_DIR/clawd/agents/safe-mode/IDENTITY.md"
+    if [ -f "$identity_file" ]; then
+      pass "setup_safe_mode_workspace_creates_identity: IDENTITY.md exists"
+      
+      if grep -q "Safe Mode Recovery Bot" "$identity_file"; then
+        pass "setup_safe_mode_workspace_creates_identity: contains 'Safe Mode Recovery Bot'"
+      else
+        fail "setup_safe_mode_workspace_creates_identity: missing 'Safe Mode Recovery Bot' text"
+      fi
+    else
+      fail "setup_safe_mode_workspace_creates_identity: IDENTITY.md not created"
+    fi
+  else
+    fail "setup_safe_mode_workspace_creates_identity: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_setup_safe_mode_workspace_creates_identity
+
+# Test: setup_safe_mode_workspace creates SOUL.md
+test_setup_safe_mode_workspace_creates_soul() {
+  setup_test_env
+  export HOME_DIR="$TEST_TMPDIR/home"
+  export USERNAME="testbot"
+  mkdir -p "$HOME_DIR"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    setup_safe_mode_workspace >/dev/null 2>&1
+    
+    soul_file="$HOME_DIR/clawd/agents/safe-mode/SOUL.md"
+    if [ -f "$soul_file" ]; then
+      pass "setup_safe_mode_workspace_creates_soul: SOUL.md exists"
+    else
+      fail "setup_safe_mode_workspace_creates_soul: SOUL.md not created"
+    fi
+  else
+    fail "setup_safe_mode_workspace_creates_soul: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_setup_safe_mode_workspace_creates_soul
+
+# Test: Smart recovery does NOT use original agent's identity
+test_smart_recovery_uses_safemode_identity() {
+  setup_test_env
+  export HOME_DIR="$TEST_TMPDIR/home"
+  export USERNAME="testbot"
+  export DRY_RUN=1
+  mkdir -p "$HOME_DIR/.openclaw"
+  
+  if [ -f "$REPO_DIR/scripts/safe-mode-recovery.sh" ]; then
+    source "$REPO_DIR/scripts/safe-mode-recovery.sh"
+    
+    # Mock: All tokens valid, all providers valid
+    mock_validate_telegram_token() { return 0; }
+    mock_validate_api_key() { return 0; }
+    export -f mock_validate_telegram_token mock_validate_api_key
+    VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
+    VALIDATE_API_KEY_FN="mock_validate_api_key"
+    
+    run_smart_recovery >/dev/null 2>&1
+    
+    # Check that safe-mode workspace was created
+    if [ -d "$HOME_DIR/clawd/agents/safe-mode" ]; then
+      pass "smart_recovery_uses_safemode_identity: creates safe-mode workspace"
+    else
+      fail "smart_recovery_uses_safemode_identity: did not create safe-mode workspace"
+    fi
+  else
+    fail "smart_recovery_uses_safemode_identity: safe-mode-recovery.sh not found"
+  fi
+  
+  cleanup_test_env
+}
+test_smart_recovery_uses_safemode_identity
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""

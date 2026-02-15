@@ -371,6 +371,39 @@ for i in $(seq 1 $AC); do
   mkdir -p "$H/.openclaw/agents/agent${i}/agent"
   ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/agent${i}/agent/auth-profiles.json"
 done
+
+# Create safe-mode workspace (used if health check fails)
+/usr/local/bin/setup-safe-mode-workspace.sh "$H" "$USERNAME" 2>/dev/null || {
+  # Inline fallback if script not available
+  mkdir -p "$H/clawd/agents/safe-mode/memory"
+  cat > "$H/clawd/agents/safe-mode/IDENTITY.md" << 'SMID'
+# Safe Mode Recovery Bot
+
+You are the **Safe Mode Recovery Bot** - an emergency diagnostic and repair agent.
+
+The normal bot(s) failed to start. Check BOOT_REPORT.md in your workspace to see what failed.
+
+## Your Mission
+1. Read BOOT_REPORT.md to understand what's broken
+2. Diagnose the problem using system tools  
+3. Attempt repair if possible
+4. Escalate to user with clear explanation if you can't fix it
+
+You are NOT one of the originally configured agents - you're borrowing a working token to communicate.
+SMID
+  cat > "$H/clawd/agents/safe-mode/SOUL.md" << 'SMSO'
+You are calm, competent, and focused on getting things working again.
+
+Be clear about what's wrong. Explain what you're checking. If stuck, say so and ask for help.
+
+Start with status, not pleasantries: "Safe mode active. Checking boot report..."
+SMSO
+  chown -R "$USERNAME:$USERNAME" "$H/clawd/agents/safe-mode" 2>/dev/null || true
+}
+# Link auth-profiles for safe-mode agent too
+mkdir -p "$H/.openclaw/agents/safe-mode/agent"
+ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/safe-mode/agent/auth-profiles.json"
+
 cat > /etc/systemd/system/clawdbot.service <<SVC
 [Unit]
 Description=Clawdbot Gateway

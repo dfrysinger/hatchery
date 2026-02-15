@@ -313,19 +313,68 @@ get_default_model_for_provider() {
 # Emergency Config Generation
 # =============================================================================
 
+# Ensure safe-mode workspace exists
+setup_safe_mode_workspace() {
+  local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
+  local user="${USERNAME:-bot}"
+  local safe_mode_dir="$home/clawd/agents/safe-mode"
+  local setup_script="/usr/local/bin/setup-safe-mode-workspace.sh"
+  
+  # If setup script exists, use it
+  if [ -x "$setup_script" ]; then
+    "$setup_script" "$home" "$user"
+    return $?
+  fi
+  
+  # Otherwise create minimal workspace inline
+  mkdir -p "$safe_mode_dir/memory"
+  
+  # Create minimal IDENTITY.md
+  cat > "$safe_mode_dir/IDENTITY.md" << 'EOF'
+# Safe Mode Recovery Bot
+
+You are the **Safe Mode Recovery Bot** - an emergency diagnostic and repair agent.
+
+The normal bot(s) failed to start. Check BOOT_REPORT.md in your workspace to see what failed.
+
+## Your Mission
+1. Read BOOT_REPORT.md to understand what's broken
+2. Diagnose the problem using system tools
+3. Attempt repair if possible
+4. Escalate to user with clear explanation if you can't fix it
+
+You are NOT one of the originally configured agents - you're borrowing a working token to communicate.
+EOF
+
+  # Create minimal SOUL.md
+  cat > "$safe_mode_dir/SOUL.md" << 'EOF'
+You are calm, competent, and focused on getting things working again.
+
+Be clear about what's wrong. Explain what you're checking. If stuck, say so and ask for help.
+
+Start with status, not pleasantries: "Safe mode active. Checking boot report..."
+EOF
+
+  chown -R "$user:$user" "$safe_mode_dir" 2>/dev/null || true
+  echo "$safe_mode_dir"
+}
+
 # Generate emergency config with working credentials
 generate_emergency_config() {
   local token="$1"
   local platform="$2"
   local provider="$3"
   local api_key="$4"
-  local agent_name="${5:-RecoveryBot}"
+  local agent_name="${5:-SafeModeBot}"  # Default to SafeModeBot, not agent's name
   local auth_type="${6:-apikey}"  # oauth or apikey
   local model="${7:-}"  # Use provided model or fall back to default
   
   [ -z "$model" ] && model=$(get_default_model_for_provider "$provider")
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
   local gateway_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-token-$(date +%s)")
+  
+  # Ensure safe-mode workspace exists
+  setup_safe_mode_workspace >/dev/null 2>&1
   
   # Build env section based on provider and auth type
   local env_json=""
@@ -403,10 +452,10 @@ generate_emergency_config() {
     },
     "list": [
       {
-        "id": "agent1",
+        "id": "safe-mode",
         "default": true,
-        "name": "${agent_name}",
-        "workspace": "${home}/clawd/agents/agent1"
+        "name": "SafeModeBot",
+        "workspace": "${home}/clawd/agents/safe-mode"
       }
     ]
   },
@@ -649,9 +698,9 @@ run_smart_recovery() {
   
   # Step 3: Generate emergency config
   log_recovery "Step 3: Generating emergency config..."
-  local agent_name_var="AGENT${agent_num}_NAME"
-  local agent_name="${!agent_name_var:-RecoveryBot}"
-  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "$agent_name" "$auth_type" "$model")
+  # Use SafeModeBot identity - don't inherit original agent's name/identity
+  # The safe-mode workspace has its own IDENTITY.md and SOUL.md
+  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "SafeModeBot" "$auth_type" "$model")
   
   # Validate config JSON
   if ! validate_config_json "$config"; then

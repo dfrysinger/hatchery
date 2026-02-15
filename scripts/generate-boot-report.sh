@@ -222,7 +222,11 @@ generate_boot_report() {
   local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local habitat_name="${HABITAT_NAME:-Unknown}"
   
-  # Get coordinator
+  # Check if we're in safe mode
+  local is_safe_mode="false"
+  [ -f "/var/lib/init-status/safe-mode" ] && is_safe_mode="true"
+  
+  # Get coordinator (for multi-agent mode)
   local coordinator_result=$(designate_coordinator)
   local coordinator_num="${coordinator_result%%:*}"
   local coordinator_name="${coordinator_result#*:}"
@@ -244,8 +248,22 @@ generate_boot_report() {
   local has_errors="false"
   [ -n "$failures" ] && has_errors="true"
   
-  # Generate report
-  cat <<EOF
+  # Generate report header based on mode
+  if [ "$is_safe_mode" = "true" ]; then
+    cat <<EOF
+# Boot Report — SAFE MODE ACTIVE
+Generated: ${timestamp}
+Habitat: ${habitat_name}
+
+## ⚠️ Safe Mode
+**You are the SafeModeBot** — the emergency recovery agent.
+
+The normal bot(s) failed to start. You're running on borrowed credentials to help diagnose and fix the issue.
+
+**Your job:** Diagnose the problem, attempt repair if possible, or escalate to the user.
+EOF
+  else
+    cat <<EOF
 # Boot Report
 Generated: ${timestamp}
 Habitat: ${habitat_name}
@@ -255,6 +273,10 @@ Habitat: ${habitat_name}
 
 If you are the coordinator, investigate any errors below.
 If you are NOT the coordinator, acknowledge this report but take no action.
+EOF
+  fi
+
+  cat <<EOF
 
 ## Intended Configuration
 Source: ${HABITAT_JSON_PATH}
@@ -300,6 +322,50 @@ EOF
 - Boot logs: /var/log/post-boot-check.log
 - Service logs: journalctl -u clawdbot -n 100
 
+EOF
+
+  # Different instructions for safe mode vs normal multi-agent mode
+  if [ "$is_safe_mode" = "true" ]; then
+    cat <<EOF
+## What To Do (Safe Mode)
+
+You are the only bot running. The normal agent(s) failed to start.
+
+### Step 1: Diagnose
+Review the errors above. Use these commands to investigate:
+
+\`\`\`bash
+# Check what went wrong
+journalctl -u clawdbot --since "10 minutes ago" | grep -iE "error|failed|401|403|404"
+
+# Check the recovery log
+cat /var/log/post-boot-check.log | tail -50
+
+# Validate tokens:
+# Telegram: curl -s "https://api.telegram.org/bot<TOKEN>/getMe" | jq .ok
+# Discord:  curl -s -H "Authorization: Bot <TOKEN>" "https://discord.com/api/v10/users/@me" | jq .id
+\`\`\`
+
+### Step 2: Common Fixes
+
+| Error | Meaning | What You Can Do |
+|-------|---------|-----------------|
+| getMe failed / 404 | Invalid Telegram token | Token needs regeneration — escalate to user |
+| Unauthorized / 401 | Bad Discord token | Token needs regeneration — escalate to user |
+| disallowed intents | Discord missing permissions | User must enable Message Content Intent |
+| API key invalid | Anthropic/OpenAI/etc failed | Key expired or revoked — escalate to user |
+
+### Step 3: Escalate if Needed
+
+If the problem requires new credentials (tokens, API keys), tell the user clearly:
+- What credential is broken
+- Where to get a new one (BotFather for Telegram, Discord Dev Portal, etc.)
+- What to update in their habitat config
+
+**Remember:** You're here to help diagnose and explain, not to access external systems the user controls.
+EOF
+  else
+    cat <<EOF
 ## What To Do
 
 ### If you are the Coordinator (Agent${coordinator_num}):
@@ -339,6 +405,7 @@ journalctl -u clawdbot --since "5 minutes ago" | grep -iE "error|failed|unauthor
 - Continue normal operation if your systems are working
 - If coordinator appears stuck (>5 min no progress), you may take over
 EOF
+  fi
 }
 
 # =============================================================================
@@ -359,6 +426,14 @@ distribute_boot_report() {
       [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$workspace/BOOT_REPORT.md" 2>/dev/null || true
     fi
   done
+  
+  # Also distribute to safe-mode workspace (for when recovery kicks in)
+  local safe_mode_workspace="$home/clawd/agents/safe-mode"
+  if [ -d "$safe_mode_workspace" ] || [ "${TEST_MODE:-}" = "1" ]; then
+    mkdir -p "$safe_mode_workspace" 2>/dev/null || true
+    echo "$report" > "$safe_mode_workspace/BOOT_REPORT.md"
+    [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
+  fi
   
   # Also copy to shared folder
   local shared="$home/clawd/shared"
