@@ -72,7 +72,7 @@ S="/usr/local/bin/set-stage.sh"
 TG="/usr/local/bin/tg-notify.sh"
 LOG="/var/log/phase1.log"
 START=$(date +%s)
-$TG "[INIT] Droplet starting up. Phase 1 in progress..." || true
+$TG "🚀 Droplet starting up. Phase 1 in progress..." || true
 $S 1 "preparing"
 NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
 [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
