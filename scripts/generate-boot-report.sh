@@ -303,35 +303,35 @@ EOF
 ## What To Do
 
 ### If you are the Coordinator (Agent${coordinator_num}):
-You are responsible for investigating and fixing boot issues. Follow this checklist:
+1. Review the errors above carefully
+2. Compare "Intended Configuration" with "Actual Results"
+3. Fix any discrepancies (bad tokens, missing configs, etc.)
+4. Verify fixes by checking service status
 
-**1. Diagnose the Problem:**
+**Diagnostic Commands:**
 \`\`\`bash
-# Check which services are running
+# Check service status
 systemctl is-active clawdbot openclaw-browser openclaw-documents 2>/dev/null
-# Check recent errors
-journalctl -u clawdbot --since "5 minutes ago" | grep -i error
-# Check Telegram token validity (replace TOKEN)
-curl -s "https://api.telegram.org/botTOKEN/getMe" | jq .ok
+
+# Check recent errors (look for patterns matching errors above)
+journalctl -u clawdbot --since "5 minutes ago" | grep -iE "error|failed|unauthorized"
+
+# Validate tokens (platform-specific):
+# Telegram: curl -s "https://api.telegram.org/bot<TOKEN>/getMe" | jq .ok
+# Discord:  curl -s -H "Authorization: Bot <TOKEN>" "https://discord.com/api/v10/users/@me" | jq .id
 \`\`\`
 
-**2. Common Fixes:**
-- **Bad Telegram token:** Token shows "404 Not Found" - token is invalid/revoked. Alert user.
-- **Bad Discord token:** "disallowed intents" or "Unauthorized" - check Discord Developer Portal settings.
-- **Service won't start:** Check logs with \`journalctl -u <service> -n 50\`
-- **API key issues:** Verify provider keys in \`~/.openclaw/openclaw.json\`
+**Common Error Patterns:**
+| Error | Platform | Meaning | Fix |
+|-------|----------|---------|-----|
+| getMe failed / 404 | Telegram | Invalid or revoked token | Alert user - needs new token |
+| disallowed intents | Discord | Missing intents in Dev Portal | User must enable Message Content Intent |
+| Unauthorized / 401 | Both | Bad token | Alert user - needs new token |
+| connection refused | Both | Network or service down | Check firewall, restart service |
 
-**3. After Fixing:**
-\`\`\`bash
-sudo systemctl restart clawdbot
-# Verify it's working
-sleep 10 && systemctl is-active clawdbot
-\`\`\`
+**After Fixing:** \`sudo systemctl restart clawdbot\` then verify with \`systemctl is-active clawdbot\`
 
-**4. Escalate to User if:**
-- Token needs to be regenerated (you can't do this)
-- API key is invalid/expired
-- Problem persists after 2 fix attempts
+**Escalate to User if:** Token/key needs regeneration, or problem persists after 2 fix attempts.
 
 ### If you are NOT the Coordinator:
 - Agent${coordinator_num} (${coordinator_name}) is handling this
