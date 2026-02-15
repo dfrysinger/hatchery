@@ -250,6 +250,12 @@ generate_boot_report() {
   
   # Generate report header based on mode
   if [ "$is_safe_mode" = "true" ]; then
+    # Load diagnostics if available
+    local diagnostics=""
+    if [ -f "/var/log/safe-mode-diagnostics.txt" ]; then
+      diagnostics=$(cat /var/log/safe-mode-diagnostics.txt)
+    fi
+    
     cat <<EOF
 # Boot Report — SAFE MODE ACTIVE
 Generated: ${timestamp}
@@ -261,6 +267,11 @@ Habitat: ${habitat_name}
 The normal bot(s) failed to start. You're running on borrowed credentials to help diagnose and fix the issue.
 
 **Your job:** Diagnose the problem, attempt repair if possible, or escalate to the user.
+
+### Recovery Diagnostics
+\`\`\`
+${diagnostics:-No diagnostics available}
+\`\`\`
 EOF
   else
     cat <<EOF
@@ -501,11 +512,17 @@ EOF
 Health check failed. SafeModeBot is online to diagnose.
 EOF
     
-    # Add failure summary if available
-    if [ -n "$failures" ]; then
+    # Add diagnostics summary if available
+    if [ -f "/var/log/safe-mode-diagnostics.txt" ]; then
+      echo ""
+      echo "<b>Recovery diagnostics:</b>"
+      echo "<code>"
+      cat /var/log/safe-mode-diagnostics.txt | sed 's/^🔍 //'  # Remove emoji for Telegram
+      echo "</code>"
+    elif [ -n "$failures" ]; then
+      # Fallback to failure summary if no diagnostics
       echo ""
       echo "<b>What went wrong:</b>"
-      # Extract key failure info (first 2 lines)
       echo "$failures" | head -2 | sed 's/^/• /'
     fi
     

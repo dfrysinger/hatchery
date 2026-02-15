@@ -26,76 +26,251 @@ VALIDATE_DISCORD_TOKEN_FN="${VALIDATE_DISCORD_TOKEN_FN:-validate_discord_token}"
 VALIDATE_API_KEY_FN="${VALIDATE_API_KEY_FN:-validate_api_key}"
 
 # =============================================================================
+# Diagnostics Tracking
+# =============================================================================
+# Accumulates validation results for boot report display
+
+declare -a DIAG_TELEGRAM_RESULTS=()
+declare -a DIAG_DISCORD_RESULTS=()
+declare -a DIAG_API_RESULTS=()
+DIAG_DOCTOR_RAN=""
+DIAG_DOCTOR_RESULT=""
+DIAG_NETWORK_OK=""
+
+# Add a diagnostic result
+# Usage: diag_add "telegram" "agent1" "✅" "valid"
+#        diag_add "api" "anthropic" "❌" "401 unauthorized"
+diag_add() {
+  local category="$1"
+  local name="$2"
+  local icon="$3"
+  local reason="$4"
+  local entry="${name}:${icon}:${reason}"
+  
+  case "$category" in
+    telegram) DIAG_TELEGRAM_RESULTS+=("$entry") ;;
+    discord)  DIAG_DISCORD_RESULTS+=("$entry") ;;
+    api)      DIAG_API_RESULTS+=("$entry") ;;
+  esac
+}
+
+# Write diagnostics summary to file for boot report
+write_diagnostics_summary() {
+  local output_file="${1:-/var/log/safe-mode-diagnostics.txt}"
+  
+  {
+    echo "🔍 Recovery diagnostics:"
+    
+    # Telegram tokens
+    if [ ${#DIAG_TELEGRAM_RESULTS[@]} -gt 0 ]; then
+      echo -n "  Telegram: "
+      local first=1
+      for entry in "${DIAG_TELEGRAM_RESULTS[@]}"; do
+        local name="${entry%%:*}"
+        local rest="${entry#*:}"
+        local icon="${rest%%:*}"
+        local reason="${rest#*:}"
+        [ $first -eq 0 ] && echo -n ", "
+        echo -n "${name} ${icon}"
+        [ -n "$reason" ] && [ "$reason" != "valid" ] && echo -n " (${reason})"
+        first=0
+      done
+      echo
+    else
+      echo "  Telegram: none configured"
+    fi
+    
+    # Discord tokens
+    if [ ${#DIAG_DISCORD_RESULTS[@]} -gt 0 ]; then
+      echo -n "  Discord: "
+      local first=1
+      for entry in "${DIAG_DISCORD_RESULTS[@]}"; do
+        local name="${entry%%:*}"
+        local rest="${entry#*:}"
+        local icon="${rest%%:*}"
+        local reason="${rest#*:}"
+        [ $first -eq 0 ] && echo -n ", "
+        echo -n "${name} ${icon}"
+        [ -n "$reason" ] && [ "$reason" != "valid" ] && echo -n " (${reason})"
+        first=0
+      done
+      echo
+    else
+      echo "  Discord: none configured"
+    fi
+    
+    # API providers
+    if [ ${#DIAG_API_RESULTS[@]} -gt 0 ]; then
+      echo -n "  API: "
+      local first=1
+      for entry in "${DIAG_API_RESULTS[@]}"; do
+        local name="${entry%%:*}"
+        local rest="${entry#*:}"
+        local icon="${rest%%:*}"
+        local reason="${rest#*:}"
+        [ $first -eq 0 ] && echo -n ", "
+        echo -n "${name} ${icon}"
+        [ -n "$reason" ] && [ "$reason" != "valid" ] && echo -n " (${reason})"
+        first=0
+      done
+      echo
+    else
+      echo "  API: none found"
+    fi
+    
+    # Doctor status
+    if [ -n "$DIAG_DOCTOR_RAN" ]; then
+      echo "  Doctor: ran (${DIAG_DOCTOR_RESULT:-no issues})"
+    fi
+    
+  } > "$output_file"
+  
+  # Also return for inline use
+  cat "$output_file"
+}
+
+# =============================================================================
 # Token Validation Functions
 # =============================================================================
 
 # Validate a Telegram bot token by calling getMe
+# Returns: 0=valid, 1=invalid
+# Sets: VALIDATION_REASON with status/error details
 validate_telegram_token() {
   local token="$1"
-  [ -z "$token" ] && return 1
   
-  # In test mode, use mock
-  if [ "${TEST_MODE:-}" = "1" ]; then
+  if [ -z "$token" ]; then
+    VALIDATION_REASON="empty"
     return 1
   fi
   
-  response=$(curl -sf --max-time 10 "https://api.telegram.org/bot${token}/getMe" 2>/dev/null)
-  [ $? -eq 0 ] && echo "$response" | jq -e '.ok == true' >/dev/null 2>&1
+  # In test mode, use mock
+  if [ "${TEST_MODE:-}" = "1" ]; then
+    VALIDATION_REASON="test-mode"
+    return 1
+  fi
+  
+  local http_code response
+  response=$(curl -s --max-time 10 -w "\n%{http_code}" "https://api.telegram.org/bot${token}/getMe" 2>/dev/null)
+  http_code=$(echo "$response" | tail -1)
+  response=$(echo "$response" | head -n -1)
+  
+  case "$http_code" in
+    200)
+      if echo "$response" | jq -e '.ok == true' >/dev/null 2>&1; then
+        VALIDATION_REASON="valid"
+        return 0
+      else
+        VALIDATION_REASON="invalid response"
+        return 1
+      fi
+      ;;
+    401) VALIDATION_REASON="401 unauthorized"; return 1 ;;
+    403) VALIDATION_REASON="403 forbidden"; return 1 ;;
+    404) VALIDATION_REASON="404 not found"; return 1 ;;
+    409) VALIDATION_REASON="409 conflict"; return 1 ;;
+    000) VALIDATION_REASON="timeout"; return 1 ;;
+    *)   VALIDATION_REASON="http ${http_code}"; return 1 ;;
+  esac
 }
 
 # Validate a Discord bot token by calling /users/@me
 validate_discord_token() {
   local token="$1"
-  [ -z "$token" ] && return 1
   
-  if [ "${TEST_MODE:-}" = "1" ]; then
+  if [ -z "$token" ]; then
+    VALIDATION_REASON="empty"
     return 1
   fi
   
-  response=$(curl -sf --max-time 10 \
+  if [ "${TEST_MODE:-}" = "1" ]; then
+    VALIDATION_REASON="test-mode"
+    return 1
+  fi
+  
+  local http_code response
+  response=$(curl -s --max-time 10 -w "\n%{http_code}" \
     -H "Authorization: Bot ${token}" \
     "https://discord.com/api/v10/users/@me" 2>/dev/null)
-  [ $? -eq 0 ] && echo "$response" | jq -e '.id' >/dev/null 2>&1
+  http_code=$(echo "$response" | tail -1)
+  response=$(echo "$response" | head -n -1)
+  
+  case "$http_code" in
+    200)
+      if echo "$response" | jq -e '.id' >/dev/null 2>&1; then
+        VALIDATION_REASON="valid"
+        return 0
+      else
+        VALIDATION_REASON="invalid response"
+        return 1
+      fi
+      ;;
+    401) VALIDATION_REASON="401 unauthorized"; return 1 ;;
+    403) VALIDATION_REASON="403 forbidden"; return 1 ;;
+    000) VALIDATION_REASON="timeout"; return 1 ;;
+    *)   VALIDATION_REASON="http ${http_code}"; return 1 ;;
+  esac
 }
 
 # Validate an API key by making a minimal request
 validate_api_key() {
   local provider="$1"
   local key="$2"
-  [ -z "$key" ] && return 1
   
-  if [ "${TEST_MODE:-}" = "1" ]; then
+  if [ -z "$key" ]; then
+    VALIDATION_REASON="no key"
     return 1
   fi
   
+  if [ "${TEST_MODE:-}" = "1" ]; then
+    VALIDATION_REASON="test-mode"
+    return 1
+  fi
+  
+  local http_code response
+  
   case "$provider" in
     anthropic)
-      # Anthropic: Try a minimal messages request (will fail with 400 but auth succeeds)
-      response=$(curl -sf --max-time 10 \
+      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
         -H "x-api-key: ${key}" \
         -H "anthropic-version: 2023-06-01" \
         -H "content-type: application/json" \
         -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
-        "https://api.anthropic.com/v1/messages" 2>&1)
-      # 200 = success, 400 = bad request but auth OK, 401/403 = auth failed
-      [ $? -eq 0 ] || echo "$response" | grep -q '"type"'
+        "https://api.anthropic.com/v1/messages" 2>/dev/null)
       ;;
     openai)
-      # OpenAI: Check models endpoint
-      response=$(curl -sf --max-time 10 \
+      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
         -H "Authorization: Bearer ${key}" \
         "https://api.openai.com/v1/models" 2>/dev/null)
-      [ $? -eq 0 ] && echo "$response" | jq -e '.data' >/dev/null 2>&1
       ;;
     google)
-      # Google: Check models endpoint
-      response=$(curl -sf --max-time 10 \
+      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
         "https://generativelanguage.googleapis.com/v1/models?key=${key}" 2>/dev/null)
-      [ $? -eq 0 ] && echo "$response" | jq -e '.models' >/dev/null 2>&1
       ;;
     *)
+      VALIDATION_REASON="unknown provider"
       return 1
       ;;
+  esac
+  
+  http_code=$(echo "$response" | tail -1)
+  
+  case "$http_code" in
+    200) VALIDATION_REASON="valid"; return 0 ;;
+    400) 
+      # Anthropic returns 400 for bad request but auth OK
+      if [ "$provider" = "anthropic" ]; then
+        VALIDATION_REASON="valid"
+        return 0
+      fi
+      VALIDATION_REASON="400 bad request"
+      return 1
+      ;;
+    401) VALIDATION_REASON="401 unauthorized"; return 1 ;;
+    403) VALIDATION_REASON="403 forbidden"; return 1 ;;
+    429) VALIDATION_REASON="429 rate limited"; return 1 ;;
+    000) VALIDATION_REASON="timeout"; return 1 ;;
+    *)   VALIDATION_REASON="http ${http_code}"; return 1 ;;
   esac
 }
 
@@ -103,10 +278,15 @@ validate_api_key() {
 # Token Hunting Functions
 # =============================================================================
 
+# Global variable for validation reason (avoids subshell issues with $())
+VALIDATION_REASON=""
+
 # Find a working Telegram token from all agents
 # Returns: agent_num:token (e.g., "2:abc123...")
+# Side effect: populates DIAG_TELEGRAM_RESULTS
 find_working_telegram_token() {
   local count="${AGENT_COUNT:-0}"
+  local found=""
   
   for i in $(seq 1 "$count"); do
     local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
@@ -115,13 +295,27 @@ find_working_telegram_token() {
     # Also try generic BOT_TOKEN
     [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
     
-    [ -z "$token" ] && continue
+    if [ -z "$token" ]; then
+      # Don't log "not configured" for every agent - only if none have tokens
+      continue
+    fi
     
+    # Run validation - captures reason via VALIDATION_REASON global
+    # (using $() would create subshell and break test mocks)
+    VALIDATION_REASON=""
     if $VALIDATE_TELEGRAM_TOKEN_FN "$token"; then
-      echo "${i}:${token}"
-      return 0
+      diag_add "telegram" "agent${i}" "✅" "valid"
+      [ -z "$found" ] && found="${i}:${token}"
+    else
+      # Capture reason from stdout if function echoed it
+      diag_add "telegram" "agent${i}" "❌" "${VALIDATION_REASON:-unknown}"
     fi
   done
+  
+  if [ -n "$found" ]; then
+    echo "$found"
+    return 0
+  fi
   
   echo ""
   return 1
@@ -129,20 +323,32 @@ find_working_telegram_token() {
 
 # Find a working Discord token from all agents
 # Returns: agent_num:token (e.g., "2:abc123...")
+# Side effect: populates DIAG_DISCORD_RESULTS
 find_working_discord_token() {
   local count="${AGENT_COUNT:-0}"
+  local found=""
   
   for i in $(seq 1 "$count"); do
     local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
     local token="${!token_var:-}"
     
-    [ -z "$token" ] && continue
+    if [ -z "$token" ]; then
+      continue
+    fi
     
+    VALIDATION_REASON=""
     if $VALIDATE_DISCORD_TOKEN_FN "$token"; then
-      echo "${i}:${token}"
-      return 0
+      diag_add "discord" "agent${i}" "✅" "valid"
+      [ -z "$found" ] && found="${i}:${token}"
+    else
+      diag_add "discord" "agent${i}" "❌" "${VALIDATION_REASON:-unknown}"
     fi
   done
+  
+  if [ -n "$found" ]; then
+    echo "$found"
+    return 0
+  fi
   
   echo ""
   return 1
@@ -395,9 +601,11 @@ get_provider_order() {
 # Order: User's default provider → Anthropic → OpenAI → Google (skipping user's default)
 # Checks both OAuth (auth-profiles.json) and API keys
 # Returns: provider name (may be different from input, e.g., "openai-codex" for OAuth)
+# Side effect: populates DIAG_API_RESULTS
 find_working_api_provider() {
   local providers=($(get_provider_order))
   log_recovery "  Provider order: ${providers[*]}"
+  local found=""
   
   for provider in "${providers[@]}"; do
     log_recovery "  Checking provider: $provider"
@@ -409,8 +617,10 @@ find_working_api_provider() {
       # Parse "oauth:<actual_provider>" format
       local actual_provider="${oauth_result#oauth:}"
       log_recovery "    OAuth profile found for $provider → using $actual_provider"
-      echo "$actual_provider"
-      return 0
+      diag_add "api" "$actual_provider" "✅" "OAuth"
+      [ -z "$found" ] && found="$actual_provider"
+      # Continue checking others for diagnostics, but we have our answer
+      continue
     else
       log_recovery "    No OAuth for $provider"
     fi
@@ -425,17 +635,28 @@ find_working_api_provider() {
     
     if [ -n "$key" ]; then
       log_recovery "    API key found for $provider, validating..."
+      VALIDATION_REASON=""
       if $VALIDATE_API_KEY_FN "$provider" "$key"; then
         log_recovery "    API key valid for $provider"
-        echo "$provider"
-        return 0
+        diag_add "api" "$provider" "✅" "API key"
+        [ -z "$found" ] && found="$provider"
       else
-        log_recovery "    API key invalid for $provider"
+        log_recovery "    API key invalid for $provider: ${VALIDATION_REASON:-unknown}"
+        diag_add "api" "$provider" "❌" "${VALIDATION_REASON:-unknown}"
       fi
     else
       log_recovery "    No API key for $provider"
+      # Only log "no key" if we also didn't find OAuth
+      if [ "$provider" != "openai" ] || [ -z "$found" ]; then
+        diag_add "api" "$provider" "⚪" "not configured"
+      fi
     fi
   done
+  
+  if [ -n "$found" ]; then
+    echo "$found"
+    return 0
+  fi
   
   log_recovery "  No working provider found"
   echo ""
@@ -809,15 +1030,25 @@ run_smart_recovery() {
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$log"
   }
   
+  # Reset diagnostics arrays for this run
+  DIAG_TELEGRAM_RESULTS=()
+  DIAG_DISCORD_RESULTS=()
+  DIAG_API_RESULTS=()
+  DIAG_DOCTOR_RAN=""
+  DIAG_DOCTOR_RESULT=""
+  DIAG_NETWORK_OK=""
+  
   log_recovery "========== SMART RECOVERY STARTING =========="
   
   # Step 0: Check network connectivity
   log_recovery "Step 0: Checking network connectivity..."
   if ! check_network; then
     log_recovery "WARNING: Network connectivity issues detected"
+    DIAG_NETWORK_OK="no"
     notify_user_emergency "⚠️ Safe Mode: Network connectivity issues. Recovery may fail."
   else
     log_recovery "Network OK"
+    DIAG_NETWORK_OK="yes"
   fi
   
   # Step 1: Find working platform and token
@@ -827,12 +1058,19 @@ run_smart_recovery() {
   if [ -z "$platform_token" ]; then
     log_recovery "ERROR: No working bot tokens found"
     log_recovery "Attempting openclaw doctor --fix..."
-    run_doctor_fix >> "$log" 2>&1
+    DIAG_DOCTOR_RAN="yes"
+    if run_doctor_fix >> "$log" 2>&1; then
+      DIAG_DOCTOR_RESULT="completed"
+    else
+      DIAG_DOCTOR_RESULT="errors"
+    fi
     
     # Retry after doctor
     platform_token=$(find_working_platform_and_token)
     if [ -z "$platform_token" ]; then
       log_recovery "ERROR: Still no working tokens after doctor --fix"
+      # Write diagnostics before failing
+      write_diagnostics_summary "/var/log/safe-mode-diagnostics.txt" >/dev/null 2>&1
       notify_user_emergency "🚨 CRITICAL: Safe Mode failed - no working bot tokens found!"
       echo "ERROR: No working bot tokens found" >&2
       return 1
@@ -904,6 +1142,12 @@ run_smart_recovery() {
   log_recovery "  Platform: $platform"
   log_recovery "  Provider: $provider (auth: $auth_type)"
   log_recovery "  Model: $(get_default_model_for_provider "$provider")"
+  
+  # Write diagnostics summary for boot report
+  local diag_file="/var/log/safe-mode-diagnostics.txt"
+  [ "${TEST_MODE:-}" = "1" ] && diag_file="${TEST_TMPDIR:-/tmp}/safe-mode-diagnostics.txt"
+  write_diagnostics_summary "$diag_file" >/dev/null 2>&1
+  log_recovery "Diagnostics written to $diag_file"
   
   # Note: Don't send celebratory notification here - the boot report flow
   # will send a proper safe mode notification with failure details.
