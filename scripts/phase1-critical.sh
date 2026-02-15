@@ -82,6 +82,8 @@ if [ -f /tmp/downloads/node.tar.xz ]; then
 else
   apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
 fi
+# Install jq early - needed by build-full-config.sh which may run via API before phase2
+apt-get install -y jq >> "$LOG" 2>&1 || true
 $S 2 "installing-bot"
 npm install -g openclaw@latest >> "$LOG" 2>&1
 PW=$(d "$PASSWORD_B64")
