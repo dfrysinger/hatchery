@@ -280,10 +280,10 @@ get_api_key_for_provider() {
 get_default_model_for_provider() {
   local provider="$1"
   case "$provider" in
-    anthropic) echo "anthropic/claude-sonnet-4" ;;
+    anthropic) echo "anthropic/claude-sonnet-4-5" ;;
     openai)    echo "openai/gpt-4o" ;;
     google)    echo "google/gemini-2.0-flash" ;;
-    *)         echo "anthropic/claude-sonnet-4" ;;
+    *)         echo "anthropic/claude-sonnet-4-5" ;;
   esac
 }
 
