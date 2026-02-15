@@ -263,11 +263,18 @@ check_oauth_profile() {
       "$home/.openclaw/agents/main/agent/auth-profiles.json" \
       "$home/.openclaw/agents/agent1/agent/auth-profiles.json" \
       "$home/.openclaw/agent/auth-profiles.json"; do
-      [ -f "$path" ] && auth_file="$path" && break
+      if [ -f "$path" ]; then
+        auth_file="$path"
+        log_recovery "  Found auth-profiles.json at: $path"
+        break
+      fi
     done
   fi
   
-  [ -z "$auth_file" ] || [ ! -f "$auth_file" ] && return 1
+  if [ -z "$auth_file" ] || [ ! -f "$auth_file" ]; then
+    log_recovery "  No auth-profiles.json found"
+    return 1
+  fi
   
   # Map provider name to auth-profiles key
   local profile_key=""
@@ -361,12 +368,20 @@ get_provider_order() {
 # Checks both OAuth (auth-profiles.json) and API keys
 find_working_api_provider() {
   local providers=($(get_provider_order))
+  log_recovery "  Provider order: ${providers[*]}"
   
   for provider in "${providers[@]}"; do
+    log_recovery "  Checking provider: $provider"
+    
     # First check OAuth profile
-    if check_oauth_profile "$provider" >/dev/null 2>&1; then
+    local oauth_result
+    oauth_result=$(check_oauth_profile "$provider" 2>&1)
+    if [ $? -eq 0 ]; then
+      log_recovery "    OAuth profile found for $provider"
       echo "$provider"
       return 0
+    else
+      log_recovery "    No OAuth for $provider"
     fi
     
     # Then check API key
@@ -377,12 +392,21 @@ find_working_api_provider() {
       google)    key="${GOOGLE_API_KEY:-}" ;;
     esac
     
-    if [ -n "$key" ] && $VALIDATE_API_KEY_FN "$provider" "$key"; then
-      echo "$provider"
-      return 0
+    if [ -n "$key" ]; then
+      log_recovery "    API key found for $provider, validating..."
+      if $VALIDATE_API_KEY_FN "$provider" "$key"; then
+        log_recovery "    API key valid for $provider"
+        echo "$provider"
+        return 0
+      else
+        log_recovery "    API key invalid for $provider"
+      fi
+    else
+      log_recovery "    No API key for $provider"
     fi
   done
   
+  log_recovery "  No working provider found"
   echo ""
   return 1
 }

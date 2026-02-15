@@ -617,6 +617,16 @@ CRITMD
   log "Updating bot display names after recovery..."
   /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || log "Warning: rename-bots.sh failed (non-fatal)"
   
+  # Set stage to 11 (ready) even in safe mode - bot is online, just in recovery mode
+  # Use different DESC to distinguish from normal ready
+  if [ "$CLAWDBOT_STARTED" = "true" ]; then
+    echo '11' > /var/lib/init-status/stage
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=safe-mode-ready" >> /var/log/init-stages.log
+  else
+    echo '12' > /var/lib/init-status/stage
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=12 DESC=critical-failure" >> /var/log/init-stages.log
+  fi
+  
   rm -f /var/lib/init-status/needs-post-boot-check
   # Note: Don't send notification here - boot report flow will send 
   # a proper safe mode notification with failure details
