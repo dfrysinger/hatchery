@@ -415,10 +415,12 @@ User=$USERNAME
 WorkingDirectory=$H
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+ExecStartPost=-/bin/bash -c 'RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 ExecStop=+/usr/local/bin/sync-openclaw-state.sh
 TimeoutStopSec=30
-Restart=always
-RestartSec=3
+TimeoutStartSec=120
+Restart=on-failure
+RestartSec=10
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
