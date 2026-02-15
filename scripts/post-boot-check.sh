@@ -35,6 +35,13 @@ else
   exit 1
 fi
 
+# Decode API keys from base64 (droplet.env stores them encoded)
+# Export them so safe-mode-recovery.sh can use them
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$(d "$ANTHROPIC_KEY_B64")}"
+export OPENAI_API_KEY="${OPENAI_API_KEY:-$(d "$OPENAI_KEY_B64")}"
+export GOOGLE_API_KEY="${GOOGLE_API_KEY:-$(d "$GOOGLE_API_KEY_B64")}"
+export BRAVE_API_KEY="${BRAVE_API_KEY:-$(d "$BRAVE_KEY_B64")}"
+
 # Set working variables
 AC=${AGENT_COUNT:-1}
 H="/home/$USERNAME"
