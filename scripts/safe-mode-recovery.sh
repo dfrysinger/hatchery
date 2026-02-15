@@ -260,6 +260,7 @@ check_oauth_profile() {
   if [ -z "$auth_file" ]; then
     local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
     for path in \
+      "$home/.openclaw/agents/main/agent/auth-profiles.json" \
       "$home/.openclaw/agents/agent1/agent/auth-profiles.json" \
       "$home/.openclaw/agent/auth-profiles.json"; do
       [ -f "$path" ] && auth_file="$path" && break
