@@ -855,20 +855,18 @@ EOF
   echo "$safe_mode_dir"
 }
 
-# Generate emergency config with working credentials
 # Generate emergency OpenClaw config with working credentials
 # Uses bind=lan (not local) because:
 #   - iOS Shortcut API needs to reach the gateway from the LAN
 #   - Safe mode still needs config apply/health check endpoints accessible
 #   - bind=local would only allow localhost connections, breaking remote management
 generate_emergency_config() {
-  local token="$1"
-  local platform="$2"
-  local provider="$3"
-  local api_key="$4"
-  # $5 was agent_name - removed as SafeModeBot is always hardcoded
-  local auth_type="${5:-apikey}"  # oauth or apikey
-  local model="${6:-}"  # Use provided model or fall back to default
+  local token="$1"       # Bot token (Telegram or Discord)
+  local platform="$2"    # "telegram" or "discord"
+  local provider="$3"    # API provider: "anthropic", "openai", "google"
+  local api_key="$4"     # API key (empty if using OAuth)
+  local auth_type="${5:-apikey}"  # "oauth" or "apikey"
+  local model="${6:-}"   # Model override (uses provider default if empty)
   
   [ -z "$model" ] && model=$(get_default_model_for_provider "$provider")
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
