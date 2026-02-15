@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2155  # Declare and assign separately - acceptable here as we don't check return values
 # =============================================================================
 # safe-mode-recovery.sh -- Smart Safe Mode Recovery
 # =============================================================================
@@ -842,6 +843,11 @@ EOF
 }
 
 # Generate emergency config with working credentials
+# Generate emergency OpenClaw config with working credentials
+# Uses bind=lan (not local) because:
+#   - iOS Shortcut API needs to reach the gateway from the LAN
+#   - Safe mode still needs config apply/health check endpoints accessible
+#   - bind=local would only allow localhost connections, breaking remote management
 generate_emergency_config() {
   local token="$1"
   local platform="$2"
@@ -968,15 +974,18 @@ check_network() {
     return 0  # Assume network OK in tests
   fi
   
-  # Try multiple endpoints
-  for host in "api.telegram.org" "discord.com" "api.anthropic.com" "1.1.1.1"; do
-    if ping -c 1 -W 2 "$host" >/dev/null 2>&1; then
-      return 0
-    fi
-    if curl -sf --max-time 3 "https://$host" >/dev/null 2>&1; then
+  # Try multiple endpoints - use real API endpoints that we'll need anyway
+  # Avoid 1.1.1.1 - some networks block it or it may cause false negatives
+  for url in "https://api.telegram.org" "https://discord.com" "https://api.anthropic.com" "https://www.google.com"; do
+    if curl -sf --max-time 5 --head "$url" >/dev/null 2>&1; then
       return 0
     fi
   done
+  
+  # Fallback: try DNS resolution
+  if host api.telegram.org >/dev/null 2>&1 || nslookup api.telegram.org >/dev/null 2>&1; then
+    return 0
+  fi
   
   return 1
 }
@@ -1278,6 +1287,14 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   # Source environment if available
   [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
   [ -f /etc/droplet.env ] && source /etc/droplet.env
+  
+  # Defensive base64 decoding for standalone execution
+  # (droplet.env stores API keys as base64-encoded values)
+  d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+  export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$(d "${ANTHROPIC_KEY_B64:-}")}"
+  export OPENAI_API_KEY="${OPENAI_API_KEY:-$(d "${OPENAI_KEY_B64:-}")}"
+  export GOOGLE_API_KEY="${GOOGLE_API_KEY:-$(d "${GOOGLE_API_KEY_B64:-}")}"
+  export BRAVE_API_KEY="${BRAVE_API_KEY:-$(d "${BRAVE_KEY_B64:-}")}"
   
   run_smart_recovery
 fi

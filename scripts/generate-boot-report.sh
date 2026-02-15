@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2155  # Declare and assign separately - acceptable here as we don't check return values
 # =============================================================================
 # generate-boot-report.sh -- Boot Report & Coordinator System
 # =============================================================================
