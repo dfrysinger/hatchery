@@ -72,7 +72,7 @@ S="/usr/local/bin/set-stage.sh"
 TG="/usr/local/bin/tg-notify.sh"
 LOG="/var/log/phase1.log"
 START=$(date +%s)
-$TG "🚀 Droplet starting up. Phase 1 in progress..." || true
+$TG "🚀 Droplet starting up. Bot online in ~2 min..." || true
 $S 1 "preparing"
 NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
 [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
@@ -271,7 +271,7 @@ for _ in {1..30}; do
 done
 if [ "$BOT_OK" = "true" ]; then
   $S 3 "bot-online"
-  $TG "[OK] Bot online! Phase 1 complete. Starting desktop setup..." || true
+  $TG "✅ Bot online! Desktop setup in progress..." || true
 else
   journalctl -u clawdbot -n 50 >> "$LOG" 2>&1
   $TG "[WARN] Bot may not be running. Check logs: journalctl -u clawdbot" || true

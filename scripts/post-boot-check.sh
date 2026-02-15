@@ -220,9 +220,8 @@ if [ "$HEALTHY" = "true" ]; then
   log "Updating bot display names..."
   /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || log "Warning: rename-bots.sh failed (non-fatal)"
   
-  HN="${HABITAT_NAME:-default}"
-  HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-  $TG "[OK] ${HN}${HDOM} fully operational. Full config applied (isolation=$ISOLATION). All systems ready." || true
+  # Note: Boot report flow will send the final notification with agent details
+  rm -f /var/lib/init-status/safe-mode  # Clear any stale safe-mode marker
 else
   log "FAILURE - entering SAFE MODE with smart recovery"
   touch /var/lib/init-status/safe-mode
