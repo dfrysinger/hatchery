@@ -692,7 +692,7 @@ get_default_model_for_provider() {
   case "$provider" in
     anthropic)     echo "anthropic/claude-sonnet-4-5" ;;
     openai)        echo "openai/gpt-4o" ;;
-    openai-codex)  echo "openai-codex/gpt-4o" ;;
+    openai-codex)  echo "openai-codex/o3" ;;  # OAuth models differ from API key models
     google)        echo "google/gemini-2.0-flash" ;;
     *)             echo "anthropic/claude-sonnet-4-5" ;;
   esac
@@ -943,31 +943,6 @@ clear_corrupted_state() {
   return 0
 }
 
-# Backup current config as last-known-good
-backup_working_config() {
-  local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
-  local config_path="$home/.openclaw/openclaw.json"
-  local backup_path="$home/.openclaw/openclaw.last-good.json"
-  
-  if [ -f "$config_path" ]; then
-    cp "$config_path" "$backup_path" 2>/dev/null || true
-  fi
-}
-
-# Restore last-known-good config
-restore_last_good_config() {
-  local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
-  local config_path="$home/.openclaw/openclaw.json"
-  local backup_path="$home/.openclaw/openclaw.last-good.json"
-  
-  if [ -f "$backup_path" ]; then
-    cp "$backup_path" "$config_path" 2>/dev/null
-    return $?
-  fi
-  
-  return 1
-}
-
 # Try to notify user via any available channel
 notify_user_emergency() {
   local message="$1"
@@ -1192,14 +1167,7 @@ run_full_recovery_escalation() {
     return 0
   fi
   
-  # Level 4: Try last-known-good config
-  log_recovery "Level 4: Attempting last-known-good config..."
-  if restore_last_good_config; then
-    log_recovery "Restored last-known-good config"
-    return 0
-  fi
-  
-  # Level 5: Give up
+  # Level 4: Give up
   log_recovery "CRITICAL: All recovery attempts failed!"
   notify_user_emergency "🚨 CRITICAL: All recovery attempts failed! Manual intervention required."
   
