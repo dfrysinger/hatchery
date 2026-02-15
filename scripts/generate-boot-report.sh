@@ -515,9 +515,9 @@ EOF
     # Add diagnostics summary if available
     if [ -f "/var/log/safe-mode-diagnostics.txt" ]; then
       echo ""
-      echo "<b>Recovery diagnostics:</b>"
       echo "<code>"
-      cat /var/log/safe-mode-diagnostics.txt | sed 's/^🔍 //'  # Remove emoji for Telegram
+      # Skip the first line (header) since we're in a code block already
+      tail -n +2 /var/log/safe-mode-diagnostics.txt
       echo "</code>"
     elif [ -n "$failures" ]; then
       # Fallback to failure summary if no diagnostics
