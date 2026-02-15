@@ -45,7 +45,7 @@ export BRAVE_API_KEY="${BRAVE_API_KEY:-$(d "$BRAVE_KEY_B64")}"
 # Set working variables
 AC=${AGENT_COUNT:-1}
 H="/home/$USERNAME"
-TG="/usr/local/bin/tg-notify.sh"
+# Note: TG removed - notifications now handled via boot report flow
 ISOLATION="${ISOLATION_DEFAULT:-none}"
 # NOTE: Do NOT use "GROUPS" - it's a bash built-in array variable that causes conflicts
 SESSION_GROUPS="${ISOLATION_GROUPS:-}"
@@ -127,7 +127,8 @@ check_service_health() {
 # Returns 0 if at least one provider works, 1 if all fail
 check_api_key_validity() {
   local service="$1"
-  local today=$(date +%Y-%m-%d)
+  local today
+  today=$(date +%Y-%m-%d)
   local openclaw_log="/tmp/openclaw/openclaw-${today}.log"
   
   log "  Checking API key validity for $service..."
@@ -248,7 +249,8 @@ validate_discord_token_direct() {
 # 2. Checking service logs for connection errors (fallback/additional info)
 check_channel_connectivity() {
   local service="$1"
-  local today=$(date +%Y-%m-%d)
+  local today
+  today=$(date +%Y-%m-%d)
   local openclaw_log="/tmp/openclaw/openclaw-${today}.log"
   
   log "  Checking channel connectivity for $service..."

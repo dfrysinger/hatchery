@@ -417,7 +417,8 @@ get_all_configured_models() {
     local model="${!model_var:-}"
     
     if [ -n "$model" ]; then
-      # Skip duplicates
+      # Skip duplicates (shellcheck: quotes intentional for exact word match)
+      # shellcheck disable=SC2076
       if [[ ! " ${seen[*]} " =~ " $model " ]]; then
         models+=("$model")
         seen+=("$model")
@@ -433,7 +434,8 @@ get_all_configured_models() {
 # Returns the first model that matches the provider
 find_working_model_for_provider() {
   local provider="$1"
-  local configured_models=($(get_all_configured_models))
+  local configured_models
+  read -ra configured_models <<< "$(get_all_configured_models)"
   
   # Try configured models first (that match this provider)
   for model in "${configured_models[@]}"; do
@@ -673,6 +675,7 @@ get_provider_order() {
   # (skipping whichever was the user's default)
   for p in "anthropic" "openai" "google"; do
     # Skip if already added (user's default)
+    # shellcheck disable=SC2076  # Quotes intentional for exact word match
     [[ " ${ordered[*]} " =~ " $p " ]] && continue
     ordered+=("$p")
   done
@@ -697,7 +700,8 @@ type log_recovery &>/dev/null || log_recovery() { :; }
 # Sets: FOUND_API_PROVIDER with provider name (may be "openai-codex" for OAuth)
 # Side effect: populates DIAG_API_RESULTS
 find_working_api_provider() {
-  local providers=($(get_provider_order))
+  local providers
+  read -ra providers <<< "$(get_provider_order)"
   log_recovery "  Provider order: ${providers[*]}"
   FOUND_API_PROVIDER=""
   

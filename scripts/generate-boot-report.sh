@@ -583,6 +583,7 @@ run_boot_report_flow() {
   log_report "Starting boot report generation..."
   
   # Source environment if not already loaded
+  # shellcheck disable=SC1090  # Path is validated before sourcing
   [ -z "${AGENT_COUNT:-}" ] && [ -f "$HABITAT_ENV_PATH" ] && source "$HABITAT_ENV_PATH"
   
   # Generate report
