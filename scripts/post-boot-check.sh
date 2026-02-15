@@ -276,4 +276,29 @@ SAFEMD
   $TG "[SAFE MODE] ${HABITAT_NAME:-default} running minimal config. Full config failed (isolation=$ISOLATION). Check /var/log/post-boot-check.log" || true
 fi
 
+# Generate boot report for all agents
+log "Generating boot report..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/generate-boot-report.sh" ]; then
+  source "$SCRIPT_DIR/generate-boot-report.sh"
+  export HOME_DIR="$H"
+  export HABITAT_JSON_PATH="/etc/habitat.json"
+  export HABITAT_ENV_PATH="/etc/habitat-parsed.env"
+  export CLAWDBOT_LOG="/var/log/clawdbot.log"
+  export BOOT_REPORT_LOG="$LOG"
+  run_boot_report_flow
+  log "Boot report generated and distributed"
+elif [ -f "/usr/local/bin/generate-boot-report.sh" ]; then
+  source "/usr/local/bin/generate-boot-report.sh"
+  export HOME_DIR="$H"
+  export HABITAT_JSON_PATH="/etc/habitat.json"
+  export HABITAT_ENV_PATH="/etc/habitat-parsed.env"
+  export CLAWDBOT_LOG="/var/log/clawdbot.log"
+  export BOOT_REPORT_LOG="$LOG"
+  run_boot_report_flow
+  log "Boot report generated and distributed"
+else
+  log "WARNING: generate-boot-report.sh not found, skipping boot report"
+fi
+
 log "========== POST-BOOT-CHECK COMPLETE =========="
