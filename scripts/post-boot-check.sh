@@ -627,6 +627,16 @@ CRITMD
   if [ "$CLAWDBOT_STARTED" = "true" ]; then
     echo '12' > /var/lib/init-status/stage
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=12 DESC=safe-mode" >> /var/log/init-stages.log
+    
+    # Wake SafeModeBot to start diagnosis
+    # Run in background so post-boot-check completes promptly
+    (
+      sleep 30  # Give gateway time to fully initialize
+      log "Waking SafeModeBot to begin diagnosis..."
+      sudo -u "$USERNAME" openclaw system event \
+        --text "Safe Mode active. Read BOOT_REPORT.md in your workspace and diagnose what's broken. Explain the situation to the user and attempt repair if possible." \
+        --mode now >> "$LOG" 2>&1 || log "Warning: Failed to wake SafeModeBot"
+    ) &
   else
     echo '13' > /var/lib/init-status/stage
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=13 DESC=critical-failure" >> /var/log/init-stages.log
