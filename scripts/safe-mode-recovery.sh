@@ -692,7 +692,7 @@ get_default_model_for_provider() {
   case "$provider" in
     anthropic)     echo "anthropic/claude-sonnet-4-5" ;;
     openai)        echo "openai/gpt-4o" ;;
-    openai-codex)  echo "openai-codex/o3" ;;  # OAuth models differ from API key models
+    openai-codex)  echo "openai-codex/gpt-5.2" ;;  # OAuth provider uses different model names
     google)        echo "google/gemini-2.0-flash" ;;
     *)             echo "anthropic/claude-sonnet-4-5" ;;
   esac
