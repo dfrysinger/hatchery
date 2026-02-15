@@ -157,8 +157,15 @@ esac
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Config apply complete"
 echo "========================================"
 
-# Send Telegram notification that config was applied
+# Send notification that config was applied
 TG="/usr/local/bin/tg-notify.sh"
 if [ -x "$TG" ]; then
-    $TG "🤖 Bot personality uploaded! OpenClaw restarted." || true
+    echo "Sending personality upload notification..."
+    if $TG "🤖 Bot personality uploaded!"; then
+        echo "Notification sent successfully"
+    else
+        echo "WARNING: Notification failed (exit code: $?)"
+    fi
+else
+    echo "WARNING: tg-notify.sh not found or not executable at $TG"
 fi
