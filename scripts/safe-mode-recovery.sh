@@ -290,22 +290,35 @@ check_oauth_profile() {
   access_token=$(jq -r ".profiles[\"$profile_key\"].access // empty" "$auth_file" 2>/dev/null)
   
   if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
+    log_recovery "    OAuth access token exists for $provider"
+    
     # Check if expired (if expires field exists)
     local expires
     expires=$(jq -r ".profiles[\"$profile_key\"].expires // empty" "$auth_file" 2>/dev/null)
-    if [ -n "$expires" ] && [ "$expires" != "null" ]; then
+    if [ -n "$expires" ] && [ "$expires" != "null" ] && [ "$expires" != "0" ]; then
       local now=$(date +%s)
       local exp_ts=$((expires / 1000))  # Convert ms to seconds if needed
       [ "$exp_ts" -lt 1000000000000 ] || exp_ts=$((expires / 1000))
+      
       if [ "$now" -lt "$exp_ts" ]; then
+        log_recovery "    OAuth token valid (expires in $((exp_ts - now))s)"
+        echo "oauth"
+        return 0
+      else
+        log_recovery "    OAuth token EXPIRED (expired $((now - exp_ts))s ago)"
+        # Token expired - but we have refresh token, so still usable by OpenClaw
+        # OpenClaw will refresh it automatically when it starts
         echo "oauth"
         return 0
       fi
     else
-      # No expiry, assume valid
+      # No expiry or expiry=0, assume valid
+      log_recovery "    OAuth token has no expiry, assuming valid"
       echo "oauth"
       return 0
     fi
+  else
+    log_recovery "    No OAuth access token for $provider"
   fi
   
   return 1
