@@ -98,7 +98,7 @@ test_finds_working_telegram_token() {
     export -f mock_validate_telegram_token
     VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
     
-    result=$(find_working_telegram_token)
+    find_working_telegram_token; result="$FOUND_TOKEN_RESULT"
     # New format: agent_num:token
     if [ "$result" = "2:TOKEN_2_VALID" ]; then
       pass "finds_working_telegram_token: found Agent2's token"
@@ -126,7 +126,7 @@ test_finds_working_discord_token() {
     export -f mock_validate_discord_token
     VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
     
-    result=$(find_working_discord_token)
+    find_working_discord_token; result="$FOUND_TOKEN_RESULT"
     # New format: agent_num:token
     if [ "$result" = "3:DISCORD_TOKEN_VALID" ]; then
       pass "finds_working_discord_token: found Agent3's token"
@@ -152,7 +152,7 @@ test_returns_empty_when_no_valid_tokens() {
     export -f mock_validate_telegram_token
     VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
     
-    result=$(find_working_telegram_token)
+    find_working_telegram_token; result="$FOUND_TOKEN_RESULT"
     if [ -z "$result" ]; then
       pass "returns_empty_when_no_valid_tokens: correctly returned empty"
     else
@@ -215,7 +215,7 @@ test_cross_platform_fallback() {
     VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
     VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
     
-    result=$(find_working_platform_and_token)
+    find_working_platform_and_token; result="$FOUND_TOKEN_RESULT"
     # New format: platform:agent_num:token
     if [ "$result" = "discord:3:DISCORD_TOKEN_VALID" ]; then
       pass "cross_platform_fallback: found Discord after Telegram failed"
@@ -243,7 +243,7 @@ test_platform_token_format() {
     export -f mock_validate_telegram_token
     VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
     
-    result=$(find_working_platform_and_token)
+    find_working_platform_and_token; result="$FOUND_TOKEN_RESULT"
     if [[ "$result" == "telegram:"* ]]; then
       pass "platform_token_format: returns 'platform:token' format"
     else
@@ -275,7 +275,7 @@ test_user_preferred_platform_discord() {
     VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
     VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
     
-    result=$(find_working_platform_and_token)
+    find_working_platform_and_token; result="$FOUND_TOKEN_RESULT"
     
     # Should find discord token (not fall back to telegram)
     if [[ "$result" == "discord:"* ]]; then
@@ -308,7 +308,7 @@ test_default_platform_telegram() {
     VALIDATE_TELEGRAM_TOKEN_FN="mock_validate_telegram_token"
     VALIDATE_DISCORD_TOKEN_FN="mock_validate_discord_token"
     
-    result=$(find_working_platform_and_token)
+    find_working_platform_and_token; result="$FOUND_TOKEN_RESULT"
     
     # Should find telegram token
     if [[ "$result" == "telegram:"* ]]; then
@@ -345,7 +345,7 @@ test_uses_anthropic_if_valid() {
     export -f mock_validate_api_key
     VALIDATE_API_KEY_FN="mock_validate_api_key"
     
-    result=$(find_working_api_provider)
+    find_working_api_provider; result="$FOUND_API_PROVIDER"
     if [ "$result" = "anthropic" ]; then
       pass "uses_anthropic_if_valid: selected anthropic"
     else
@@ -375,7 +375,7 @@ test_falls_back_to_openai() {
     export -f mock_validate_api_key
     VALIDATE_API_KEY_FN="mock_validate_api_key"
     
-    result=$(find_working_api_provider)
+    find_working_api_provider; result="$FOUND_API_PROVIDER"
     if [ "$result" = "openai" ]; then
       pass "falls_back_to_openai: selected openai"
     else
@@ -406,7 +406,7 @@ test_falls_back_to_gemini() {
     export -f mock_validate_api_key
     VALIDATE_API_KEY_FN="mock_validate_api_key"
     
-    result=$(find_working_api_provider)
+    find_working_api_provider; result="$FOUND_API_PROVIDER"
     if [ "$result" = "google" ]; then
       pass "falls_back_to_gemini: selected google"
     else
@@ -652,7 +652,7 @@ test_all_providers_fail() {
     export -f mock_validate_api_key
     VALIDATE_API_KEY_FN="mock_validate_api_key"
     
-    result=$(find_working_api_provider)
+    find_working_api_provider; result="$FOUND_API_PROVIDER"
     if [ -z "$result" ]; then
       pass "all_providers_fail: correctly returned empty"
     else

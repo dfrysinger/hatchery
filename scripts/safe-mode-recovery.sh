@@ -278,15 +278,16 @@ validate_api_key() {
 # Token Hunting Functions
 # =============================================================================
 
-# Global variable for validation reason (avoids subshell issues with $())
+# Global variables for function results (avoids subshell issues with $())
 VALIDATION_REASON=""
+FOUND_TOKEN_RESULT=""
 
 # Find a working Telegram token from all agents
-# Returns: agent_num:token (e.g., "2:abc123...")
+# Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
 # Side effect: populates DIAG_TELEGRAM_RESULTS
 find_working_telegram_token() {
   local count="${AGENT_COUNT:-0}"
-  local found=""
+  FOUND_TOKEN_RESULT=""
   
   for i in $(seq 1 "$count"); do
     local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
@@ -301,32 +302,25 @@ find_working_telegram_token() {
     fi
     
     # Run validation - captures reason via VALIDATION_REASON global
-    # (using $() would create subshell and break test mocks)
     VALIDATION_REASON=""
     if $VALIDATE_TELEGRAM_TOKEN_FN "$token"; then
       diag_add "telegram" "agent${i}" "✅" "valid"
-      [ -z "$found" ] && found="${i}:${token}"
+      [ -z "$FOUND_TOKEN_RESULT" ] && FOUND_TOKEN_RESULT="${i}:${token}"
     else
-      # Capture reason from stdout if function echoed it
       diag_add "telegram" "agent${i}" "❌" "${VALIDATION_REASON:-unknown}"
     fi
   done
   
-  if [ -n "$found" ]; then
-    echo "$found"
-    return 0
-  fi
-  
-  echo ""
+  [ -n "$FOUND_TOKEN_RESULT" ] && return 0
   return 1
 }
 
 # Find a working Discord token from all agents
-# Returns: agent_num:token (e.g., "2:abc123...")
+# Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
 # Side effect: populates DIAG_DISCORD_RESULTS
 find_working_discord_token() {
   local count="${AGENT_COUNT:-0}"
-  local found=""
+  FOUND_TOKEN_RESULT=""
   
   for i in $(seq 1 "$count"); do
     local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
@@ -339,28 +333,28 @@ find_working_discord_token() {
     VALIDATION_REASON=""
     if $VALIDATE_DISCORD_TOKEN_FN "$token"; then
       diag_add "discord" "agent${i}" "✅" "valid"
-      [ -z "$found" ] && found="${i}:${token}"
+      [ -z "$FOUND_TOKEN_RESULT" ] && FOUND_TOKEN_RESULT="${i}:${token}"
     else
       diag_add "discord" "agent${i}" "❌" "${VALIDATION_REASON:-unknown}"
     fi
   done
   
-  if [ -n "$found" ]; then
-    echo "$found"
-    return 0
-  fi
-  
-  echo ""
+  [ -n "$FOUND_TOKEN_RESULT" ] && return 0
   return 1
 }
+
+# Global variable for function results (avoids subshell issues)
+FOUND_TOKEN_RESULT=""
 
 # Find a working platform and token
 # Order: User's default platform (PLATFORM env var) first, then fallback platform
 # Tries ALL tokens from preferred platform before moving to fallback
-# Returns: platform:agent_num:token (e.g., "telegram:2:abc123...")
+# Sets: FOUND_TOKEN_RESULT with platform:agent_num:token (e.g., "telegram:2:abc123...")
+# Returns: 0 if found, 1 if not
 find_working_platform_and_token() {
   local user_platform="${PLATFORM:-telegram}"
   local platforms=()
+  FOUND_TOKEN_RESULT=""
   
   # Build ordered list: user's default first, then the other
   if [ "$user_platform" = "discord" ]; then
@@ -370,19 +364,18 @@ find_working_platform_and_token() {
   fi
   
   for platform in "${platforms[@]}"; do
-    local result=""
+    # Call directly (not in subshell) to preserve diagnostic array modifications
     case "$platform" in
-      telegram) result=$(find_working_telegram_token) ;;
-      discord)  result=$(find_working_discord_token) ;;
+      telegram) find_working_telegram_token ;;
+      discord)  find_working_discord_token ;;
     esac
     
-    if [ -n "$result" ]; then
-      echo "${platform}:${result}"
+    if [ -n "$FOUND_TOKEN_RESULT" ]; then
+      FOUND_TOKEN_RESULT="${platform}:${FOUND_TOKEN_RESULT}"
       return 0
     fi
   done
   
-  echo ""
   return 1
 }
 
@@ -597,15 +590,21 @@ get_provider_order() {
   echo "${ordered[@]}"
 }
 
+# Global for API provider result
+FOUND_API_PROVIDER=""
+
+# Default log_recovery to no-op if not defined (allows function use outside run_smart_recovery)
+type log_recovery &>/dev/null || log_recovery() { :; }
+
 # Find a working API provider
 # Order: User's default provider → Anthropic → OpenAI → Google (skipping user's default)
 # Checks both OAuth (auth-profiles.json) and API keys
-# Returns: provider name (may be different from input, e.g., "openai-codex" for OAuth)
+# Sets: FOUND_API_PROVIDER with provider name (may be "openai-codex" for OAuth)
 # Side effect: populates DIAG_API_RESULTS
 find_working_api_provider() {
   local providers=($(get_provider_order))
   log_recovery "  Provider order: ${providers[*]}"
-  local found=""
+  FOUND_API_PROVIDER=""
   
   for provider in "${providers[@]}"; do
     log_recovery "  Checking provider: $provider"
@@ -618,7 +617,7 @@ find_working_api_provider() {
       local actual_provider="${oauth_result#oauth:}"
       log_recovery "    OAuth profile found for $provider → using $actual_provider"
       diag_add "api" "$actual_provider" "✅" "OAuth"
-      [ -z "$found" ] && found="$actual_provider"
+      [ -z "$FOUND_API_PROVIDER" ] && FOUND_API_PROVIDER="$actual_provider"
       # Continue checking others for diagnostics, but we have our answer
       continue
     else
@@ -639,7 +638,7 @@ find_working_api_provider() {
       if $VALIDATE_API_KEY_FN "$provider" "$key"; then
         log_recovery "    API key valid for $provider"
         diag_add "api" "$provider" "✅" "API key"
-        [ -z "$found" ] && found="$provider"
+        [ -z "$FOUND_API_PROVIDER" ] && FOUND_API_PROVIDER="$provider"
       else
         log_recovery "    API key invalid for $provider: ${VALIDATION_REASON:-unknown}"
         diag_add "api" "$provider" "❌" "${VALIDATION_REASON:-unknown}"
@@ -647,19 +646,15 @@ find_working_api_provider() {
     else
       log_recovery "    No API key for $provider"
       # Only log "no key" if we also didn't find OAuth
-      if [ "$provider" != "openai" ] || [ -z "$found" ]; then
+      if [ "$provider" != "openai" ] || [ -z "$FOUND_API_PROVIDER" ]; then
         diag_add "api" "$provider" "⚪" "not configured"
       fi
     fi
   done
   
-  if [ -n "$found" ]; then
-    echo "$found"
-    return 0
-  fi
+  [ -n "$FOUND_API_PROVIDER" ] && return 0
   
   log_recovery "  No working provider found"
-  echo ""
   return 1
 }
 
@@ -1028,7 +1023,9 @@ run_smart_recovery() {
   
   # Step 1: Find working platform and token
   log_recovery "Step 1: Searching for working bot token..."
-  local platform_token=$(find_working_platform_and_token)
+  # Call directly (not in subshell) to preserve diagnostic array modifications
+  find_working_platform_and_token
+  local platform_token="$FOUND_TOKEN_RESULT"
   
   if [ -z "$platform_token" ]; then
     log_recovery "ERROR: No working bot tokens found"
@@ -1041,7 +1038,8 @@ run_smart_recovery() {
     fi
     
     # Retry after doctor
-    platform_token=$(find_working_platform_and_token)
+    find_working_platform_and_token
+    platform_token="$FOUND_TOKEN_RESULT"
     if [ -z "$platform_token" ]; then
       log_recovery "ERROR: Still no working tokens after doctor --fix"
       # Write diagnostics before failing
@@ -1061,7 +1059,8 @@ run_smart_recovery() {
   
   # Step 2: Find working API provider
   log_recovery "Step 2: Searching for working API provider..."
-  local provider=$(find_working_api_provider)
+  find_working_api_provider
+  local provider="$FOUND_API_PROVIDER"
   
   if [ -z "$provider" ]; then
     log_recovery "WARNING: No working API providers found via validation"
