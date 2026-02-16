@@ -752,20 +752,23 @@ REPORT
   log "Generated BOOT_REPORT.md"
 }
 
-# Send notification based on outcome
+# Send notification based on FINAL outcome only
+# - No notification when first entering safe mode (Run 1) - wait for Run 2
+# - This ensures user gets ONE notification reflecting the final state
 if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
-  # Safe mode config working - send safe-mode notification (not "Ready!")
+  # Safe mode config verified working (Run 2)
   generate_boot_report_md
   send_boot_notification "safe-mode"
 elif [ "$HEALTHY" = "true" ]; then
   # Full config healthy - truly ready
   send_boot_notification "healthy"
 elif [ "$EXIT_CODE" = "2" ]; then
+  # Critical failure - everything broken
   send_boot_notification "critical"
 else
-  # Entering safe mode - generate report and notify
-  generate_boot_report_md
-  send_boot_notification "safe-mode"
+  # Entering safe mode (Run 1) - no notification yet, wait for Run 2 to confirm
+  log "Entering safe mode - notification deferred until recovery verified"
+  generate_boot_report_md  # Still generate report for SafeModeBot to read
 fi
 
 log "========== GATEWAY HEALTH CHECK COMPLETE (exit=$EXIT_CODE) =========="
