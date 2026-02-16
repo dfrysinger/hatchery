@@ -569,7 +569,15 @@ fi
 log "========== HEALTH CHECK DECISION =========="
 log "HEALTHY=$HEALTHY, ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE, RECOVERY_ATTEMPTS=$RECOVERY_ATTEMPTS"
 
-if [ "$HEALTHY" = "true" ]; then
+if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
+  # Safe mode config is working - keep safe mode active, don't pretend everything is normal
+  log "DECISION: SAFE MODE STABLE - recovery config working, keeping safe mode flag"
+  rm -f "$RECOVERY_COUNTER_FILE"
+  rm -f "$RECENTLY_RECOVERED_FILE"
+  EXIT_CODE=0  # Don't restart, safe mode is working
+
+elif [ "$HEALTHY" = "true" ]; then
+  # Full config is healthy (not in safe mode) - truly ready
   log "DECISION: SUCCESS - gateway healthy, clearing safe mode state"
   rm -f /var/lib/init-status/safe-mode
   rm -f "$RECOVERY_COUNTER_FILE"
@@ -745,12 +753,17 @@ REPORT
 }
 
 # Send notification based on outcome
-if [ "$HEALTHY" = "true" ]; then
+if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
+  # Safe mode config working - send safe-mode notification (not "Ready!")
+  generate_boot_report_md
+  send_boot_notification "safe-mode"
+elif [ "$HEALTHY" = "true" ]; then
+  # Full config healthy - truly ready
   send_boot_notification "healthy"
 elif [ "$EXIT_CODE" = "2" ]; then
   send_boot_notification "critical"
 else
-  # Safe mode - generate report and notify
+  # Entering safe mode - generate report and notify
   generate_boot_report_md
   send_boot_notification "safe-mode"
 fi
