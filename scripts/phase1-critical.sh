@@ -190,7 +190,8 @@ else
 fi
 
 # Find first available bot token (prefer agent1 if valid)
-EMERGENCY_TOKEN="${A1TK}"
+# TBT is AGENT1_BOT_TOKEN (telegram), set earlier in this script
+EMERGENCY_TOKEN="${TBT}"
 EMERGENCY_PLATFORM="telegram"
 [ -z "$EMERGENCY_TOKEN" ] && [ -n "${AGENT2_BOT_TOKEN:-}" ] && EMERGENCY_TOKEN=$(d "$AGENT2_BOT_TOKEN_B64")
 
