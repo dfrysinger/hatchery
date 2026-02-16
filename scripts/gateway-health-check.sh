@@ -188,35 +188,64 @@ check_channel_connectivity() {
   
   log "  Checking channel connectivity..."
   
-  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-  
-  local platform="${PLATFORM:-telegram}"
   local token_valid=false
-  local count="${AGENT_COUNT:-1}"
+  local config_file="$H/.openclaw/openclaw.json"
   
-  for i in $(seq 1 "$count"); do
-    if [ "$platform" = "telegram" ]; then
-      local token="${!AGENT${i}_TELEGRAM_BOT_TOKEN:-}"
-      [ -z "$token" ] && token="${!AGENT${i}_BOT_TOKEN:-}"
-      
-      if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
-        log "  Agent${i} Telegram token valid"
+  # In safe mode, read tokens from ACTUAL config (not habitat-parsed.env)
+  # The safe mode config only contains the ONE working token
+  if [ -f /var/lib/init-status/safe-mode ] && [ -f "$config_file" ]; then
+    log "  Safe mode active - reading tokens from openclaw.json"
+    
+    # Try to extract Telegram token from config
+    local tg_token=$(jq -r '.channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    if [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
+      log "  Safe mode Telegram token valid"
+      token_valid=true
+    fi
+    
+    # Try Discord if Telegram not configured or failed
+    if [ "$token_valid" = "false" ]; then
+      local dc_token=$(jq -r '.channels.discord.token // empty' "$config_file" 2>/dev/null)
+      if [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
+        log "  Safe mode Discord token valid"
         token_valid=true
-        break
-      fi
-    elif [ "$platform" = "discord" ]; then
-      local token="${!AGENT${i}_DISCORD_BOT_TOKEN:-}"
-      
-      if [ -n "$token" ] && validate_discord_token_direct "$token"; then
-        log "  Agent${i} Discord token valid"
-        token_valid=true
-        break
       fi
     fi
-  done
+    
+    if [ "$token_valid" = "false" ]; then
+      log "  Safe mode config has no working chat tokens"
+    fi
+  else
+    # Normal mode: check all tokens from habitat-parsed.env
+    [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+    
+    local platform="${PLATFORM:-telegram}"
+    local count="${AGENT_COUNT:-1}"
+    
+    for i in $(seq 1 "$count"); do
+      if [ "$platform" = "telegram" ]; then
+        local token="${!AGENT${i}_TELEGRAM_BOT_TOKEN:-}"
+        [ -z "$token" ] && token="${!AGENT${i}_BOT_TOKEN:-}"
+        
+        if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
+          log "  Agent${i} Telegram token valid"
+          token_valid=true
+          break
+        fi
+      elif [ "$platform" = "discord" ]; then
+        local token="${!AGENT${i}_DISCORD_BOT_TOKEN:-}"
+        
+        if [ -n "$token" ] && validate_discord_token_direct "$token"; then
+          log "  Agent${i} Discord token valid"
+          token_valid=true
+          break
+        fi
+      fi
+    done
+  fi
   
-  # Try fallback platform
-  if [ "$token_valid" = "false" ]; then
+  # Try fallback platform (only in normal mode - safe mode already checked both)
+  if [ "$token_valid" = "false" ] && [ ! -f /var/lib/init-status/safe-mode ]; then
     local fallback=""
     [ "$platform" = "telegram" ] && fallback="discord"
     [ "$platform" = "discord" ] && fallback="telegram"
