@@ -76,6 +76,14 @@ echo "Bot renaming complete"
 echo "Handling service restarts for isolation mode: ${ISOLATION_DEFAULT:-none}"
 systemctl daemon-reload
 
+# Don't start/restart services if phase 2 hasn't completed yet (still in initial boot)
+# Config is saved; clawdbot will start automatically after reboot
+if [ ! -f /var/lib/init-status/phase2-complete ]; then
+    echo "Phase 2 not complete - config saved but skipping service restart"
+    echo "OpenClaw will start automatically after the post-install reboot"
+    exit 0
+fi
+
 case "${ISOLATION_DEFAULT:-none}" in
     session)
         echo "Session isolation mode - managing per-group services"
