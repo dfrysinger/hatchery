@@ -22,10 +22,7 @@ LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
 RUN_MODE="${RUN_MODE:-standalone}"
 
 log() {
-  local msg="$(date -u +%Y-%m-%dT%H:%M:%SZ) $*"
-  echo "$msg" >> "$LOG"
-  # Also log to journal so it appears in OpenClaw /log API
-  logger -t "health-check" "$*" 2>/dev/null || true
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"
 }
 
 log "========== GATEWAY HEALTH CHECK STARTING (mode=$RUN_MODE) =========="
@@ -755,21 +752,4 @@ else
 fi
 
 log "========== GATEWAY HEALTH CHECK COMPLETE (exit=$EXIT_CODE) =========="
-
-# Write summary for SafeModeBot to read
-SUMMARY_FILE="$H/clawd/agents/safe-mode/HEALTH_CHECK_LOG.md"
-mkdir -p "$(dirname "$SUMMARY_FILE")" 2>/dev/null
-cat >> "$SUMMARY_FILE" <<SUMMARY
-
----
-## Health Check Run: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-- **Exit Code:** $EXIT_CODE
-- **HEALTHY:** $HEALTHY
-- **ALREADY_IN_SAFE_MODE:** $ALREADY_IN_SAFE_MODE
-- **RECOVERY_ATTEMPTS:** $RECOVERY_ATTEMPTS
-- **Current Model:** $(jq -r '.agents.defaults.model.primary // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
-- **Config Env Keys:** $(jq -r '.env | keys | join(", ")' "$H/.openclaw/openclaw.json" 2>/dev/null)
-SUMMARY
-chown $USERNAME:$USERNAME "$SUMMARY_FILE" 2>/dev/null || true
-
 exit $EXIT_CODE
