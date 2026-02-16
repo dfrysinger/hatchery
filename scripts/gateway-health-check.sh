@@ -350,7 +350,7 @@ enter_safe_mode() {
   # Fall back to minimal config
   if [ "$SMART_RECOVERY_SUCCESS" = "false" ]; then
     log "Restoring minimal config..."
-    cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
+    cp "$H/.openclaw/openclaw.emergency.json" "$H/.openclaw/openclaw.json"
     chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
     chmod 600 "$H/.openclaw/openclaw.json"
   fi
@@ -507,19 +507,140 @@ else
   fi
 fi
 
-# Generate boot report (unless in execstartpost mode - avoid during restart)
-if [ "$RUN_MODE" != "execstartpost" ] || [ "$HEALTHY" = "true" ]; then
-  log "Generating boot report..."
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  BOOT_REPORT=""
-  [ -f "$SCRIPT_DIR/generate-boot-report.sh" ] && BOOT_REPORT="$SCRIPT_DIR/generate-boot-report.sh"
-  [ -z "$BOOT_REPORT" ] && [ -f "/usr/local/bin/generate-boot-report.sh" ] && BOOT_REPORT="/usr/local/bin/generate-boot-report.sh"
+# =============================================================================
+# Send Notification
+# =============================================================================
+
+send_boot_notification() {
+  local status="$1"  # healthy, safe-mode, critical
   
-  if [ -n "$BOOT_REPORT" ]; then
-    source "$BOOT_REPORT"
-    export HOME_DIR="$H" HABITAT_JSON_PATH="/etc/habitat.json" HABITAT_ENV_PATH="/etc/habitat-parsed.env"
-    run_boot_report_flow 2>/dev/null || true
+  log "Sending notification: $status"
+  
+  # Get habitat name
+  local habitat_name="${HABITAT_NAME:-Droplet}"
+  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  habitat_name="${HABITAT_NAME:-Droplet}"
+  
+  # Find a working token to send notification
+  local platform="${PLATFORM:-telegram}"
+  local send_token=""
+  local owner_id=""
+  
+  # In safe mode, read token from emergency config
+  if [ -f /var/lib/init-status/safe-mode ] && [ -f "$H/.openclaw/openclaw.json" ]; then
+    send_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts.default.botToken // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
   fi
+  
+  # Fall back to habitat tokens
+  if [ -z "$send_token" ]; then
+    for i in $(seq 1 "${AGENT_COUNT:-1}"); do
+      local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+      local token="${!token_var:-}"
+      [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
+      
+      if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
+        send_token="$token"
+        break
+      fi
+    done
+  fi
+  
+  owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+  
+  if [ -z "$send_token" ] || [ -z "$owner_id" ]; then
+    log "Cannot send notification - no working token or owner ID"
+    return 1
+  fi
+  
+  # Build message based on status
+  local message=""
+  case "$status" in
+    healthy)
+      local count="${AGENT_COUNT:-1}"
+      if [ "$count" -gt 1 ]; then
+        local agents_list=""
+        for i in $(seq 1 "$count"); do
+          local name_var="AGENT${i}_NAME"
+          local name="${!name_var:-Agent${i}}"
+          agents_list="${agents_list}• ${name} ✓
+"
+        done
+        message="✅ <b>[${habitat_name}]</b> Ready!
+
+<b>All ${count} agents online:</b>
+${agents_list}"
+      else
+        local name="${AGENT1_NAME:-Agent1}"
+        message="✅ <b>[${habitat_name}]</b> Ready!
+
+${name} is online."
+      fi
+      ;;
+      
+    safe-mode)
+      message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
+
+Health check failed. SafeModeBot is online to diagnose.
+
+See BOOT_REPORT.md for details."
+      ;;
+      
+    critical)
+      message="🔴 <b>[${habitat_name}] CRITICAL FAILURE</b>
+
+Gateway failed to start after multiple attempts.
+Bot is OFFLINE - no connectivity available.
+
+Check logs: <code>journalctl -u clawdbot -n 50</code>
+See CRITICAL_FAILURE.md for recovery steps."
+      ;;
+  esac
+  
+  # Send via Telegram
+  curl -sf --max-time 10 \
+    "https://api.telegram.org/bot${send_token}/sendMessage" \
+    -d "chat_id=${owner_id}" \
+    -d "text=${message}" \
+    -d "parse_mode=HTML" >> "$LOG" 2>&1 || log "Notification send failed"
+}
+
+# Generate BOOT_REPORT.md for SafeModeBot
+generate_boot_report_md() {
+  local report_path="$H/clawd/agents/safe-mode/BOOT_REPORT.md"
+  mkdir -p "$(dirname "$report_path")"
+  
+  cat > "$report_path" <<REPORT
+# Boot Report - Safe Mode Active
+
+## Status
+Safe mode was triggered because the full config failed health checks.
+
+## Recovery Actions Taken
+$(cat /var/log/gateway-health-check.log 2>/dev/null | grep -E "Recovery|recovery|SAFE MODE|token|API" | tail -20)
+
+## Diagnostics
+$(cat /var/log/safe-mode-diagnostics.txt 2>/dev/null || echo "No diagnostics available")
+
+## Next Steps
+1. Check which credentials failed above
+2. Review /var/log/gateway-health-check.log for details
+3. Fix the broken credentials in habitat config
+4. Upload new config via API or recreate droplet
+REPORT
+  
+  chown $USERNAME:$USERNAME "$report_path" 2>/dev/null
+  log "Generated BOOT_REPORT.md"
+}
+
+# Send notification based on outcome
+if [ "$HEALTHY" = "true" ]; then
+  send_boot_notification "healthy"
+elif [ "$EXIT_CODE" = "2" ]; then
+  send_boot_notification "critical"
+else
+  # Safe mode - generate report and notify
+  generate_boot_report_md
+  send_boot_notification "safe-mode"
 fi
 
 log "========== GATEWAY HEALTH CHECK COMPLETE (exit=$EXIT_CODE) =========="

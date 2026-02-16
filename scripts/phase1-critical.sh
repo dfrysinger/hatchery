@@ -72,7 +72,7 @@ S="/usr/local/bin/set-stage.sh"
 TG="/usr/local/bin/tg-notify.sh"
 LOG="/var/log/phase1.log"
 START=$(date +%s)
-$TG "🚀 Starting up. Bootstrap bot online in ~2 min..." || true
+# Boot messages removed - status API provides progress, first message will be final outcome
 $S 1 "preparing"
 NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
 [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
@@ -178,7 +178,8 @@ cat > $H/.openclaw/openclaw.json <<CFG
   }
 }
 CFG
-cp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.minimal.json
+# Save as emergency config for safe mode fallback
+cp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.emergency.json
 echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
 [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
 GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
@@ -201,10 +202,12 @@ Type=simple
 User=$USERNAME
 WorkingDirectory=$H
 ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
-Restart=always
-RestartSec=3
+ExecStartPost=+/usr/local/bin/gateway-health-check.sh
+Restart=on-failure
+RestartSec=5
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
+Environment=RUN_MODE=execstartpost
 Environment=ANTHROPIC_API_KEY=${AK}
 $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
 $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")
@@ -260,24 +263,11 @@ if [ -f /etc/systemd/system/openclaw-restore.service ]; then
     systemctl enable openclaw-restore.service
     systemctl start openclaw-restore.service || true  # Don't fail if restore has issues
 fi
+# Enable clawdbot but DON'T start - reboot will start it with full config
+# ExecStartPost health check will validate and send notifications
 systemctl enable clawdbot
-systemctl start clawdbot
 ufw allow 18789/tcp
-BOT_OK=false
-for _ in {1..30}; do
-  if systemctl is-active --quiet clawdbot; then
-    BOT_OK=true
-    break
-  fi
-  sleep 1
-done
-if [ "$BOT_OK" = "true" ]; then
-  $S 3 "bot-online"
-  $TG "✅ Bootstrap bot online! (No personality yet — upload config to customize)" || true
-else
-  journalctl -u clawdbot -n 50 >> "$LOG" 2>&1
-  $TG "[WARN] Bot may not be running. Check logs: journalctl -u clawdbot" || true
-fi
+$S 3 "phase1-complete"
 touch /var/lib/init-status/phase1-complete
 echo "$START" > /var/lib/init-status/phase1-time
 /usr/local/bin/set-phase.sh 2 "background-setup"

@@ -459,4 +459,4 @@ BGXML
 fi
 chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
 chmod 700 $H/.openclaw
-chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json 2>/dev/null || true
+chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
