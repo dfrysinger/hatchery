@@ -284,9 +284,6 @@ GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
 [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
   -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
   -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
-TG="/usr/local/bin/tg-notify.sh"
-HN="${HABITAT_NAME:-default}"
-HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
 # Boot notification removed - health check sends final status after reboot
 sleep 5
 reboot

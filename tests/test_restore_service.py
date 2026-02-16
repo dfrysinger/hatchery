@@ -178,27 +178,28 @@ class TestRestoreServiceOrdering:
         """Read the phase1-critical.sh script content."""
         return read_phase1_script()
 
-    def test_restore_enabled_before_clawdbot_starts(self, phase1_script_content):
-        """openclaw-restore must be enabled BEFORE clawdbot starts.
+    def test_restore_enabled_before_clawdbot_enabled(self, phase1_script_content):
+        """openclaw-restore must be enabled BEFORE clawdbot is enabled.
         
-        This ensures the Wants= dependency works correctly - if the restore
-        service isn't enabled when clawdbot starts, systemd can't wait for it.
+        This ensures the Wants= dependency works correctly when the system reboots.
+        Note: In the new architecture, phase1 only enables clawdbot (doesn't start it).
+        The service starts on reboot when the full config is ready.
         """
         content = phase1_script_content
         
         # Find the position of both commands
         enable_restore = re.search(r'systemctl\s+enable\s+openclaw-restore', content)
-        start_clawdbot = re.search(r'systemctl\s+start\s+clawdbot', content)
+        enable_clawdbot = re.search(r'systemctl\s+enable\s+clawdbot', content)
         
         assert enable_restore, \
             "phase1-critical.sh must have 'systemctl enable openclaw-restore'"
-        assert start_clawdbot, \
-            "phase1-critical.sh must have 'systemctl start clawdbot'"
+        assert enable_clawdbot, \
+            "phase1-critical.sh must have 'systemctl enable clawdbot'"
         
-        # Verify ordering: enable restore must come BEFORE start clawdbot
-        assert enable_restore.start() < start_clawdbot.start(), \
-            "systemctl enable openclaw-restore must appear BEFORE systemctl start clawdbot " \
-            "so the Wants= dependency works correctly"
+        # Verify ordering: enable restore must come BEFORE enable clawdbot
+        assert enable_restore.start() < enable_clawdbot.start(), \
+            "systemctl enable openclaw-restore must appear BEFORE systemctl enable clawdbot " \
+            "so the Wants= dependency works correctly on reboot"
 
     def test_restore_enabled_in_phase1_not_phase2(self, phase1_script_content):
         """Restore service should be enabled in phase1 (for immediate availability)."""

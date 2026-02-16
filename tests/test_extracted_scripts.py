@@ -25,11 +25,14 @@ EXPECTED_SCRIPTS = {
     "phase1-critical.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 150},
     "phase2-background.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 200},
     "build-full-config.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 300},
-    "post-boot-check.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 50},
+    "post-boot-check.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 10, "deprecated": True},
     "try-full-config.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 30},
     "restore-openclaw-state.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 50},
     "rename-bots.sh": {"type": "bash", "shebang": "#!/bin/bash", "min_lines": 40},
 }
+
+# Scripts that are deprecated but kept for backwards compatibility
+DEPRECATED_SCRIPTS = [name for name, info in EXPECTED_SCRIPTS.items() if info.get("deprecated")]
 
 # Utility scripts that require executable permissions (Issue #168)
 # These scripts are smaller utilities that don't require full documentation
@@ -83,6 +86,9 @@ class TestScriptFiles:
         path = os.path.join(SCRIPTS_DIR, script_name)
         if not os.path.isfile(path):
             pytest.skip(f"{script_name} does not exist")
+        # Skip full header checks for deprecated scripts
+        if script_name in DEPRECATED_SCRIPTS:
+            pytest.skip(f"{script_name} is deprecated")
         with open(path, "r") as f:
             content = f.read(2000)  # Read first 2KB
         # Check for header block (=== ... === pattern)
@@ -157,6 +163,8 @@ class TestBashScriptEnvSourcing:
         path = os.path.join(SCRIPTS_DIR, script_name)
         if not os.path.isfile(path):
             pytest.skip(f"{script_name} does not exist")
+        if script_name in DEPRECATED_SCRIPTS:
+            pytest.skip(f"{script_name} is deprecated")
         with open(path, "r") as f:
             content = f.read()
         assert "source /etc/droplet.env" in content, (
@@ -172,6 +180,8 @@ class TestBashScriptEnvSourcing:
         path = os.path.join(SCRIPTS_DIR, script_name)
         if not os.path.isfile(path):
             pytest.skip(f"{script_name} does not exist")
+        if script_name in DEPRECATED_SCRIPTS:
+            pytest.skip(f"{script_name} is deprecated")
         with open(path, "r") as f:
             content = f.read()
         assert "habitat-parsed.env" in content, (
@@ -182,14 +192,18 @@ class TestBashScriptEnvSourcing:
 class TestScriptContent:
     """Validate key content patterns in critical scripts."""
 
-    def test_phase1_starts_clawdbot(self):
-        """phase1-critical.sh should start the clawdbot service."""
+    def test_phase1_enables_clawdbot(self):
+        """phase1-critical.sh should enable the clawdbot service.
+        
+        Note: In the new architecture, phase1 only enables clawdbot (doesn't start it).
+        The service starts on reboot when the full config is ready. Health check
+        runs via ExecStartPost in clawdbot.service.
+        """
         path = os.path.join(SCRIPTS_DIR, "phase1-critical.sh")
         if not os.path.isfile(path):
             pytest.skip("phase1-critical.sh does not exist")
         with open(path, "r") as f:
             content = f.read()
-        assert "systemctl start clawdbot" in content
         assert "systemctl enable clawdbot" in content
 
     def test_phase1_installs_node(self):
@@ -249,15 +263,19 @@ class TestScriptContent:
         assert "AGENT_COUNT" in content
         assert "AGENT${i}" in content or "AGENT{" in content
 
-    def test_post_boot_check_safe_mode(self):
-        """post-boot-check.sh should implement safe mode fallback."""
-        path = os.path.join(SCRIPTS_DIR, "post-boot-check.sh")
+    def test_safe_mode_recovery_exists(self):
+        """safe-mode-recovery.sh should implement safe mode fallback.
+        
+        Note: post-boot-check.sh is deprecated. Safe mode logic is now in
+        safe-mode-recovery.sh, invoked by gateway-health-check.sh via ExecStartPost.
+        """
+        path = os.path.join(SCRIPTS_DIR, "safe-mode-recovery.sh")
         if not os.path.isfile(path):
-            pytest.skip("post-boot-check.sh does not exist")
+            pytest.skip("safe-mode-recovery.sh does not exist")
         with open(path, "r") as f:
             content = f.read()
-        assert "safe-mode" in content or "SAFE_MODE" in content
-        assert "openclaw.minimal.json" in content
+        assert "safe-mode" in content.lower() or "safe_mode" in content.lower()
+        assert "run_smart_recovery" in content
 
     def test_rename_bots_platform_aware(self):
         """rename-bots.sh should handle telegram/discord/both platforms."""

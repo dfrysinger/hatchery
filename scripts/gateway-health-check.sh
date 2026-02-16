@@ -165,9 +165,10 @@ check_api_key_validity() {
     log "  Safe mode active - checking API from config"
     
     # Try to get API key from config env section
-    local cfg_anthropic=$(jq -r '.env.ANTHROPIC_API_KEY // empty' "$config_file" 2>/dev/null)
-    local cfg_google=$(jq -r '.env.GOOGLE_API_KEY // empty' "$config_file" 2>/dev/null)
-    local cfg_openai=$(jq -r '.env.OPENAI_API_KEY // empty' "$config_file" 2>/dev/null)
+    local cfg_anthropic cfg_google cfg_openai
+    cfg_anthropic=$(jq -r '.env.ANTHROPIC_API_KEY // empty' "$config_file" 2>/dev/null)
+    cfg_google=$(jq -r '.env.GOOGLE_API_KEY // empty' "$config_file" 2>/dev/null)
+    cfg_openai=$(jq -r '.env.OPENAI_API_KEY // empty' "$config_file" 2>/dev/null)
     
     # Test whichever key is in the config
     if [ -n "$cfg_google" ]; then
@@ -264,7 +265,8 @@ check_channel_connectivity() {
     log "  Safe mode active - reading tokens from openclaw.json"
     
     # Try to extract Telegram token from config
-    local tg_token=$(jq -r '.channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    local tg_token
+    tg_token=$(jq -r '.channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
     if [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       log "  Safe mode Telegram token valid"
       token_valid=true
@@ -272,7 +274,8 @@ check_channel_connectivity() {
     
     # Try Discord if Telegram not configured or failed
     if [ "$token_valid" = "false" ]; then
-      local dc_token=$(jq -r '.channels.discord.token // empty' "$config_file" 2>/dev/null)
+      local dc_token
+      dc_token=$(jq -r '.channels.discord.token // empty' "$config_file" 2>/dev/null)
       if [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
         log "  Safe mode Discord token valid"
         token_valid=true
@@ -437,8 +440,9 @@ enter_safe_mode() {
     log "!!! SMART RECOVERY FAILED - falling back to emergency.json !!!"
     log "Emergency config before copy:"
     if [ -f "$H/.openclaw/openclaw.emergency.json" ]; then
-      local emerg_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.emergency.json" 2>/dev/null)
-      local emerg_keys=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.emergency.json" 2>/dev/null)
+      local emerg_model emerg_keys
+      emerg_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.emergency.json" 2>/dev/null)
+      emerg_keys=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.emergency.json" 2>/dev/null)
       log "  emergency.json: model=$emerg_model, env_keys=$emerg_keys"
     else
       log "  ERROR: emergency.json does not exist!"
@@ -447,13 +451,15 @@ enter_safe_mode() {
     chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
     chmod 600 "$H/.openclaw/openclaw.json"
     log "Config after fallback:"
-    local new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    local new_model
+    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
     log "  openclaw.json: model=$new_model"
   else
     log "Smart recovery succeeded - using recovery-generated config"
     log "Config after recovery:"
-    local new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    local new_keys=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    local new_model new_keys
+    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    new_keys=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.json" 2>/dev/null)
     log "  openclaw.json: model=$new_model, env_keys=$new_keys"
   fi
   
@@ -510,6 +516,7 @@ restart_gateway() {
         GATEWAY_TOKEN=""
         [ -f "$H/.openclaw/gateway-token.txt" ] && GATEWAY_TOKEN=$(cat "$H/.openclaw/gateway-token.txt")
         if [ -n "$GATEWAY_TOKEN" ]; then
+          # shellcheck disable=SC2024  # Redirect is intentional - LOG is root-owned, script runs as root
           sudo -u "$USERNAME" OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN" openclaw system event \
             --text "Safe Mode active. Read BOOT_REPORT.md and diagnose what's broken." \
             --mode now >> "$LOG" 2>&1 || true

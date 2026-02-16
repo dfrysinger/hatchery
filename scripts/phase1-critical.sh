@@ -69,7 +69,6 @@ FALLBACK_PY
 fi
 source /etc/habitat-parsed.env
 S="/usr/local/bin/set-stage.sh"
-TG="/usr/local/bin/tg-notify.sh"
 LOG="/var/log/phase1.log"
 START=$(date +%s)
 # Boot messages removed - status API provides progress, first message will be final outcome
