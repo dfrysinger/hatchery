@@ -216,8 +216,13 @@ if ! echo "$CONFIG_JSON" | jq . >/dev/null 2>&1; then
   exit 1
 fi
 echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
-# Copy full config to openclaw.json so OpenClaw uses all agents (not minimal single-agent)
-cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
+# Copy full config to openclaw.json UNLESS safe mode is active
+# (safe mode recovery already wrote a working config - don't overwrite it)
+if [ -f /var/lib/init-status/safe-mode ]; then
+  echo "Safe mode active - NOT overwriting openclaw.json with full config"
+else
+  cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
+fi
 for i in $(seq 1 $AC); do
   AD="$H/clawd/agents/agent${i}"
   NV="AGENT${i}_NAME"; ANAME="${!NV}"
@@ -299,6 +304,7 @@ If this is your first message since the system started, announce yourself:
 
 If you see a file called SAFE_MODE.md in your workspace, read and follow it immediately.
 If you see a file called BOOTSTRAP.md in your workspace, execute it once and delete it when done.
+If asked about boot status or system health, check for BOOT_REPORT.md in your workspace - it contains the full boot report with coordinator designation and component status.
 
 Check these services silently. Only alert user if something is broken after 2 fix attempts:
 - systemctl is-active clawdbot
@@ -370,6 +376,39 @@ for i in $(seq 1 $AC); do
   mkdir -p "$H/.openclaw/agents/agent${i}/agent"
   ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/agent${i}/agent/auth-profiles.json"
 done
+
+# Create safe-mode workspace (used if health check fails)
+/usr/local/bin/setup-safe-mode-workspace.sh "$H" "$USERNAME" 2>/dev/null || {
+  # Inline fallback if script not available
+  mkdir -p "$H/clawd/agents/safe-mode/memory"
+  cat > "$H/clawd/agents/safe-mode/IDENTITY.md" << 'SMID'
+# Safe Mode Recovery Bot
+
+You are the **Safe Mode Recovery Bot** - an emergency diagnostic and repair agent.
+
+The normal bot(s) failed to start. Check BOOT_REPORT.md in your workspace to see what failed.
+
+## Your Mission
+1. Read BOOT_REPORT.md to understand what's broken
+2. Diagnose the problem using system tools  
+3. Attempt repair if possible
+4. Escalate to user with clear explanation if you can't fix it
+
+You are NOT one of the originally configured agents - you're borrowing a working token to communicate.
+SMID
+  cat > "$H/clawd/agents/safe-mode/SOUL.md" << 'SMSO'
+You are calm, competent, and focused on getting things working again.
+
+Be clear about what's wrong. Explain what you're checking. If stuck, say so and ask for help.
+
+Start with status, not pleasantries: "Safe mode active. Checking boot report..."
+SMSO
+  chown -R "$USERNAME:$USERNAME" "$H/clawd/agents/safe-mode" 2>/dev/null || true
+}
+# Link auth-profiles for safe-mode agent too
+mkdir -p "$H/.openclaw/agents/safe-mode/agent"
+ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/safe-mode/agent/auth-profiles.json"
+
 cat > /etc/systemd/system/clawdbot.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
@@ -381,10 +420,13 @@ User=$USERNAME
 WorkingDirectory=$H
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+ExecStartPost=+/bin/bash -c 'RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 ExecStop=+/usr/local/bin/sync-openclaw-state.sh
 TimeoutStopSec=30
-Restart=always
-RestartSec=3
+TimeoutStartSec=120
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
@@ -423,4 +465,4 @@ BGXML
 fi
 chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
 chmod 700 $H/.openclaw
-chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.minimal.json 2>/dev/null || true
+chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true

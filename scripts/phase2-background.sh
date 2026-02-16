@@ -17,7 +17,6 @@ d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 S="/usr/local/bin/set-stage.sh"
 LOG="/var/log/phase2.log"
-START=$(date +%s)
 H="/home/$USERNAME"
 CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
 [ -n "$CHROME_PID" ] && wait $CHROME_PID 2>/dev/null || true
@@ -285,11 +284,6 @@ GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
 [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
   -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \
   -d '{"mode":"now"}' >> "$LOG" 2>&1 || true
-END=$(date +%s)
-DURATION=$((END - START))
-TG="/usr/local/bin/tg-notify.sh"
-HN="${HABITAT_NAME:-default}"
-HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-$TG "[SETUP COMPLETE] ${HN}${HDOM} ready. Phase 2 finished in ${DURATION}s. Rebooting... Back shortly!" || true
+# Boot notification removed - health check sends final status after reboot
 sleep 5
 reboot

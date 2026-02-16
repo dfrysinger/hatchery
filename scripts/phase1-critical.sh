@@ -69,10 +69,9 @@ FALLBACK_PY
 fi
 source /etc/habitat-parsed.env
 S="/usr/local/bin/set-stage.sh"
-TG="/usr/local/bin/tg-notify.sh"
 LOG="/var/log/phase1.log"
 START=$(date +%s)
-$TG "[INIT] Droplet starting up. Phase 1 in progress..." || true
+# Boot messages removed - status API provides progress, first message will be final outcome
 $S 1 "preparing"
 NODE_PID=$(cat /tmp/downloads/node.pid 2>/dev/null)
 [ -n "$NODE_PID" ] && wait $NODE_PID 2>/dev/null || true
@@ -82,6 +81,8 @@ if [ -f /tmp/downloads/node.tar.xz ]; then
 else
   apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
 fi
+# Install jq early - needed by build-full-config.sh which may run via API before phase2
+apt-get install -y jq >> "$LOG" 2>&1 || true
 $S 2 "installing-bot"
 npm install -g openclaw@latest >> "$LOG" 2>&1
 PW=$(d "$PASSWORD_B64")
@@ -176,7 +177,67 @@ cat > $H/.openclaw/openclaw.json <<CFG
   }
 }
 CFG
-cp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.minimal.json
+# Generate emergency config for safe mode fallback
+# Uses agent1's EXACT settings - no fallback logic (that's what smart recovery is for)
+# This is a safety net for when the smart recovery script itself is broken
+EMERGENCY_MODEL="${AGENT1_MODEL:-anthropic/claude-sonnet-4-5}"
+
+# Pick API key based on agent1's model provider
+case "$EMERGENCY_MODEL" in
+  google/*|gemini/*)
+    EMERGENCY_ENV="\"GOOGLE_API_KEY\": \"${GK}\""
+    ;;
+  openai/*)
+    OK=$(d "$OPENAI_KEY_B64")
+    EMERGENCY_ENV="\"OPENAI_API_KEY\": \"${OK}\""
+    ;;
+  *)
+    # Default to Anthropic (covers anthropic/* and unknown providers)
+    EMERGENCY_ENV="\"ANTHROPIC_API_KEY\": \"${AK}\""
+    ;;
+esac
+
+# Use agent1's exact bot token - no searching for alternatives
+EMERGENCY_TOKEN="${TBT}"
+
+EMERGENCY_GT=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
+cat > $H/.openclaw/openclaw.emergency.json <<EMCFG
+{
+  "env": {
+    ${EMERGENCY_ENV}
+  },
+  "agents": {
+    "defaults": {
+      "model": {"primary": "${EMERGENCY_MODEL}"},
+      "workspace": "$H/clawd"
+    },
+    "list": [
+      {
+        "id": "safe-mode",
+        "default": true,
+        "name": "SafeModeBot",
+        "workspace": "$H/clawd/agents/safe-mode"
+      }
+    ]
+  },
+  "gateway": {
+    "mode": "local",
+    "port": 18789,
+    "bind": "lan",
+    "auth": {"mode": "token", "token": "${EMERGENCY_GT}"}
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "${EMERGENCY_TOKEN}",
+      "dmPolicy": "allowlist",
+      "allowFrom": ["${TO}"]
+    },
+    "discord": {"enabled": false}
+  }
+}
+EMCFG
+chmod 600 $H/.openclaw/openclaw.emergency.json
 echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
 [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
 GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
@@ -199,10 +260,13 @@ Type=simple
 User=$USERNAME
 WorkingDirectory=$H
 ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
-Restart=always
-RestartSec=3
+ExecStartPost=+/usr/local/bin/gateway-health-check.sh
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=2
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
+Environment=RUN_MODE=execstartpost
 Environment=ANTHROPIC_API_KEY=${AK}
 $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
 $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")
@@ -258,24 +322,11 @@ if [ -f /etc/systemd/system/openclaw-restore.service ]; then
     systemctl enable openclaw-restore.service
     systemctl start openclaw-restore.service || true  # Don't fail if restore has issues
 fi
+# Enable clawdbot but DON'T start - reboot will start it with full config
+# ExecStartPost health check will validate and send notifications
 systemctl enable clawdbot
-systemctl start clawdbot
 ufw allow 18789/tcp
-BOT_OK=false
-for _ in {1..30}; do
-  if systemctl is-active --quiet clawdbot; then
-    BOT_OK=true
-    break
-  fi
-  sleep 1
-done
-if [ "$BOT_OK" = "true" ]; then
-  $S 3 "bot-online"
-  $TG "[OK] Bot online! Phase 1 complete. Starting desktop setup..." || true
-else
-  journalctl -u clawdbot -n 50 >> "$LOG" 2>&1
-  $TG "[WARN] Bot may not be running. Check logs: journalctl -u clawdbot" || true
-fi
+$S 3 "phase1-complete"
 touch /var/lib/init-status/phase1-complete
 echo "$START" > /var/lib/init-status/phase1-time
 /usr/local/bin/set-phase.sh 2 "background-setup"
