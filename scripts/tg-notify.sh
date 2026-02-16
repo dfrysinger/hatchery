@@ -25,20 +25,58 @@ MSG="$1"
 [ -z "$MSG" ] && exit 1
 TG_OK=0; DC_OK=0
 # --- Telegram notification ---
+# Try all agent tokens until one succeeds
 send_telegram() {
-  local TBT="${AGENT1_BOT_TOKEN}"
   local TUI
   TUI=$(d "$TELEGRAM_USER_ID_B64")
-  [ -z "$TBT" ] || [ -z "$TUI" ] && return 1
+  [ -z "$TUI" ] && TUI="${TELEGRAM_OWNER_ID}"
+  [ -z "$TUI" ] && return 1
+  
+  local count="${AGENT_COUNT:-1}"
+  
+  for i in $(seq 1 "$count"); do
+    local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+    local TBT="${!token_var:-}"
+    [ -z "$TBT" ] && token_var="AGENT${i}_BOT_TOKEN" && TBT="${!token_var:-}"
+    
+    [ -z "$TBT" ] && continue
+    
+    if curl -sf --max-time 10 "https://api.telegram.org/bot${TBT}/sendMessage" \
+      -d "chat_id=${TUI}" \
+      -d "text=${MSG}" > /dev/null 2>&1; then
+      return 0  # Success!
+    fi
+  done
+  
+  # Fallback: try AGENT1_BOT_TOKEN directly (backwards compat)
+  local TBT="${AGENT1_BOT_TOKEN}"
+  [ -z "$TBT" ] && return 1
   curl -sf --max-time 10 "https://api.telegram.org/bot${TBT}/sendMessage" \
     -d "chat_id=${TUI}" \
     -d "text=${MSG}" > /dev/null 2>&1
 }
 # --- Discord notification ---
+# Try all agent tokens until one succeeds
 send_discord() {
-  local DBT="${AGENT1_DISCORD_BOT_TOKEN}"
   local DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
-  [ -z "$DBT" ] || [ -z "$DOI" ] && return 1
+  [ -z "$DOI" ] && return 1
+  
+  local count="${AGENT_COUNT:-1}"
+  local DBT=""
+  
+  # Find first valid Discord token
+  for i in $(seq 1 "$count"); do
+    local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+    local token="${!token_var:-}"
+    if [ -n "$token" ]; then
+      DBT="$token"
+      break
+    fi
+  done
+  
+  # Fallback to AGENT1_DISCORD_BOT_TOKEN
+  [ -z "$DBT" ] && DBT="${AGENT1_DISCORD_BOT_TOKEN}"
+  [ -z "$DBT" ] && return 1
 
   local CHANNEL_ID=""
   local CACHE_FILE="${DISCORD_DM_CACHE_FILE:-/tmp/discord-dm-cache-${DOI}}"

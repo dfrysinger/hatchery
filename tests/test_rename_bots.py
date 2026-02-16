@@ -44,6 +44,8 @@ def make_rename_stub(script_content, tmp_dir):
 
     curl_script = f"""#!/bin/bash
 echo "$@" >> "{curl_log}"
+# Output success response for Telegram API calls
+echo '{{"ok":true,"result":{{"id":123,"is_bot":true,"first_name":"TestBot"}}}}'
 exit 0
 """
     with open(curl_path, "w") as f:

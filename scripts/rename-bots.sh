@@ -28,17 +28,36 @@ PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 AC=${AGENT_COUNT:-1}
 HN="${HABITAT_NAME:-}"
 rename_telegram() {
+  local success_count=0
+  local fail_count=0
+  
   for i in $(seq 1 $AC); do
     NV="AGENT${i}_NAME"; NAME="${!NV}"
     TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"
     DN="${NAME}Bot"; [ -n "$HN" ] && DN="${NAME}Bot (${HN})"
+    
     if [ -n "$TOK" ]; then
-      curl -s "https://api.telegram.org/bot${TOK}/setMyName" -d "name=${DN}" > /dev/null
-      echo "[rename-bots] Telegram: renamed agent${i} to '${DN}'"
+      # Call setMyName API and capture response
+      local response
+      response=$(curl -s "https://api.telegram.org/bot${TOK}/setMyName" -d "name=${DN}" 2>&1)
+      
+      # Check if API call succeeded (Telegram returns {"ok":true,...})
+      if echo "$response" | grep -q '"ok":true'; then
+        echo "[rename-bots] Telegram: renamed agent${i} to '${DN}'"
+        success_count=$((success_count + 1))
+      else
+        # Extract error if present
+        local error_desc
+        error_desc=$(echo "$response" | grep -o '"description":"[^"]*"' | cut -d'"' -f4)
+        echo "[rename-bots] Telegram: FAILED to rename agent${i} - ${error_desc:-unknown error}"
+        fail_count=$((fail_count + 1))
+      fi
     else
       echo "[rename-bots] Telegram: skipping agent${i} (no bot token)"
     fi
   done
+  
+  echo "[rename-bots] Summary: ${success_count} renamed, ${fail_count} failed"
 }
 log_discord_skip() {
   echo "[rename-bots] Discord: bot display names are configured in the Discord Developer Portal, not via API. Skipping."
