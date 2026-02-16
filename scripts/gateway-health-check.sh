@@ -298,8 +298,12 @@ check_channel_connectivity() {
     
     for i in $(seq 1 "$count"); do
       if [ "$platform" = "telegram" ]; then
-        local token="${!AGENT${i}_TELEGRAM_BOT_TOKEN:-}"
-        [ -z "$token" ] && token="${!AGENT${i}_BOT_TOKEN:-}"
+        local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+        local token="${!token_var:-}"
+        if [ -z "$token" ]; then
+          token_var="AGENT${i}_BOT_TOKEN"
+          token="${!token_var:-}"
+        fi
         
         if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
           log "  Agent${i} Telegram token valid"
@@ -307,7 +311,8 @@ check_channel_connectivity() {
           break
         fi
       elif [ "$platform" = "discord" ]; then
-        local token="${!AGENT${i}_DISCORD_BOT_TOKEN:-}"
+        local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+        local token="${!token_var:-}"
         
         if [ -n "$token" ] && validate_discord_token_direct "$token"; then
           log "  Agent${i} Discord token valid"
@@ -326,8 +331,12 @@ check_channel_connectivity() {
     
     for i in $(seq 1 "$count"); do
       if [ "$fallback" = "telegram" ]; then
-        local token="${!AGENT${i}_TELEGRAM_BOT_TOKEN:-}"
-        [ -z "$token" ] && token="${!AGENT${i}_BOT_TOKEN:-}"
+        local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+        local token="${!token_var:-}"
+        if [ -z "$token" ]; then
+          token_var="AGENT${i}_BOT_TOKEN"
+          token="${!token_var:-}"
+        fi
         
         if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
           log "  Agent${i} Telegram (fallback) token valid"
@@ -335,7 +344,8 @@ check_channel_connectivity() {
           break
         fi
       elif [ "$fallback" = "discord" ]; then
-        local token="${!AGENT${i}_DISCORD_BOT_TOKEN:-}"
+        local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+        local token="${!token_var:-}"
         
         if [ -n "$token" ] && validate_discord_token_direct "$token"; then
           log "  Agent${i} Discord (fallback) token valid"
