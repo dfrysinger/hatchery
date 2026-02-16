@@ -22,6 +22,7 @@
 VALIDATE_TELEGRAM_TOKEN_FN="${VALIDATE_TELEGRAM_TOKEN_FN:-validate_telegram_token_real}"
 VALIDATE_DISCORD_TOKEN_FN="${VALIDATE_DISCORD_TOKEN_FN:-validate_discord_token_real}"
 SEND_TELEGRAM_FN="${SEND_TELEGRAM_FN:-send_telegram_real}"
+SEND_DISCORD_FN="${SEND_DISCORD_FN:-send_discord_real}"
 
 # Paths (can be overridden for testing)
 HABITAT_JSON_PATH="${HABITAT_JSON_PATH:-/etc/habitat.json}"
@@ -62,7 +63,7 @@ send_telegram_real() {
   local message="$3"
   
   if [ "${TEST_MODE:-}" = "1" ]; then
-    echo "TEST: Would send to $chat_id via token ${token:0:10}..."
+    echo "TEST: Would send Telegram to $chat_id via token ${token:0:10}..."
     return 1
   fi
   
@@ -71,6 +72,38 @@ send_telegram_real() {
     -d "chat_id=${chat_id}" \
     -d "text=${message}" \
     -d "parse_mode=HTML" >/dev/null 2>&1
+}
+
+send_discord_real() {
+  local token="$1"
+  local user_id="$2"
+  local message="$3"
+  
+  if [ "${TEST_MODE:-}" = "1" ]; then
+    echo "TEST: Would send Discord DM to $user_id via token ${token:0:10}..."
+    return 1
+  fi
+  
+  # Create DM channel with user, then send message
+  local channel_id
+  channel_id=$(curl -sf --max-time 10 \
+    -H "Authorization: Bot ${token}" \
+    -H "Content-Type: application/json" \
+    -d "{\"recipient_id\": \"${user_id}\"}" \
+    "https://discord.com/api/v10/users/@me/channels" 2>/dev/null | jq -r '.id // empty')
+  
+  [ -z "$channel_id" ] && return 1
+  
+  # Convert HTML-style formatting to Discord markdown
+  local discord_msg="$message"
+  discord_msg=$(echo "$discord_msg" | sed 's/<b>/\*\*/g; s/<\/b>/\*\*/g')
+  discord_msg=$(echo "$discord_msg" | sed 's/<code>/`/g; s/<\/code>/`/g')
+  
+  curl -sf --max-time 10 \
+    -H "Authorization: Bot ${token}" \
+    -H "Content-Type: application/json" \
+    -d "{\"content\": $(echo "$discord_msg" | jq -Rs .)}" \
+    "https://discord.com/api/v10/channels/${channel_id}/messages" >/dev/null 2>&1
 }
 
 # =============================================================================
@@ -459,14 +492,38 @@ distribute_boot_report() {
 # =============================================================================
 
 # Send boot notification via first working token
+# Supports both Telegram and Discord based on PLATFORM and available tokens
 send_boot_notification() {
   local message="$1"
   local count="${AGENT_COUNT:-0}"
+  local platform="${PLATFORM:-telegram}"
+  
+  # Try platform-specific notification first, then fall back
+  if [ "$platform" = "discord" ]; then
+    # Discord-first: try Discord, then Telegram
+    if send_discord_notification "$message" "$count"; then
+      return 0
+    fi
+    send_telegram_notification "$message" "$count"
+    return $?
+  else
+    # Telegram-first (default): try Telegram, then Discord
+    if send_telegram_notification "$message" "$count"; then
+      return 0
+    fi
+    send_discord_notification "$message" "$count"
+    return $?
+  fi
+}
+
+# Send via Telegram
+send_telegram_notification() {
+  local message="$1"
+  local count="$2"
   local owner_id="${TELEGRAM_OWNER_ID:-}"
   
   [ -z "$owner_id" ] && return 1
   
-  # Try each token until one works
   for i in $(seq 1 "$count"); do
     local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
     local token="${!token_var:-}"
@@ -478,7 +535,27 @@ send_boot_notification() {
       fi
     fi
   done
+  return 1
+}
+
+# Send via Discord DM
+send_discord_notification() {
+  local message="$1"
+  local count="$2"
+  local owner_id="${DISCORD_OWNER_ID:-}"
   
+  [ -z "$owner_id" ] && return 1
+  
+  for i in $(seq 1 "$count"); do
+    local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+    local token="${!token_var:-}"
+    
+    if [ -n "$token" ]; then
+      if $SEND_DISCORD_FN "$token" "$owner_id" "$message"; then
+        return 0
+      fi
+    fi
+  done
   return 1
 }
 
