@@ -703,6 +703,7 @@ find_working_api_provider() {
   local providers
   read -ra providers <<< "$(get_provider_order)"
   log_recovery "  Provider order: ${providers[*]}"
+  log_recovery "  Available keys: ANTHROPIC=${ANTHROPIC_API_KEY:+yes} OPENAI=${OPENAI_API_KEY:+yes} GOOGLE=${GOOGLE_API_KEY:+yes}"
   FOUND_API_PROVIDER=""
   
   for provider in "${providers[@]}"; do
@@ -765,9 +766,13 @@ find_working_api_provider() {
     fi
   done
   
+  log_recovery "  === find_working_api_provider COMPLETE ==="
+  log_recovery "  FOUND_API_PROVIDER='$FOUND_API_PROVIDER'"
+  log_recovery "  DIAG_API_RESULTS: ${DIAG_API_RESULTS[*]:-empty}"
+  
   [ -n "$FOUND_API_PROVIDER" ] && return 0
   
-  log_recovery "  No working provider found"
+  log_recovery "  !!! No working provider found - returning failure !!!"
   return 1
 }
 
@@ -1127,6 +1132,13 @@ run_smart_recovery() {
   DIAG_NETWORK_OK=""
   
   log_recovery "========== SMART RECOVERY STARTING =========="
+  log_recovery "PID: $$ | HOME_DIR=${HOME_DIR:-unset} | USERNAME=${USERNAME:-unset}"
+  log_recovery "Environment check:"
+  log_recovery "  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:+SET (${#ANTHROPIC_API_KEY} chars)}"
+  log_recovery "  OPENAI_API_KEY: ${OPENAI_API_KEY:+SET (${#OPENAI_API_KEY} chars)}"
+  log_recovery "  GOOGLE_API_KEY: ${GOOGLE_API_KEY:+SET (${#GOOGLE_API_KEY} chars)}"
+  log_recovery "  AGENT_COUNT: ${AGENT_COUNT:-unset}"
+  log_recovery "  PLATFORM: ${PLATFORM:-unset}"
   
   # Step 0: Check network connectivity
   log_recovery "Step 0: Checking network connectivity..."
@@ -1179,11 +1191,16 @@ run_smart_recovery() {
   log_recovery "Step 2: Searching for working API provider..."
   find_working_api_provider
   local provider="$FOUND_API_PROVIDER"
+  log_recovery "  find_working_api_provider returned: FOUND_API_PROVIDER='$FOUND_API_PROVIDER'"
   
   if [ -z "$provider" ]; then
-    log_recovery "WARNING: No working API providers found via validation"
-    log_recovery "Attempting to use default Anthropic (may fail at runtime)"
+    log_recovery "!!! WARNING: No working API providers found via validation !!!"
+    log_recovery "!!! Falling back to anthropic (THIS MAY FAIL) !!!"
+    log_recovery "Diagnostic arrays at this point:"
+    log_recovery "  DIAG_API_RESULTS: ${DIAG_API_RESULTS[*]:-empty}"
     provider="anthropic"  # Fallback - let it fail at runtime rather than here
+  else
+    log_recovery "  Using provider: $provider"
   fi
   
   local api_key=$(get_api_key_for_provider "$provider")
@@ -1197,17 +1214,25 @@ run_smart_recovery() {
   
   # Step 3: Generate emergency config
   log_recovery "Step 3: Generating emergency config..."
+  log_recovery "  Parameters: token=${token:0:10}... platform=$platform provider=$provider auth_type=$auth_type model=$model"
+  log_recovery "  api_key: ${api_key:+SET (${#api_key} chars)}"
   # Use SafeModeBot identity - don't inherit original agent's name/identity
   # The safe-mode workspace has its own IDENTITY.md and SOUL.md
   local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "$auth_type" "$model")
   
   # Validate config JSON
   if ! validate_config_json "$config"; then
-    log_recovery "ERROR: Generated config is invalid JSON!"
+    log_recovery "!!! ERROR: Generated config is invalid JSON !!!"
+    log_recovery "Config content (first 500 chars): ${config:0:500}"
     echo "ERROR: Generated invalid config" >&2
     return 1
   fi
   log_recovery "Config JSON validated OK"
+  
+  # Log what we're about to write
+  local config_model=$(echo "$config" | jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' 2>/dev/null)
+  local config_keys=$(echo "$config" | jq -r '.env | keys | join(",")' 2>/dev/null)
+  log_recovery "  Generated config: model=$config_model, env_keys=$config_keys"
   
   # Step 4: Write emergency config
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"

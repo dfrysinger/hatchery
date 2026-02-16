@@ -89,11 +89,33 @@ RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts"
 ALREADY_IN_SAFE_MODE=false
 RECOVERY_ATTEMPTS=0
 
+# === INSTRUMENTATION: Entry state ===
+log "========== HEALTH CHECK START =========="
+log "RUN_MODE=$RUN_MODE"
+log "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+log "PID: $$"
+log "Init status files:"
+for f in /var/lib/init-status/*; do
+  [ -f "$f" ] && log "  $f = $(cat "$f" 2>/dev/null || echo '(empty)')"
+done
+log "Config files:"
+[ -f "$H/.openclaw/openclaw.json" ] && log "  openclaw.json exists ($(wc -c < "$H/.openclaw/openclaw.json") bytes)"
+[ -f "$H/.openclaw/openclaw.emergency.json" ] && log "  openclaw.emergency.json exists ($(wc -c < "$H/.openclaw/openclaw.emergency.json") bytes)"
+[ -f "$H/.openclaw/openclaw.full.json" ] && log "  openclaw.full.json exists ($(wc -c < "$H/.openclaw/openclaw.full.json") bytes)"
+
+# Check current config model
+if [ -f "$H/.openclaw/openclaw.json" ]; then
+  CURRENT_MODEL=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
+  CURRENT_ENV_KEYS=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.json" 2>/dev/null)
+  log "Current config: model=$CURRENT_MODEL, env_keys=$CURRENT_ENV_KEYS"
+fi
+
 if [ -f /var/lib/init-status/safe-mode ]; then
   ALREADY_IN_SAFE_MODE=true
   [ -f "$RECOVERY_COUNTER_FILE" ] && RECOVERY_ATTEMPTS=$(cat "$RECOVERY_COUNTER_FILE" 2>/dev/null || echo 0)
   log "NOTE: Already in safe mode (recovery attempts: $RECOVERY_ATTEMPTS/$MAX_RECOVERY_ATTEMPTS)"
 fi
+log "ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE, RECOVERY_ATTEMPTS=$RECOVERY_ATTEMPTS"
 
 # =============================================================================
 # Health Check Functions
@@ -408,10 +430,27 @@ enter_safe_mode() {
   
   # Fall back to minimal config
   if [ "$SMART_RECOVERY_SUCCESS" = "false" ]; then
-    log "Restoring minimal config..."
+    log "!!! SMART RECOVERY FAILED - falling back to emergency.json !!!"
+    log "Emergency config before copy:"
+    if [ -f "$H/.openclaw/openclaw.emergency.json" ]; then
+      local emerg_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.emergency.json" 2>/dev/null)
+      local emerg_keys=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.emergency.json" 2>/dev/null)
+      log "  emergency.json: model=$emerg_model, env_keys=$emerg_keys"
+    else
+      log "  ERROR: emergency.json does not exist!"
+    fi
     cp "$H/.openclaw/openclaw.emergency.json" "$H/.openclaw/openclaw.json"
     chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
     chmod 600 "$H/.openclaw/openclaw.json"
+    log "Config after fallback:"
+    local new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    log "  openclaw.json: model=$new_model"
+  else
+    log "Smart recovery succeeded - using recovery-generated config"
+    log "Config after recovery:"
+    local new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    local new_keys=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    log "  openclaw.json: model=$new_model, env_keys=$new_keys"
   fi
   
   # Mark safe mode
@@ -523,8 +562,11 @@ fi
 # Handle Results
 # =============================================================================
 
+log "========== HEALTH CHECK DECISION =========="
+log "HEALTHY=$HEALTHY, ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE, RECOVERY_ATTEMPTS=$RECOVERY_ATTEMPTS"
+
 if [ "$HEALTHY" = "true" ]; then
-  log "SUCCESS - gateway healthy"
+  log "DECISION: SUCCESS - gateway healthy, clearing safe mode state"
   rm -f /var/lib/init-status/safe-mode
   rm -f "$RECOVERY_COUNTER_FILE"
   rm -f "$RECENTLY_RECOVERED_FILE"
