@@ -27,6 +27,23 @@ log() {
 
 log "========== GATEWAY HEALTH CHECK STARTING (mode=$RUN_MODE) =========="
 
+# =============================================================================
+# Skip if recently recovered (prevents cascade from standalone → ExecStartPost)
+# =============================================================================
+RECENTLY_RECOVERED_FILE="/var/lib/init-status/recently-recovered"
+RECENTLY_RECOVERED_TTL=120  # seconds
+
+if [ "$RUN_MODE" = "execstartpost" ] && [ -f "$RECENTLY_RECOVERED_FILE" ]; then
+  recovered_at=$(cat "$RECENTLY_RECOVERED_FILE" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  age=$((now - recovered_at))
+  
+  if [ "$age" -lt "$RECENTLY_RECOVERED_TTL" ]; then
+    log "Skipping ExecStartPost health check - recovered ${age}s ago (TTL=${RECENTLY_RECOVERED_TTL}s)"
+    exit 0
+  fi
+fi
+
 # Source environment
 if [ -f /etc/droplet.env ]; then
   set -a; source /etc/droplet.env; set +a
@@ -422,6 +439,7 @@ if [ "$HEALTHY" = "true" ]; then
   log "SUCCESS - gateway healthy"
   rm -f /var/lib/init-status/safe-mode
   rm -f "$RECOVERY_COUNTER_FILE"
+  rm -f "$RECENTLY_RECOVERED_FILE"
   for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
   EXIT_CODE=0
 
@@ -450,7 +468,8 @@ else
     log "ExecStartPost mode: returning exit 1 for systemd restart"
     EXIT_CODE=1
   else
-    # Standalone mode: restart directly
+    # Standalone mode: restart directly and set marker to prevent cascade
+    date +%s > "$RECENTLY_RECOVERED_FILE"
     if restart_gateway; then
       EXIT_CODE=1  # Recovered but was unhealthy
     else
