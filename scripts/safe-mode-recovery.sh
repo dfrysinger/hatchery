@@ -1121,6 +1121,8 @@ run_smart_recovery() {
   
   log_recovery() {
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$log"
+    # Also log to journal so it appears in OpenClaw /log API
+    logger -t "safe-mode-recovery" "$*" 2>/dev/null || true
   }
   
   # Reset diagnostics arrays for this run
