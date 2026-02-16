@@ -27,10 +27,24 @@ VALIDATE_DISCORD_TOKEN_FN="${VALIDATE_DISCORD_TOKEN_FN:-validate_discord_token}"
 VALIDATE_API_KEY_FN="${VALIDATE_API_KEY_FN:-validate_api_key}"
 
 # =============================================================================
-# Diagnostics Tracking
+# Globals & Cross-Function State
 # =============================================================================
-# Accumulates validation results for boot report display
+# IMPORTANT: Many functions set global variables instead of returning values.
+# This is intentional - Bash loses variable assignments made in subshells, so
+# patterns like `result=$(some_func)` would discard side effects.
+#
+# Key globals set by functions:
+#   VALIDATION_REASON     - Why the last validation failed (set by validate_*)
+#   FOUND_TOKEN_RESULT    - Result of token hunting (platform:agent:token)
+#   FOUND_API_PROVIDER    - Result of API provider search
+#   OAUTH_CHECK_RESULT    - Result of OAuth profile check (oauth:provider)
+#   DIAG_*                - Diagnostic accumulator arrays
+#
+# Rule: Call these functions directly (not in subshells) when you need their
+# side effects. Use `local var; var=$(func)` only for pure return values.
+# =============================================================================
 
+# Diagnostics tracking - accumulates validation results for boot report
 declare -a DIAG_TELEGRAM_RESULTS=()
 declare -a DIAG_DISCORD_RESULTS=()
 declare -a DIAG_API_RESULTS=()
@@ -388,23 +402,6 @@ find_working_platform_and_token() {
 
 # Get the model for a specific agent from habitat config
 # Falls back to provider default if not found
-get_agent_model() {
-  local agent_num="$1"
-  local provider="$2"
-  
-  # Try to get the agent's configured model
-  local model_var="AGENT${agent_num}_MODEL"
-  local model="${!model_var:-}"
-  
-  if [ -n "$model" ]; then
-    echo "$model"
-    return 0
-  fi
-  
-  # Fall back to provider default
-  get_default_model_for_provider "$provider"
-}
-
 # Collect all unique models from habitat config
 # Returns models in order: agent1's model first, then others
 get_all_configured_models() {
