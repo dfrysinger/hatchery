@@ -136,17 +136,62 @@ check_api_key_validity() {
   
   log "  Checking API key validity..."
   
-  # Check journal for auth errors
+  local config_file="$H/.openclaw/openclaw.json"
+  
+  # In safe mode, read API key from actual config (recovery may have changed provider)
+  if [ -f /var/lib/init-status/safe-mode ] && [ -f "$config_file" ]; then
+    log "  Safe mode active - checking API from config"
+    
+    # Try to get API key from config env section
+    local cfg_anthropic=$(jq -r '.env.ANTHROPIC_API_KEY // empty' "$config_file" 2>/dev/null)
+    local cfg_google=$(jq -r '.env.GOOGLE_API_KEY // empty' "$config_file" 2>/dev/null)
+    local cfg_openai=$(jq -r '.env.OPENAI_API_KEY // empty' "$config_file" 2>/dev/null)
+    
+    # Test whichever key is in the config
+    if [ -n "$cfg_google" ]; then
+      if curl -sf --max-time 5 \
+        "https://generativelanguage.googleapis.com/v1/models?key=${cfg_google}" >/dev/null 2>&1; then
+        log "  Safe mode Google API key OK"
+        return 0
+      fi
+    fi
+    
+    if [ -n "$cfg_anthropic" ]; then
+      local response
+      response=$(curl -sf --max-time 5 \
+        -H "x-api-key: ${cfg_anthropic}" \
+        -H "anthropic-version: 2023-06-01" \
+        "https://api.anthropic.com/v1/models" 2>&1)
+      if [ $? -eq 0 ]; then
+        log "  Safe mode Anthropic API key OK"
+        return 0
+      fi
+    fi
+    
+    if [ -n "$cfg_openai" ]; then
+      if curl -sf --max-time 5 \
+        -H "Authorization: Bearer ${cfg_openai}" \
+        "https://api.openai.com/v1/models" >/dev/null 2>&1; then
+        log "  Safe mode OpenAI API key OK"
+        return 0
+      fi
+    fi
+    
+    log "  Safe mode config has no working API key"
+    return 1
+  fi
+  
+  # Normal mode: Check journal for auth errors (only recent, after gateway started)
   local auth_errors
-  auth_errors=$(journalctl -u "$service" --since "1 minute ago" --no-pager 2>/dev/null | \
-    grep -iE "(authentication_error|Invalid.*bearer.*token|401|invalid.*api.*key)" | head -3)
+  auth_errors=$(journalctl -u "$service" --since "30 seconds ago" --no-pager 2>/dev/null | \
+    grep -iE "(authentication_error|Invalid.*bearer.*token|invalid.*api.*key)" | head -3)
   
   if [ -n "$auth_errors" ]; then
     log "  Found API auth errors in journal"
     return 1
   fi
   
-  # Direct API validation
+  # Direct API validation from env vars
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     local response
     response=$(curl -sf --max-time 5 \
@@ -514,6 +559,13 @@ fi
 send_boot_notification() {
   local status="$1"  # healthy, safe-mode, critical
   
+  # Prevent duplicate notifications
+  local notification_file="/var/lib/init-status/notification-sent-${status}"
+  if [ -f "$notification_file" ]; then
+    log "Notification already sent for $status - skipping"
+    return 0
+  fi
+  
   log "Sending notification: $status"
   
   # Get habitat name
@@ -601,7 +653,7 @@ See CRITICAL_FAILURE.md for recovery steps."
     "https://api.telegram.org/bot${send_token}/sendMessage" \
     -d "chat_id=${owner_id}" \
     -d "text=${message}" \
-    -d "parse_mode=HTML" >> "$LOG" 2>&1 || log "Notification send failed"
+    -d "parse_mode=HTML" >> "$LOG" 2>&1 && touch "$notification_file" || log "Notification send failed"
 }
 
 # Generate BOOT_REPORT.md for SafeModeBot

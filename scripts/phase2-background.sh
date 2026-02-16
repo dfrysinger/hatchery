@@ -287,6 +287,6 @@ GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
 TG="/usr/local/bin/tg-notify.sh"
 HN="${HABITAT_NAME:-default}"
 HDOM="${HABITAT_DOMAIN:+ ($HABITAT_DOMAIN)}"
-$TG "♻️ ${HN}${HDOM} Install complete. Rebooting to apply full config..." || true
+# Boot notification removed - health check sends final status after reboot
 sleep 5
 reboot
