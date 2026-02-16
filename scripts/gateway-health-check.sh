@@ -358,9 +358,13 @@ check_service_health() {
   for i in $(seq 1 $max_attempts); do
     sleep 5
     
-    if ! systemctl is-active --quiet "$service"; then
-      log "  attempt $i/$max_attempts: service not active"
-      continue
+    # Skip is-active check in execstartpost mode - service is "activating" not "active"
+    # while ExecStartPost is running, so this check would always fail
+    if [ "$RUN_MODE" != "execstartpost" ]; then
+      if ! systemctl is-active --quiet "$service"; then
+        log "  attempt $i/$max_attempts: service not active"
+        continue
+      fi
     fi
     
     if curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
