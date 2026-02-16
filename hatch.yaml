@@ -135,7 +135,6 @@ write_files:
       [ -f "$DIR/gmail-api.py" ]&&cp "$DIR/gmail-api.py" /usr/local/bin/gmail-api.py&&chmod 755 /usr/local/bin/gmail-api.py
       [ -f "$DIR/set-council-group.sh" ]&&cp "$DIR/set-council-group.sh" /usr/local/bin/set-council-group.telegram.sh&&chmod 755 /usr/local/bin/set-council-group.telegram.sh
       chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null||true
-      notify "bootstrap: hatchery ${VER} installed -- starting phase1"
       /usr/local/sbin/phase1-critical.sh
 users:
   - default

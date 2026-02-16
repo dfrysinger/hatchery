@@ -119,6 +119,5 @@ fi
 
 chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null || true
 
-notify "bootstrap: hatchery ${VERSION} installed -- starting phase1"
 log "Handing off to phase1-critical.sh"
 /usr/local/sbin/phase1-critical.sh
