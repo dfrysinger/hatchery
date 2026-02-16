@@ -216,8 +216,13 @@ if ! echo "$CONFIG_JSON" | jq . >/dev/null 2>&1; then
   exit 1
 fi
 echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
-# Copy full config to openclaw.json so OpenClaw uses all agents (not minimal single-agent)
-cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
+# Copy full config to openclaw.json UNLESS safe mode is active
+# (safe mode recovery already wrote a working config - don't overwrite it)
+if [ -f /var/lib/init-status/safe-mode ]; then
+  echo "Safe mode active - NOT overwriting openclaw.json with full config"
+else
+  cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
+fi
 for i in $(seq 1 $AC); do
   AD="$H/clawd/agents/agent${i}"
   NV="AGENT${i}_NAME"; ANAME="${!NV}"
