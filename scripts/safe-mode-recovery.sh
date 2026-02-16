@@ -1116,6 +1116,9 @@ run_smart_recovery() {
     log="${TEST_TMPDIR:-/tmp}/safe-mode-recovery.log"
   fi
   
+  # Security: restrict log file permissions (diagnostic context, no secrets)
+  touch "$log" && chmod 600 "$log" 2>/dev/null || true
+  
   log_recovery() {
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$log"
   }

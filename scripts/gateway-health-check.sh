@@ -21,6 +21,10 @@
 LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
 RUN_MODE="${RUN_MODE:-standalone}"
 
+# Security: restrict log file permissions (diagnostic context, no secrets)
+umask 077
+touch "$LOG" && chmod 600 "$LOG" 2>/dev/null || true
+
 log() {
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"
 }

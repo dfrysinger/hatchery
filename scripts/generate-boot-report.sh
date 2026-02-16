@@ -468,6 +468,7 @@ distribute_boot_report() {
     if [ -d "$workspace" ] || [ "${TEST_MODE:-}" = "1" ]; then
       mkdir -p "$workspace" 2>/dev/null || true
       echo "$report" > "$workspace/BOOT_REPORT.md"
+      chmod 600 "$workspace/BOOT_REPORT.md" 2>/dev/null || true
       [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$workspace/BOOT_REPORT.md" 2>/dev/null || true
     fi
   done
@@ -477,6 +478,7 @@ distribute_boot_report() {
   if [ -d "$safe_mode_workspace" ] || [ "${TEST_MODE:-}" = "1" ]; then
     mkdir -p "$safe_mode_workspace" 2>/dev/null || true
     echo "$report" > "$safe_mode_workspace/BOOT_REPORT.md"
+    chmod 600 "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
     [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
   fi
   
@@ -484,6 +486,7 @@ distribute_boot_report() {
   local shared="$home/clawd/shared"
   mkdir -p "$shared" 2>/dev/null || true
   echo "$report" > "$shared/BOOT_REPORT.md"
+  chmod 600 "$shared/BOOT_REPORT.md" 2>/dev/null || true
   [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$shared/BOOT_REPORT.md" 2>/dev/null || true
 }
 
