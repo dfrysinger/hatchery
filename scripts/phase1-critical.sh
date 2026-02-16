@@ -205,6 +205,7 @@ ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
 ExecStartPost=+/usr/local/bin/gateway-health-check.sh
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=2
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=RUN_MODE=execstartpost
