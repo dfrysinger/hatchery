@@ -640,6 +640,50 @@ fi
 # Send Notification
 # =============================================================================
 
+# Send via Telegram
+send_telegram_notification() {
+  local token="$1"
+  local chat_id="$2"
+  local message="$3"
+  
+  curl -sf --max-time 10 \
+    "https://api.telegram.org/bot${token}/sendMessage" \
+    -d "chat_id=${chat_id}" \
+    -d "text=${message}" \
+    -d "parse_mode=HTML" >> "$LOG" 2>&1
+}
+
+# Send via Discord (DM to owner)
+send_discord_notification() {
+  local token="$1"
+  local owner_id="$2"
+  local message="$3"
+  
+  # Convert HTML to Discord markdown
+  local discord_msg
+  discord_msg=$(echo "$message" | sed -e 's/<b>/\*\*/g' -e 's/<\/b>/\*\*/g' -e 's/<code>/`/g' -e 's/<\/code>/`/g')
+  
+  # First, create a DM channel with the user
+  local dm_channel
+  dm_channel=$(curl -sf --max-time 10 \
+    -H "Authorization: Bot ${token}" \
+    -H "Content-Type: application/json" \
+    -X POST "https://discord.com/api/v10/users/@me/channels" \
+    -d "{\"recipient_id\": \"${owner_id}\"}" 2>/dev/null | jq -r '.id // empty')
+  
+  if [ -z "$dm_channel" ]; then
+    log "  Failed to create Discord DM channel"
+    return 1
+  fi
+  
+  # Send message to DM channel
+  curl -sf --max-time 10 \
+    -H "Authorization: Bot ${token}" \
+    -H "Content-Type: application/json" \
+    -X POST "https://discord.com/api/v10/channels/${dm_channel}/messages" \
+    -d "{\"content\": $(echo "$discord_msg" | jq -Rs .)}" >> "$LOG" 2>&1
+}
+
 send_boot_notification() {
   local status="$1"  # healthy, safe-mode, critical
   
@@ -657,34 +701,110 @@ send_boot_notification() {
   [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
   habitat_name="${HABITAT_NAME:-Droplet}"
   
-  # Find a working token to send notification
-  local platform="${PLATFORM:-telegram}"
+  # Determine which platform to use for notification
+  # In safe mode, check which channel the recovery config is actually using
+  local send_platform=""
   local send_token=""
   local owner_id=""
   
-  # In safe mode, read token from emergency config
   if [ -f /var/lib/init-status/safe-mode ] && [ -f "$H/.openclaw/openclaw.json" ]; then
-    send_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts.default.botToken // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    # Check which channels are configured in safe mode config
+    local tg_token dc_token
+    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts.default.botToken // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.token // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    
+    # Prefer platform matching PLATFORM env, fall back to whatever is configured
+    local preferred="${PLATFORM:-telegram}"
+    
+    if [ "$preferred" = "telegram" ] && [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
+      send_platform="telegram"
+      send_token="$tg_token"
+      owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      log "  Using Telegram from safe mode config"
+    elif [ "$preferred" = "discord" ] && [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
+      send_platform="discord"
+      send_token="$dc_token"
+      owner_id="${DISCORD_OWNER_ID:-}"
+      log "  Using Discord from safe mode config"
+    elif [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
+      send_platform="telegram"
+      send_token="$tg_token"
+      owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      log "  Falling back to Telegram from safe mode config"
+    elif [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
+      send_platform="discord"
+      send_token="$dc_token"
+      owner_id="${DISCORD_OWNER_ID:-}"
+      log "  Falling back to Discord from safe mode config"
+    fi
   fi
   
-  # Fall back to habitat tokens
+  # Normal mode: fall back to habitat tokens
   if [ -z "$send_token" ]; then
+    local platform="${PLATFORM:-telegram}"
+    
     for i in $(seq 1 "${AGENT_COUNT:-1}"); do
-      local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-      local token="${!token_var:-}"
-      [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-      
-      if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
-        send_token="$token"
-        break
+      if [ "$platform" = "telegram" ]; then
+        local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+        local token="${!token_var:-}"
+        [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
+        
+        if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
+          send_platform="telegram"
+          send_token="$token"
+          owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+          break
+        fi
+      elif [ "$platform" = "discord" ]; then
+        local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+        local token="${!token_var:-}"
+        
+        if [ -n "$token" ] && validate_discord_token_direct "$token"; then
+          send_platform="discord"
+          send_token="$token"
+          owner_id="${DISCORD_OWNER_ID:-}"
+          break
+        fi
       fi
     done
+    
+    # Cross-platform fallback
+    if [ -z "$send_token" ]; then
+      local alt_platform
+      [ "$platform" = "telegram" ] && alt_platform="discord" || alt_platform="telegram"
+      
+      for i in $(seq 1 "${AGENT_COUNT:-1}"); do
+        if [ "$alt_platform" = "telegram" ]; then
+          local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+          local token="${!token_var:-}"
+          [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
+          
+          if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
+            send_platform="telegram"
+            send_token="$token"
+            owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+            log "  Cross-platform fallback to Telegram"
+            break
+          fi
+        elif [ "$alt_platform" = "discord" ]; then
+          local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+          local token="${!token_var:-}"
+          
+          if [ -n "$token" ] && validate_discord_token_direct "$token"; then
+            send_platform="discord"
+            send_token="$token"
+            owner_id="${DISCORD_OWNER_ID:-}"
+            log "  Cross-platform fallback to Discord"
+            break
+          fi
+        fi
+      done
+    fi
   fi
-  
-  owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
   
   if [ -z "$send_token" ] || [ -z "$owner_id" ]; then
     log "Cannot send notification - no working token or owner ID"
+    log "  send_platform=$send_platform send_token=${send_token:+[set]} owner_id=$owner_id"
     return 1
   fi
   
@@ -732,12 +852,29 @@ See CRITICAL_FAILURE.md for recovery steps."
       ;;
   esac
   
-  # Send via Telegram
-  curl -sf --max-time 10 \
-    "https://api.telegram.org/bot${send_token}/sendMessage" \
-    -d "chat_id=${owner_id}" \
-    -d "text=${message}" \
-    -d "parse_mode=HTML" >> "$LOG" 2>&1 && touch "$notification_file" || log "Notification send failed"
+  # Send via appropriate platform
+  log "  Sending via $send_platform to owner $owner_id"
+  
+  if [ "$send_platform" = "telegram" ]; then
+    if send_telegram_notification "$send_token" "$owner_id" "$message"; then
+      touch "$notification_file"
+      log "  Notification sent successfully"
+    else
+      log "  Telegram notification failed"
+      return 1
+    fi
+  elif [ "$send_platform" = "discord" ]; then
+    if send_discord_notification "$send_token" "$owner_id" "$message"; then
+      touch "$notification_file"
+      log "  Notification sent successfully"
+    else
+      log "  Discord notification failed"
+      return 1
+    fi
+  else
+    log "  Unknown platform: $send_platform"
+    return 1
+  fi
 }
 
 # Generate BOOT_REPORT.md for SafeModeBot
