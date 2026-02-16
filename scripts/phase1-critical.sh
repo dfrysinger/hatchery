@@ -179,21 +179,27 @@ cat > $H/.openclaw/openclaw.json <<CFG
 }
 CFG
 # Generate emergency config for safe mode fallback
-# Uses Google (API keys don't expire) if available, else Anthropic
-# Only includes first WORKING bot token
-if [ -n "$GK" ]; then
-  EMERGENCY_MODEL="google/gemini-2.0-flash"
-  EMERGENCY_ENV="\"GOOGLE_API_KEY\": \"${GK}\""
-else
-  EMERGENCY_MODEL="anthropic/claude-sonnet-4-5"
-  EMERGENCY_ENV="\"ANTHROPIC_API_KEY\": \"${AK}\""
-fi
+# Uses agent1's EXACT settings - no fallback logic (that's what smart recovery is for)
+# This is a safety net for when the smart recovery script itself is broken
+EMERGENCY_MODEL="${AGENT1_MODEL:-anthropic/claude-sonnet-4-5}"
 
-# Find first available bot token (prefer agent1 if valid)
-# TBT is AGENT1_BOT_TOKEN (telegram), set earlier in this script
+# Pick API key based on agent1's model provider
+case "$EMERGENCY_MODEL" in
+  google/*|gemini/*)
+    EMERGENCY_ENV="\"GOOGLE_API_KEY\": \"${GK}\""
+    ;;
+  openai/*)
+    OK=$(d "$OPENAI_KEY_B64")
+    EMERGENCY_ENV="\"OPENAI_API_KEY\": \"${OK}\""
+    ;;
+  *)
+    # Default to Anthropic (covers anthropic/* and unknown providers)
+    EMERGENCY_ENV="\"ANTHROPIC_API_KEY\": \"${AK}\""
+    ;;
+esac
+
+# Use agent1's exact bot token - no searching for alternatives
 EMERGENCY_TOKEN="${TBT}"
-EMERGENCY_PLATFORM="telegram"
-[ -z "$EMERGENCY_TOKEN" ] && [ -n "${AGENT2_BOT_TOKEN:-}" ] && EMERGENCY_TOKEN=$(d "$AGENT2_BOT_TOKEN_B64")
 
 EMERGENCY_GT=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
 cat > $H/.openclaw/openclaw.emergency.json <<EMCFG
