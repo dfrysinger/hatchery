@@ -550,18 +550,20 @@ if [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
   log "Session isolation mode"
   IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
   
-  # Health check semantics: HEALTHY=true if ANY session group is reachable.
-  # This allows partial degradation (some groups down) while still providing
-  # user connectivity. For "all groups must be healthy", remove the 'break'.
+  # Health check semantics: ALL session groups must be healthy.
+  # Any group failure triggers safe mode so SafeModeBot can diagnose.
+  # Regular agents don't have diagnostic instructions - SafeModeBot does.
   BASE_PORT=18790
   idx=0
+  ALL_HEALTHY=true
   for group in "${GROUP_ARRAY[@]}"; do
-    if check_service_health "openclaw-${group}.service" $((BASE_PORT + idx)) 6; then
-      HEALTHY=true
-      break  # At least one group healthy = system usable
+    if ! check_service_health "openclaw-${group}.service" $((BASE_PORT + idx)) 6; then
+      log "  Session group '$group' FAILED"
+      ALL_HEALTHY=false
     fi
     idx=$((idx + 1))
   done
+  HEALTHY=$ALL_HEALTHY
 
 elif [ "$ISOLATION" = "container" ]; then
   log "Container isolation mode"
