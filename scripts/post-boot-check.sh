@@ -57,6 +57,14 @@ if [ ! -f "$H/.openclaw/openclaw.full.json" ]; then
   exit 0
 fi
 
+# Skip full config if safe mode is active (health check already found issues)
+if [ -f /var/lib/init-status/safe-mode ]; then
+  log "Safe mode active - NOT applying full config (emergency config in use)"
+  rm -f /var/lib/init-status/needs-post-boot-check
+  # Don't mark setup-complete since we're in safe mode
+  exit 0
+fi
+
 # Apply full config (upgrade from minimal bootstrap config)
 log "Applying full config..."
 cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
