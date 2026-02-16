@@ -178,8 +178,60 @@ cat > $H/.openclaw/openclaw.json <<CFG
   }
 }
 CFG
-# Save as emergency config for safe mode fallback
-cp $H/.openclaw/openclaw.json $H/.openclaw/openclaw.emergency.json
+# Generate emergency config for safe mode fallback
+# Uses Google (API keys don't expire) if available, else Anthropic
+# Only includes first WORKING bot token
+if [ -n "$GK" ]; then
+  EMERGENCY_MODEL="google/gemini-2.0-flash"
+  EMERGENCY_ENV="\"GOOGLE_API_KEY\": \"${GK}\""
+else
+  EMERGENCY_MODEL="anthropic/claude-sonnet-4-5"
+  EMERGENCY_ENV="\"ANTHROPIC_API_KEY\": \"${AK}\""
+fi
+
+# Find first available bot token (prefer agent1 if valid)
+EMERGENCY_TOKEN="${A1TK}"
+EMERGENCY_PLATFORM="telegram"
+[ -z "$EMERGENCY_TOKEN" ] && [ -n "${AGENT2_BOT_TOKEN:-}" ] && EMERGENCY_TOKEN=$(d "$AGENT2_BOT_TOKEN_B64")
+
+EMERGENCY_GT=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
+cat > $H/.openclaw/openclaw.emergency.json <<EMCFG
+{
+  "env": {
+    ${EMERGENCY_ENV}
+  },
+  "agents": {
+    "defaults": {
+      "model": {"primary": "${EMERGENCY_MODEL}"},
+      "workspace": "$H/clawd"
+    },
+    "list": [
+      {
+        "id": "safe-mode",
+        "default": true,
+        "name": "SafeModeBot",
+        "workspace": "$H/clawd/agents/safe-mode"
+      }
+    ]
+  },
+  "gateway": {
+    "mode": "local",
+    "port": 18789,
+    "bind": "lan",
+    "auth": {"mode": "token", "token": "${EMERGENCY_GT}"}
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "${EMERGENCY_TOKEN}",
+      "dmPolicy": "allowlist",
+      "allowFrom": ["${TO}"]
+    },
+    "discord": {"enabled": false}
+  }
+}
+EMCFG
+chmod 600 $H/.openclaw/openclaw.emergency.json
 echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
 [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
 GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")

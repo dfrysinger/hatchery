@@ -378,17 +378,31 @@ enter_safe_mode() {
     log "Attempting full recovery escalation..."
     export HOME_DIR="$H" USERNAME="$USERNAME" RECOVERY_LOG="$LOG"
     
-    if run_full_recovery_escalation >/dev/null 2>&1; then
+    local recovery_output
+    recovery_output=$(run_full_recovery_escalation 2>&1)
+    local recovery_exit=$?
+    
+    if [ $recovery_exit -eq 0 ]; then
       log "Recovery succeeded"
+      log "Recovery output: $recovery_output"
       SMART_RECOVERY_SUCCESS=true
+    else
+      log "Recovery FAILED (exit $recovery_exit)"
+      log "Recovery output: $recovery_output"
     fi
   elif type run_smart_recovery &>/dev/null; then
     log "Attempting smart recovery..."
     export HOME_DIR="$H" USERNAME="$USERNAME" RECOVERY_LOG="$LOG"
     
-    if run_smart_recovery >/dev/null 2>&1; then
+    local recovery_output
+    recovery_output=$(run_smart_recovery 2>&1)
+    local recovery_exit=$?
+    
+    if [ $recovery_exit -eq 0 ]; then
       log "Recovery succeeded"
       SMART_RECOVERY_SUCCESS=true
+    else
+      log "Recovery FAILED (exit $recovery_exit): $recovery_output"
     fi
   fi
   
