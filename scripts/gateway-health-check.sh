@@ -537,6 +537,11 @@ enter_safe_mode() {
       log "Recovery succeeded"
       log "Recovery output: $recovery_output"
       SMART_RECOVERY_SUCCESS=true
+      
+      # Send warning to user BEFORE restart (only on first entry, not retries)
+      if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
+        send_entering_safe_mode_warning
+      fi
     else
       log "Recovery FAILED (exit $recovery_exit)"
       log "Recovery output: $recovery_output"
@@ -552,6 +557,11 @@ enter_safe_mode() {
     if [ $recovery_exit -eq 0 ]; then
       log "Recovery succeeded"
       SMART_RECOVERY_SUCCESS=true
+      
+      # Send warning to user BEFORE restart (only on first entry, not retries)
+      if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
+        send_entering_safe_mode_warning
+      fi
     else
       log "Recovery FAILED (exit $recovery_exit): $recovery_output"
     fi
@@ -794,6 +804,75 @@ send_discord_notification() {
     -H "Content-Type: application/json" \
     -X POST "https://discord.com/api/v10/channels/${dm_channel}/messages" \
     -d "{\"content\": $(echo "$discord_msg" | jq -Rs .)}" >> "$LOG" 2>&1
+}
+
+# Send warning BEFORE entering safe mode (uses token from recovery config)
+# This notifies user that something failed and we're switching to safe mode
+send_entering_safe_mode_warning() {
+  log "========== SENDING SAFE MODE WARNING =========="
+  
+  local config_file="$H/.openclaw/openclaw.json"
+  if [ ! -f "$config_file" ]; then
+    log "  No config file found - cannot send warning"
+    return 1
+  fi
+  
+  # Extract token from the config that recovery just wrote
+  local platform=""
+  local token=""
+  
+  # Try Discord first
+  token=$(jq -r '.channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
+  if [ -n "$token" ]; then
+    platform="discord"
+  else
+    # Try Telegram
+    token=$(jq -r '.channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    if [ -n "$token" ]; then
+      platform="telegram"
+    fi
+  fi
+  
+  if [ -z "$token" ]; then
+    log "  No working token found in config - cannot send warning"
+    return 1
+  fi
+  
+  log "  Using ${platform} token from recovery config"
+  
+  # Get owner ID for the platform
+  local owner_id=""
+  if [ "$platform" = "telegram" ]; then
+    owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+  elif [ "$platform" = "discord" ]; then
+    owner_id="${DISCORD_OWNER_ID:-}"
+  fi
+  
+  if [ -z "$owner_id" ]; then
+    log "  No owner ID for platform '$platform' - cannot send warning"
+    return 1
+  fi
+  
+  # Get habitat name
+  local habitat_name="${HABITAT_NAME:-Droplet}"
+  
+  # Build warning message
+  local message="⚠️ <b>[${habitat_name}] Entering Safe Mode</b>
+
+Health check failed. Recovering with backup configuration.
+
+SafeModeBot will follow up shortly with diagnostics."
+  
+  log "  Sending warning via $platform to $owner_id"
+  
+  if [ "$platform" = "telegram" ]; then
+    send_telegram_notification "$token" "$owner_id" "$message"
+  elif [ "$platform" = "discord" ]; then
+    send_discord_notification "$token" "$owner_id" "$message"
+  fi
+  
+  log "  Warning sent"
+  log "========== SAFE MODE WARNING COMPLETE =========="
 }
 
 send_boot_notification() {
