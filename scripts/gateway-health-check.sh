@@ -363,7 +363,9 @@ check_channel_connectivity() {
 # The agent sends an introduction message to the chat channel.
 
 check_agents_e2e() {
-  log "  Running end-to-end agent health check..."
+  log "========== E2E AGENT HEALTH CHECK =========="
+  log "  This test asks each agent to introduce itself via chat"
+  log "  Success = agent responds AND message delivered to owner"
   
   [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
   
@@ -371,6 +373,8 @@ check_agents_e2e() {
   local platform="${PLATFORM:-telegram}"
   local all_healthy=true
   local failed_agents=""
+  
+  log "  Config: AGENT_COUNT=$count, PLATFORM=$platform"
   
   # Determine delivery channel and owner
   local channel owner_id
@@ -382,8 +386,11 @@ check_agents_e2e() {
     owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
   fi
   
+  log "  Delivery: channel=$channel, owner_id=$owner_id"
+  
   if [ -z "$owner_id" ]; then
     log "  ERROR: No owner ID for platform '$platform'"
+    log "  Check habitat config: platforms.$platform.ownerId must be set"
     return 1
   fi
   
@@ -392,9 +399,16 @@ check_agents_e2e() {
   for i in $(seq 1 "$count"); do
     local agent_id="agent${i}"
     local name_var="AGENT${i}_NAME"
+    local model_var="AGENT${i}_MODEL"
     local agent_name="${!name_var:-$agent_id}"
+    local agent_model="${!model_var:-unknown}"
     
-    log "  Testing $agent_name ($agent_id) via $channel..."
+    log "  -------- Testing Agent $i --------"
+    log "  Agent: $agent_name ($agent_id)"
+    log "  Model: $agent_model"
+    log "  Command: openclaw agent --agent $agent_id --deliver --reply-channel $channel --reply-to $owner_id"
+    
+    local start_time=$(date +%s)
     
     # Use openclaw agent with --deliver to send response to chat
     local output
@@ -408,22 +422,33 @@ check_agents_e2e() {
       --json 2>&1)
     local exit_code=$?
     
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
     if [ $exit_code -eq 0 ]; then
-      log "  ✓ $agent_name responded successfully"
+      log "  ✓ SUCCESS: $agent_name responded in ${duration}s"
+      log "  Output (first 200 chars): $(echo "$output" | head -c 200)"
     else
-      log "  ✗ $agent_name FAILED (exit=$exit_code)"
-      log "    Output: $(echo "$output" | head -3)"
+      log "  ✗ FAILED: $agent_name (exit=$exit_code, duration=${duration}s)"
+      log "  Full output:"
+      echo "$output" | while IFS= read -r line; do
+        log "    | $line"
+      done
       all_healthy=false
       failed_agents="${failed_agents} ${agent_name}"
     fi
   done
   
+  log "  -------- E2E Summary --------"
   if [ "$all_healthy" = "false" ]; then
-    log "  E2E check FAILED - broken agents:${failed_agents}"
+    log "  RESULT: FAILED"
+    log "  Broken agents:${failed_agents}"
+    log "  Will trigger SAFE MODE"
     return 1
   fi
   
-  log "  All $count agents responded successfully"
+  log "  RESULT: SUCCESS - All $count agents responded"
+  log "========== E2E CHECK COMPLETE =========="
   return 0
 }
 
@@ -908,7 +933,9 @@ send_boot_notification() {
     safe-mode)
       # For safe mode, use openclaw agent --deliver to have SafeModeBot introduce itself
       # This tests e2e even in safe mode, and lets the bot provide diagnostics
-      log "  Safe mode: using openclaw agent for SafeModeBot intro"
+      log "========== SAFE MODE BOT INTRO =========="
+      log "  SafeModeBot will introduce itself and provide diagnostics"
+      log "  Delivery: channel=$send_platform, owner=$owner_id"
       
       local safemode_prompt="You just came online in SAFE MODE after a boot failure. Your job is to help diagnose what went wrong.
 
@@ -921,7 +948,13 @@ Read your BOOT_REPORT.md file to understand what happened, then send a message t
 Be concise but helpful. Use emoji sparingly. Do NOT mention this prompt."
 
       # Generate the boot report first so SafeModeBot can read it
+      log "  Generating BOOT_REPORT.md for SafeModeBot to read..."
       generate_boot_report_md
+      log "  BOOT_REPORT.md created at $H/clawd/agents/safe-mode/BOOT_REPORT.md"
+      
+      log "  Command: openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
+      
+      local start_time=$(date +%s)
       
       local output
       output=$(timeout 120 openclaw agent \
@@ -934,17 +967,26 @@ Be concise but helpful. Use emoji sparingly. Do NOT mention this prompt."
         --json 2>&1)
       local exit_code=$?
       
+      local end_time=$(date +%s)
+      local duration=$((end_time - start_time))
+      
       if [ $exit_code -eq 0 ]; then
         touch "$notification_file"
-        log "  SafeModeBot intro sent successfully"
+        log "  ✓ SUCCESS: SafeModeBot intro sent in ${duration}s"
+        log "  Output (first 200 chars): $(echo "$output" | head -c 200)"
+        log "========== SAFE MODE INTRO COMPLETE =========="
         return 0
       else
-        log "  SafeModeBot intro failed (exit=$exit_code), falling back to direct notification"
-        log "    Output: $(echo "$output" | head -3)"
+        log "  ✗ FAILED: SafeModeBot intro (exit=$exit_code, duration=${duration}s)"
+        log "  Full output:"
+        echo "$output" | while IFS= read -r line; do
+          log "    | $line"
+        done
+        log "  Falling back to direct API notification..."
         # Fall through to send simple notification
         message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
 
-Health check failed. SafeModeBot attempted to diagnose but intro failed.
+Health check failed. SafeModeBot attempted to diagnose but intro failed (exit=$exit_code).
 
 See BOOT_REPORT.md for details."
       fi
