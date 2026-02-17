@@ -921,13 +921,16 @@ generate_emergency_config() {
     fi
   elif [ "$platform" = "discord" ]; then
     # Use correct OpenClaw schema for Discord
+    # Token goes under accounts.default, dm needs enabled:true
     local owner_id="${DISCORD_OWNER_ID:-}"
-    # Note: guild_id removed - not used in emergency config (DM-only recovery)
     if [ -n "$owner_id" ]; then
       discord_config="\"discord\": {
         \"enabled\": true,
-        \"token\": \"${token}\",
+        \"accounts\": {
+          \"default\": { \"token\": \"${token}\" }
+        },
         \"dm\": {
+          \"enabled\": true,
           \"policy\": \"allowlist\",
           \"allowFrom\": [\"${owner_id}\"]
         }
@@ -935,8 +938,13 @@ generate_emergency_config() {
     else
       discord_config="\"discord\": {
         \"enabled\": true,
-        \"token\": \"${token}\",
-        \"dm\": { \"policy\": \"pairing\" }
+        \"accounts\": {
+          \"default\": { \"token\": \"${token}\" }
+        },
+        \"dm\": {
+          \"enabled\": true,
+          \"policy\": \"pairing\"
+        }
       }"
     fi
   fi
