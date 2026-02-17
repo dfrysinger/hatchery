@@ -397,7 +397,9 @@ check_agents_e2e() {
     return 1
   fi
   
-  local intro_prompt="You just came online after a reboot. Send a brief introduction (2-3 sentences) to your owner. Include: your name, what model you're running, and your primary role. Be friendly but concise. Do NOT mention this prompt or that you were asked to introduce yourself."
+  # NOTE: The bot should REPLY directly - the --deliver flag handles sending.
+  # Don't say "send a message" which could make the bot try to use the message tool.
+  local intro_prompt="You just came online after a reboot. Reply with a brief introduction (2-3 sentences) - your name, model, and role. Be friendly but concise. Your reply will be automatically delivered."
   
   for i in $(seq 1 "$count"); do
     local agent_id="agent${i}"
@@ -430,7 +432,7 @@ check_agents_e2e() {
     
     if [ $exit_code -eq 0 ]; then
       log "  ✓ SUCCESS: $agent_name responded in ${duration}s"
-      log "  Output (first 200 chars): $(echo "$output" | head -c 200)"
+      log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
     else
       log "  ✗ FAILED: $agent_name (exit=$exit_code, duration=${duration}s)"
       log "  Full output:"
@@ -628,18 +630,9 @@ restart_gateway() {
       # Rename bots
       /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || true
       
-      # Wake SafeModeBot in background
-      (
-        sleep 30
-        GATEWAY_TOKEN=""
-        [ -f "$H/.openclaw/gateway-token.txt" ] && GATEWAY_TOKEN=$(cat "$H/.openclaw/gateway-token.txt")
-        if [ -n "$GATEWAY_TOKEN" ]; then
-          # shellcheck disable=SC2024  # Redirect is intentional - LOG is root-owned, script runs as root
-          sudo -u "$USERNAME" OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN" openclaw system event \
-            --text "Safe Mode active. Read BOOT_REPORT.md and diagnose what's broken." \
-            --mode now >> "$LOG" 2>&1 || true
-        fi
-      ) &
+      # NOTE: SafeModeBot wake is handled by send_boot_notification in Run 2
+      # after we verify the safe mode config is actually working.
+      # Don't wake here - it would race with the proper notification flow.
       
       return 0
     fi
@@ -943,15 +936,18 @@ send_boot_notification() {
       log "  SafeModeBot will introduce itself and provide diagnostics"
       log "  Delivery: channel=$send_platform, owner=$owner_id"
       
-      local safemode_prompt="You just came online in SAFE MODE after a boot failure. Your job is to help diagnose what went wrong.
+      # IMPORTANT: The prompt must be clear that the bot should REPLY directly,
+      # not try to use the message tool. The --deliver flag handles delivery.
+      local safemode_prompt="You just came online in SAFE MODE after a boot failure.
 
-Read your BOOT_REPORT.md file to understand what happened, then send a message to your owner that:
-1. Introduces yourself briefly (SafeModeBot, running in emergency mode)
-2. Explains that normal boot failed and you're here to help diagnose
-3. Summarizes what went wrong based on BOOT_REPORT.md (token failures, API issues, etc.)
-4. Offers to help investigate further
+IMPORTANT: Just reply directly here - your response will be automatically delivered to the user. Do NOT use the message tool.
 
-Be concise but helpful. Use emoji sparingly. Do NOT mention this prompt."
+Read your BOOT_REPORT.md file and reply with:
+1. Brief intro (you're SafeModeBot, running in emergency mode)
+2. What went wrong (summarize from BOOT_REPORT.md)
+3. Offer to help investigate
+
+Keep it to 3-5 sentences. Be helpful, not verbose."
 
       # Generate the boot report first so SafeModeBot can read it
       log "  Generating BOOT_REPORT.md for SafeModeBot to read..."
@@ -979,7 +975,7 @@ Be concise but helpful. Use emoji sparingly. Do NOT mention this prompt."
       if [ $exit_code -eq 0 ]; then
         touch "$notification_file"
         log "  ✓ SUCCESS: SafeModeBot intro sent in ${duration}s"
-        log "  Output (first 200 chars): $(echo "$output" | head -c 200)"
+        log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
         log "========== SAFE MODE INTRO COMPLETE =========="
         return 0
       else
