@@ -247,6 +247,17 @@ SESSIONCFG
         ls -la "${state_dir}" 2>&1 | head -5
     fi
 
+    # Collect agent IDs for this group (for health check)
+    agent_ids_in_group=""
+    for i in $(seq 1 "$AGENT_COUNT"); do
+        agent_group_var="AGENT${i}_ISOLATION_GROUP"
+        agent_group="${!agent_group_var:-}"
+        if [ "$agent_group" = "$group" ]; then
+            [ -n "$agent_ids_in_group" ] && agent_ids_in_group="${agent_ids_in_group},"
+            agent_ids_in_group="${agent_ids_in_group}agent${i}"
+        fi
+    done
+
     # Generate systemd service
     cat > "${OUTPUT_DIR}/openclaw-${group}.service" <<SVCFILE
 [Unit]
@@ -259,8 +270,11 @@ Type=simple
 User=${SVC_USER}
 WorkingDirectory=${HOME_DIR}
 ExecStart=/usr/local/bin/openclaw gateway --bind lan --port ${port}
-Restart=always
-RestartSec=3
+ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} GROUP_AGENTS=${agent_ids_in_group} RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+TimeoutStartSec=120
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
