@@ -278,7 +278,7 @@ check_channel_connectivity() {
     
     # Try Discord token from config
     local dc_token
-    dc_token=$(jq -r '.channels.discord.token // empty' "$config_file" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts.default.token // empty' "$config_file" 2>/dev/null)
     if [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       log "  Safe mode Discord token valid"
       log "  Channel connectivity verified (safe mode)"
@@ -825,7 +825,7 @@ send_boot_notification() {
     # Check which channels are configured in safe mode config
     local tg_token dc_token
     tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts.default.botToken // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    dc_token=$(jq -r '.channels.discord.token // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts.default.token // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
     
     # Prefer platform matching PLATFORM env, fall back to whatever is configured
     local preferred="${PLATFORM:-telegram}"
