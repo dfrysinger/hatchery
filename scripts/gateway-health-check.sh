@@ -773,6 +773,9 @@ send_discord_notification() {
   local owner_id="$2"
   local message="$3"
   
+  # Strip "user:" prefix if present (OpenClaw format vs raw Discord ID)
+  owner_id="${owner_id#user:}"
+  
   # Convert HTML to Discord markdown
   local discord_msg
   discord_msg=$(echo "$message" | sed -e 's/<b>/\*\*/g' -e 's/<\/b>/\*\*/g' -e 's/<code>/`/g' -e 's/<\/code>/`/g')
