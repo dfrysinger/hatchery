@@ -111,6 +111,11 @@ write_files:
       set -euo pipefail
       set -a;source /etc/droplet.env;source /etc/habitat-parsed.env 2>/dev/null||true;set +a
       REPO="dfrysinger/hatchery";DIR="/opt/hatchery"
+      # Extract hatcheryVersion from HABITAT_B64 before fetching code
+      if [ -n "${HABITAT_B64:-}" ]; then
+        HV=$(echo "$HABITAT_B64"|base64 -d 2>/dev/null|grep -o '"hatcheryVersion"[[:space:]]*:[[:space:]]*"[^"]*"'|sed 's/.*"hatcheryVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/'||true)
+        [ -n "$HV" ]&&echo "$HV">/etc/hatchery-version
+      fi
       VER=$(cat /etc/hatchery-version 2>/dev/null||echo "main")
       log(){ echo "[bootstrap] $*";}
       notify(){ [ -x /usr/local/bin/tg-notify.sh ]&&/usr/local/bin/tg-notify.sh "$1" 2>/dev/null||true;}
@@ -139,8 +144,7 @@ write_files:
 users:
   - default
 runcmd:
-  # parse-habitat.py MUST run first to extract hatcheryVersion before bootstrap fetches code
-  - [bash, -lc, "set -a;source /etc/droplet.env;set +a;python3 /usr/local/bin/parse-habitat.py"]
+  # bootstrap.sh extracts hatcheryVersion from HABITAT_B64 before fetching code
   - [bash, -lc, "/usr/local/bin/bootstrap.sh>>/var/log/bootstrap.log 2>&1"]
   - [bash, -lc, "systemctl daemon-reload;systemctl enable --now api-server;ufw allow 8080/tcp"]
   - [bash, -lc, "systemctl enable post-boot-check.service"]
