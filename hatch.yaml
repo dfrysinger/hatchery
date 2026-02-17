@@ -9,7 +9,7 @@ bootcmd:
   - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&[ ! -f /var/lib/init-status/boot-complete ]&&{ echo 11>/var/lib/init-status/stage;echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready\">>/var/log/init-stages.log;touch /var/lib/init-status/boot-complete;}||true"]
 write_files:
   - path: /etc/hatchery-version
-    content: "main"
+    content: "[[HATCHERY_VERSION]]"
   - path: /etc/droplet.env
     owner: root:root
     permissions: "0600"
