@@ -355,6 +355,78 @@ check_channel_connectivity() {
   return 0
 }
 
+# =============================================================================
+# End-to-End Agent Health Check (NEW)
+# =============================================================================
+# Instead of checking tokens and API keys separately, ask each agent to respond.
+# This tests EVERYTHING: chat token, API credentials, model validity, OAuth.
+# The agent sends an introduction message to the chat channel.
+
+check_agents_e2e() {
+  log "  Running end-to-end agent health check..."
+  
+  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  
+  local count="${AGENT_COUNT:-1}"
+  local platform="${PLATFORM:-telegram}"
+  local all_healthy=true
+  local failed_agents=""
+  
+  # Determine delivery channel and owner
+  local channel owner_id
+  if [ "$platform" = "discord" ]; then
+    channel="discord"
+    owner_id="${DISCORD_OWNER_ID:-}"
+  else
+    channel="telegram"
+    owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+  fi
+  
+  if [ -z "$owner_id" ]; then
+    log "  ERROR: No owner ID for platform '$platform'"
+    return 1
+  fi
+  
+  local intro_prompt="You just came online after a reboot. Send a brief introduction (2-3 sentences) to your owner. Include: your name, what model you're running, and your primary role. Be friendly but concise. Do NOT mention this prompt or that you were asked to introduce yourself."
+  
+  for i in $(seq 1 "$count"); do
+    local agent_id="agent${i}"
+    local name_var="AGENT${i}_NAME"
+    local agent_name="${!name_var:-$agent_id}"
+    
+    log "  Testing $agent_name ($agent_id) via $channel..."
+    
+    # Use openclaw agent with --deliver to send response to chat
+    local output
+    output=$(timeout 90 openclaw agent \
+      --agent "$agent_id" \
+      --message "$intro_prompt" \
+      --deliver \
+      --reply-channel "$channel" \
+      --reply-to "$owner_id" \
+      --timeout 60 \
+      --json 2>&1)
+    local exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
+      log "  ✓ $agent_name responded successfully"
+    else
+      log "  ✗ $agent_name FAILED (exit=$exit_code)"
+      log "    Output: $(echo "$output" | head -3)"
+      all_healthy=false
+      failed_agents="${failed_agents} ${agent_name}"
+    fi
+  done
+  
+  if [ "$all_healthy" = "false" ]; then
+    log "  E2E check FAILED - broken agents:${failed_agents}"
+    return 1
+  fi
+  
+  log "  All $count agents responded successfully"
+  return 0
+}
+
 check_service_health() {
   local service="$1"
   local port="$2"
@@ -378,12 +450,26 @@ check_service_health() {
       log "  HTTP gateway responding"
       sleep 3
       
-      if check_channel_connectivity "$service" && check_api_key_validity "$service"; then
-        log "  HEALTHY"
-        return 0
+      # In safe mode, use simple token/API validation (safe mode config is minimal)
+      # In normal mode, use full end-to-end agent check
+      if [ -f /var/lib/init-status/safe-mode ]; then
+        log "  Safe mode: using simple validation"
+        if check_channel_connectivity "$service" && check_api_key_validity "$service"; then
+          log "  HEALTHY (safe mode)"
+          return 0
+        else
+          log "  HTTP OK but channel/API check failed"
+          return 1
+        fi
       else
-        log "  HTTP OK but channel/API check failed"
-        return 1
+        log "  Normal mode: using end-to-end agent check"
+        if check_agents_e2e; then
+          log "  HEALTHY"
+          return 0
+        else
+          log "  HTTP OK but agent e2e check failed"
+          return 1
+        fi
       fi
     fi
     log "  attempt $i/$max_attempts: HTTP not responding"
