@@ -898,33 +898,56 @@ send_boot_notification() {
   local message=""
   case "$status" in
     healthy)
-      local count="${AGENT_COUNT:-1}"
-      if [ "$count" -gt 1 ]; then
-        local agents_list=""
-        for i in $(seq 1 "$count"); do
-          local name_var="AGENT${i}_NAME"
-          local name="${!name_var:-Agent${i}}"
-          agents_list="${agents_list}• ${name} ✓
-"
-        done
-        message="✅ <b>[${habitat_name}]</b> Ready!
-
-<b>All ${count} agents online:</b>
-${agents_list}"
-      else
-        local name="${AGENT1_NAME:-Agent1}"
-        message="✅ <b>[${habitat_name}]</b> Ready!
-
-${name} is online."
-      fi
+      # In normal mode, agents already introduced themselves via check_agents_e2e
+      # So we don't need to send a separate "Ready!" notification
+      log "  Agents already introduced themselves - skipping separate Ready notification"
+      touch "$notification_file"
+      return 0
       ;;
       
     safe-mode)
-      message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
+      # For safe mode, use openclaw agent --deliver to have SafeModeBot introduce itself
+      # This tests e2e even in safe mode, and lets the bot provide diagnostics
+      log "  Safe mode: using openclaw agent for SafeModeBot intro"
+      
+      local safemode_prompt="You just came online in SAFE MODE after a boot failure. Your job is to help diagnose what went wrong.
 
-Health check failed. SafeModeBot is online to diagnose.
+Read your BOOT_REPORT.md file to understand what happened, then send a message to your owner that:
+1. Introduces yourself briefly (SafeModeBot, running in emergency mode)
+2. Explains that normal boot failed and you're here to help diagnose
+3. Summarizes what went wrong based on BOOT_REPORT.md (token failures, API issues, etc.)
+4. Offers to help investigate further
+
+Be concise but helpful. Use emoji sparingly. Do NOT mention this prompt."
+
+      # Generate the boot report first so SafeModeBot can read it
+      generate_boot_report_md
+      
+      local output
+      output=$(timeout 120 openclaw agent \
+        --agent "safe-mode" \
+        --message "$safemode_prompt" \
+        --deliver \
+        --reply-channel "$send_platform" \
+        --reply-to "$owner_id" \
+        --timeout 90 \
+        --json 2>&1)
+      local exit_code=$?
+      
+      if [ $exit_code -eq 0 ]; then
+        touch "$notification_file"
+        log "  SafeModeBot intro sent successfully"
+        return 0
+      else
+        log "  SafeModeBot intro failed (exit=$exit_code), falling back to direct notification"
+        log "    Output: $(echo "$output" | head -3)"
+        # Fall through to send simple notification
+        message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
+
+Health check failed. SafeModeBot attempted to diagnose but intro failed.
 
 See BOOT_REPORT.md for details."
+      fi
       ;;
       
     critical)
