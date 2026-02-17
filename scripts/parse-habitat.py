@@ -617,8 +617,20 @@ with open(os.path.join(output_dir, 'habitat-parsed.env'), 'w') as f:
 
 os.chmod(os.path.join(output_dir, 'habitat-parsed.env'), 0o600)
 
+# Write hatcheryVersion to /etc/hatchery-version (used by bootstrap.sh)
+# This allows habitat JSON to specify a feature branch for testing
+hatchery_version = hab.get("hatcheryVersion", "main")
+if not isinstance(hatchery_version, str) or not hatchery_version.strip():
+    hatchery_version = "main"
+hatchery_version_path = os.path.join(output_dir, 'hatchery-version')
+with open(hatchery_version_path, 'w') as f:
+    f.write(hatchery_version.strip())
+os.chmod(hatchery_version_path, 0o644)
+
 # Emit deprecation warnings
 for warning in deprecation_warnings:
     print(warning, file=sys.stderr)
 
-print("Parsed habitat '{}' with {} agents (platform: {})".format(hab['name'], len(agents), platform))
+# Show which branch is being used if not main
+branch_info = "" if hatchery_version == "main" else f" [branch: {hatchery_version}]"
+print("Parsed habitat '{}' with {} agents (platform: {}){}".format(hab['name'], len(agents), platform, branch_info))
