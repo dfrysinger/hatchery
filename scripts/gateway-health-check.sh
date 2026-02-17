@@ -1011,31 +1011,15 @@ send_boot_notification() {
       ;;
       
     safe-mode)
-      # STEP 1: Send direct API notification immediately
-      # This gives user instant feedback that safe mode triggered
-      log "========== SAFE MODE NOTIFICATION =========="
-      log "  Sending direct notification first, then SafeModeBot intro"
+      # Pre-restart warning already sent by send_entering_safe_mode_warning()
+      # Now just trigger SafeModeBot intro for detailed diagnostics
       
-      local direct_message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
-
-Health check failed. SafeModeBot is online to diagnose.
-
-See BOOT_REPORT.md for details."
-      
-      log "  Sending direct notification via $send_platform"
-      if [ "$send_platform" = "telegram" ]; then
-        send_telegram_notification "$send_token" "$owner_id" "$direct_message"
-      elif [ "$send_platform" = "discord" ]; then
-        send_discord_notification "$send_token" "$owner_id" "$direct_message"
-      fi
-      log "  Direct notification sent"
-      
-      # STEP 2: Generate boot report for SafeModeBot to read
+      # Generate boot report for SafeModeBot to read
       log "  Generating BOOT_REPORT.md for SafeModeBot to read..."
       generate_boot_report_md
       log "  BOOT_REPORT.md created at $H/clawd/agents/safe-mode/BOOT_REPORT.md"
       
-      # STEP 3: Trigger SafeModeBot intro via openclaw agent
+      # Trigger SafeModeBot intro via openclaw agent
       log "========== SAFE MODE BOT INTRO =========="
       log "  SafeModeBot will introduce itself and provide diagnostics"
       log "  Delivery: channel=$send_platform, owner=$owner_id"
