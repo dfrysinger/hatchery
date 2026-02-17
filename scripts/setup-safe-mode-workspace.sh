@@ -197,6 +197,16 @@ fi
 # -----------------------------------------------------------------------------
 # Set permissions
 # -----------------------------------------------------------------------------
+# Chown the workspace directory
 chown -R "$USERNAME:$USERNAME" "$SAFE_MODE_DIR" 2>/dev/null || true
+
+# CRITICAL: Also create and chown the .openclaw subdirectories that OpenClaw will use
+# These paths must be writable by the bot user or the gateway will fail with EACCES
+mkdir -p "$SAFE_MODE_DIR/.openclaw"
+mkdir -p "$HOME_DIR/.openclaw/agents/safe-mode/agent"
+mkdir -p "$HOME_DIR/.openclaw/agents/safe-mode/sessions"
+
+chown -R "$USERNAME:$USERNAME" "$SAFE_MODE_DIR/.openclaw" 2>/dev/null || true
+chown -R "$USERNAME:$USERNAME" "$HOME_DIR/.openclaw/agents/safe-mode" 2>/dev/null || true
 
 echo "Safe mode workspace created at: $SAFE_MODE_DIR"

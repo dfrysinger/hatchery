@@ -411,8 +411,13 @@ SMSO
   chown -R "$USERNAME:$USERNAME" "$H/clawd/agents/safe-mode" 2>/dev/null || true
 }
 # Link auth-profiles for safe-mode agent too
+# Also create sessions dir and ensure proper ownership (prevents EACCES errors)
 mkdir -p "$H/.openclaw/agents/safe-mode/agent"
+mkdir -p "$H/.openclaw/agents/safe-mode/sessions"
+mkdir -p "$H/clawd/agents/safe-mode/.openclaw"
 ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/safe-mode/agent/auth-profiles.json"
+chown -R "$USERNAME:$USERNAME" "$H/.openclaw/agents/safe-mode" 2>/dev/null || true
+chown -R "$USERNAME:$USERNAME" "$H/clawd/agents/safe-mode/.openclaw" 2>/dev/null || true
 
 cat > /etc/systemd/system/clawdbot.service <<SVC
 [Unit]
