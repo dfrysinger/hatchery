@@ -377,18 +377,21 @@ check_agents_e2e() {
   log "  Config: AGENT_COUNT=$count, PLATFORM=$platform"
   
   # Determine delivery channel and owner
-  local channel owner_id
+  # Discord requires "user:" prefix for DMs, Telegram uses raw IDs
+  local channel owner_id raw_owner_id
   if [ "$platform" = "discord" ]; then
     channel="discord"
-    owner_id="${DISCORD_OWNER_ID:-}"
+    raw_owner_id="${DISCORD_OWNER_ID:-}"
+    owner_id="user:${raw_owner_id}"
   else
     channel="telegram"
-    owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+    raw_owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+    owner_id="$raw_owner_id"
   fi
   
   log "  Delivery: channel=$channel, owner_id=$owner_id"
   
-  if [ -z "$owner_id" ]; then
+  if [ -z "$raw_owner_id" ]; then
     log "  ERROR: No owner ID for platform '$platform'"
     log "  Check habitat config: platforms.$platform.ownerId must be set"
     return 1
@@ -835,7 +838,7 @@ send_boot_notification() {
     elif [ "$preferred" = "discord" ] && [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       send_platform="discord"
       send_token="$dc_token"
-      owner_id="${DISCORD_OWNER_ID:-}"
+      owner_id="user:${DISCORD_OWNER_ID:-}"
       log "  Using Discord from safe mode config"
     elif [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       send_platform="telegram"
@@ -845,7 +848,7 @@ send_boot_notification() {
     elif [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       send_platform="discord"
       send_token="$dc_token"
-      owner_id="${DISCORD_OWNER_ID:-}"
+      owner_id="user:${DISCORD_OWNER_ID:-}"
       log "  Falling back to Discord from safe mode config"
     fi
   fi
@@ -873,7 +876,7 @@ send_boot_notification() {
         if [ -n "$token" ] && validate_discord_token_direct "$token"; then
           send_platform="discord"
           send_token="$token"
-          owner_id="${DISCORD_OWNER_ID:-}"
+          owner_id="user:${DISCORD_OWNER_ID:-}"
           break
         fi
       fi
@@ -904,7 +907,7 @@ send_boot_notification() {
           if [ -n "$token" ] && validate_discord_token_direct "$token"; then
             send_platform="discord"
             send_token="$token"
-            owner_id="${DISCORD_OWNER_ID:-}"
+            owner_id="user:${DISCORD_OWNER_ID:-}"
             log "  Cross-platform fallback to Discord"
             break
           fi
