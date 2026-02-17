@@ -69,6 +69,8 @@ OR_ESC=$(json_escape "$OR")
 # shellcheck disable=SC2034
 OI_ESC=$(json_escape "$OI")
 mkdir -p $H/.openclaw/credentials
+# SECURITY: credentials directory should not be world-readable
+chmod 700 $H/.openclaw/credentials
 for i in $(seq 1 $AC); do
   mkdir -p "$H/clawd/agents/agent${i}/memory"
 done
@@ -372,6 +374,9 @@ mkdir -p $H/.openclaw/agents/main/agent
 cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
 {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
 APJ
+# SECURITY: auth-profiles.json contains credentials - restrict permissions
+chmod 600 $H/.openclaw/agents/main/agent/auth-profiles.json
+chown $USERNAME:$USERNAME $H/.openclaw/agents/main/agent/auth-profiles.json
 for i in $(seq 1 $AC); do
   mkdir -p "$H/.openclaw/agents/agent${i}/agent"
   ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/agent${i}/agent/auth-profiles.json"
