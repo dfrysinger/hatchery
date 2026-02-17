@@ -921,7 +921,7 @@ generate_emergency_config() {
     fi
   elif [ "$platform" = "discord" ]; then
     # Use correct OpenClaw schema for Discord
-    # Token goes under accounts.default, dm needs enabled:true
+    # Token under accounts.default, DM config uses flat keys (dmPolicy, allowFrom)
     local owner_id="${DISCORD_OWNER_ID:-}"
     if [ -n "$owner_id" ]; then
       discord_config="\"discord\": {
@@ -929,11 +929,8 @@ generate_emergency_config() {
         \"accounts\": {
           \"default\": { \"token\": \"${token}\" }
         },
-        \"dm\": {
-          \"enabled\": true,
-          \"policy\": \"allowlist\",
-          \"allowFrom\": [\"${owner_id}\"]
-        }
+        \"dmPolicy\": \"allowlist\",
+        \"allowFrom\": [\"${owner_id}\"]
       }"
     else
       discord_config="\"discord\": {
@@ -941,10 +938,7 @@ generate_emergency_config() {
         \"accounts\": {
           \"default\": { \"token\": \"${token}\" }
         },
-        \"dm\": {
-          \"enabled\": true,
-          \"policy\": \"pairing\"
-        }
+        \"dmPolicy\": \"pairing\"
       }"
     fi
   fi
