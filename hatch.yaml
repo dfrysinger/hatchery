@@ -113,7 +113,7 @@ write_files:
       REPO="dfrysinger/hatchery";DIR="/opt/hatchery"
       # Extract hatcheryVersion from HABITAT_B64 before fetching code
       if [ -n "${HABITAT_B64:-}" ]; then
-        HV=$(echo "$HABITAT_B64"|base64 -d 2>/dev/null|grep -o '"hatcheryVersion"[[:space:]]*:[[:space:]]*"[^"]*"'|sed 's/.*"hatcheryVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/'||true)
+        HV=$(echo "$HABITAT_B64"|base64 -d 2>/dev/null|grep -o '"hatcheryVersion"[[:space:]]*:[[:space:]]*"[^"]*"'|sed 's/.*"hatcheryVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/'|sed 's/\\//g'||true)
         [ -n "$HV" ]&&echo "$HV">/etc/hatchery-version
       fi
       VER=$(cat /etc/hatchery-version 2>/dev/null||echo "main")
