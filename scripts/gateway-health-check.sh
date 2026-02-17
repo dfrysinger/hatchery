@@ -79,17 +79,16 @@ SESSION_GROUPS="${ISOLATION_GROUPS:-}"
 
 # Per-group health check mode (for session isolation)
 # When GROUP is set, we only check agents in that group
+# Agents are derived from AGENT{N}_ISOLATION_GROUP in habitat-parsed.env (single source of truth)
 GROUP="${GROUP:-}"
 GROUP_PORT="${GROUP_PORT:-18789}"
-GROUP_AGENTS="${GROUP_AGENTS:-}"  # Comma-separated list of agent IDs (e.g., "agent1,agent2")
 
 if [ -n "$GROUP" ]; then
-  log "Config: GROUP MODE - group=$GROUP port=$GROUP_PORT agents=$GROUP_AGENTS"
-  # Override service name for this group
   SERVICE_NAME="openclaw-${GROUP}"
+  log "Config: GROUP MODE - group=$GROUP port=$GROUP_PORT service=$SERVICE_NAME"
 else
-  log "Config: isolation=$ISOLATION groups=$SESSION_GROUPS agents=$AC"
   SERVICE_NAME="clawdbot"
+  log "Config: isolation=$ISOLATION groups=$SESSION_GROUPS agents=$AC"
 fi
 
 # =============================================================================
@@ -146,6 +145,31 @@ log "ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE, RECOVERY_ATTEMPTS=$RECOVERY_ATT
 # =============================================================================
 # Health Check Functions
 # =============================================================================
+
+# Get owner ID for a platform (single source of truth for owner ID logic)
+# Usage: owner_id=$(get_owner_id_for_platform "telegram")
+#        owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
+get_owner_id_for_platform() {
+  local platform="$1"
+  local with_prefix="${2:-}"  # Pass "with_prefix" to add "user:" for Discord
+  
+  case "$platform" in
+    telegram)
+      echo "${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      ;;
+    discord)
+      local raw_id="${DISCORD_OWNER_ID:-}"
+      if [ "$with_prefix" = "with_prefix" ] && [ -n "$raw_id" ]; then
+        echo "user:${raw_id}"
+      else
+        echo "$raw_id"
+      fi
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
 
 validate_telegram_token_direct() {
   local token="$1"
@@ -396,14 +420,22 @@ check_agents_e2e() {
   local failed_agents=""
   
   # Determine which agents to check
-  # If GROUP_AGENTS is set (session isolation), only check those agents
+  # If GROUP is set (session isolation), derive agents from AGENT{N}_ISOLATION_GROUP
   # Otherwise, check all agents
   local agents_to_check=()
-  if [ -n "$GROUP_AGENTS" ]; then
-    IFS=',' read -ra agents_to_check <<< "$GROUP_AGENTS"
-    log "  Config: GROUP MODE - checking agents: ${GROUP_AGENTS}"
+  local count="${AGENT_COUNT:-1}"
+  
+  if [ -n "$GROUP" ]; then
+    # Derive agents for this group from habitat-parsed.env (single source of truth)
+    for i in $(seq 1 "$count"); do
+      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
+      local agent_group="${!agent_group_var:-}"
+      if [ "$agent_group" = "$GROUP" ]; then
+        agents_to_check+=("agent${i}")
+      fi
+    done
+    log "  Config: GROUP MODE - group=$GROUP, checking agents: ${agents_to_check[*]}"
   else
-    local count="${AGENT_COUNT:-1}"
     for i in $(seq 1 "$count"); do
       agents_to_check+=("agent${i}")
     done
@@ -412,22 +444,14 @@ check_agents_e2e() {
   
   log "  Platform: $platform"
   
-  # Determine delivery channel and owner
-  # Discord requires "user:" prefix for DMs, Telegram uses raw IDs
-  local channel owner_id raw_owner_id
-  if [ "$platform" = "discord" ]; then
-    channel="discord"
-    raw_owner_id="${DISCORD_OWNER_ID:-}"
-    owner_id="user:${raw_owner_id}"
-  else
-    channel="telegram"
-    raw_owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
-    owner_id="$raw_owner_id"
-  fi
+  # Determine delivery channel and owner (Discord needs "user:" prefix for DMs)
+  local channel="$platform"
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform" "with_prefix")
   
   log "  Delivery: channel=$channel, owner_id=$owner_id"
   
-  if [ -z "$raw_owner_id" ]; then
+  if [ -z "$owner_id" ] || [ "$owner_id" = "user:" ]; then
     log "  ERROR: No owner ID for platform '$platform'"
     log "  Check habitat config: platforms.$platform.ownerId must be set"
     return 1
@@ -883,12 +907,8 @@ send_entering_safe_mode_warning() {
   log "  Using ${platform} token from recovery config"
   
   # Get owner ID for the platform
-  local owner_id=""
-  if [ "$platform" = "telegram" ]; then
-    owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
-  elif [ "$platform" = "discord" ]; then
-    owner_id="${DISCORD_OWNER_ID:-}"
-  fi
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform")
   
   if [ -z "$owner_id" ]; then
     log "  No owner ID for platform '$platform' - cannot send warning"
@@ -952,22 +972,22 @@ send_boot_notification() {
     if [ "$preferred" = "telegram" ] && [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       send_platform="telegram"
       send_token="$tg_token"
-      owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      owner_id=$(get_owner_id_for_platform "telegram")
       log "  Using Telegram from safe mode config"
     elif [ "$preferred" = "discord" ] && [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       send_platform="discord"
       send_token="$dc_token"
-      owner_id="user:${DISCORD_OWNER_ID:-}"
+      owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
       log "  Using Discord from safe mode config"
     elif [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       send_platform="telegram"
       send_token="$tg_token"
-      owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      owner_id=$(get_owner_id_for_platform "telegram")
       log "  Falling back to Telegram from safe mode config"
     elif [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       send_platform="discord"
       send_token="$dc_token"
-      owner_id="user:${DISCORD_OWNER_ID:-}"
+      owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
       log "  Falling back to Discord from safe mode config"
     fi
   fi
@@ -985,7 +1005,7 @@ send_boot_notification() {
         if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
           send_platform="telegram"
           send_token="$token"
-          owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+          owner_id=$(get_owner_id_for_platform "telegram")
           break
         fi
       elif [ "$platform" = "discord" ]; then
@@ -995,7 +1015,7 @@ send_boot_notification() {
         if [ -n "$token" ] && validate_discord_token_direct "$token"; then
           send_platform="discord"
           send_token="$token"
-          owner_id="user:${DISCORD_OWNER_ID:-}"
+          owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
           break
         fi
       fi
@@ -1015,7 +1035,7 @@ send_boot_notification() {
           if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
             send_platform="telegram"
             send_token="$token"
-            owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+            owner_id=$(get_owner_id_for_platform "telegram")
             log "  Cross-platform fallback to Telegram"
             break
           fi
@@ -1026,7 +1046,7 @@ send_boot_notification() {
           if [ -n "$token" ] && validate_discord_token_direct "$token"; then
             send_platform="discord"
             send_token="$token"
-            owner_id="user:${DISCORD_OWNER_ID:-}"
+            owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
             log "  Cross-platform fallback to Discord"
             break
           fi
