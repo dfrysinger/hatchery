@@ -932,8 +932,31 @@ send_boot_notification() {
       ;;
       
     safe-mode)
-      # For safe mode, use openclaw agent --deliver to have SafeModeBot introduce itself
-      # This tests e2e even in safe mode, and lets the bot provide diagnostics
+      # STEP 1: Send direct API notification immediately
+      # This gives user instant feedback that safe mode triggered
+      log "========== SAFE MODE NOTIFICATION =========="
+      log "  Sending direct notification first, then SafeModeBot intro"
+      
+      local direct_message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
+
+Health check failed. SafeModeBot is online to diagnose.
+
+See BOOT_REPORT.md for details."
+      
+      log "  Sending direct notification via $send_platform"
+      if [ "$send_platform" = "telegram" ]; then
+        send_telegram_notification "$send_token" "$owner_id" "$direct_message"
+      elif [ "$send_platform" = "discord" ]; then
+        send_discord_notification "$send_token" "$owner_id" "$direct_message"
+      fi
+      log "  Direct notification sent"
+      
+      # STEP 2: Generate boot report for SafeModeBot to read
+      log "  Generating BOOT_REPORT.md for SafeModeBot to read..."
+      generate_boot_report_md
+      log "  BOOT_REPORT.md created at $H/clawd/agents/safe-mode/BOOT_REPORT.md"
+      
+      # STEP 3: Trigger SafeModeBot intro via openclaw agent
       log "========== SAFE MODE BOT INTRO =========="
       log "  SafeModeBot will introduce itself and provide diagnostics"
       log "  Delivery: channel=$send_platform, owner=$owner_id"
@@ -950,11 +973,6 @@ Read your BOOT_REPORT.md file and reply with:
 3. Offer to help investigate
 
 Keep it to 3-5 sentences. Be helpful, not verbose."
-
-      # Generate the boot report first so SafeModeBot can read it
-      log "  Generating BOOT_REPORT.md for SafeModeBot to read..."
-      generate_boot_report_md
-      log "  BOOT_REPORT.md created at $H/clawd/agents/safe-mode/BOOT_REPORT.md"
       
       log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
       
@@ -981,21 +999,17 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
         log "  ✓ SUCCESS: SafeModeBot intro sent in ${duration}s"
         log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
         log "========== SAFE MODE INTRO COMPLETE =========="
-        return 0
       else
         log "  ✗ FAILED: SafeModeBot intro (exit=$exit_code, duration=${duration}s)"
         log "  Full output:"
         echo "$output" | while IFS= read -r line; do
           log "    | $line"
         done
-        log "  Falling back to direct API notification..."
-        # Fall through to send simple notification
-        message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
-
-Health check failed. SafeModeBot attempted to diagnose but intro failed (exit=$exit_code).
-
-See BOOT_REPORT.md for details."
+        log "  Direct notification already sent - SafeModeBot intro failed but user was notified"
       fi
+      
+      # Already sent direct notification, so we're done regardless of bot intro result
+      return 0
       ;;
       
     critical)
