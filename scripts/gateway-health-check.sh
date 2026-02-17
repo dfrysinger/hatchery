@@ -416,8 +416,10 @@ check_agents_e2e() {
     local start_time=$(date +%s)
     
     # Use openclaw agent with --deliver to send response to chat
+    # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
+    # but openclaw must run as the bot user to create files with correct ownership.
     local output
-    output=$(timeout 90 openclaw agent \
+    output=$(timeout 90 sudo -u "$USERNAME" openclaw agent \
       --agent "$agent_id" \
       --message "$intro_prompt" \
       --deliver \
@@ -954,12 +956,14 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
       generate_boot_report_md
       log "  BOOT_REPORT.md created at $H/clawd/agents/safe-mode/BOOT_REPORT.md"
       
-      log "  Command: openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
+      log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
       
       local start_time=$(date +%s)
       
+      # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
+      # but openclaw must run as the bot user to create files with correct ownership.
       local output
-      output=$(timeout 120 openclaw agent \
+      output=$(timeout 120 sudo -u "$USERNAME" openclaw agent \
         --agent "safe-mode" \
         --message "$safemode_prompt" \
         --deliver \
