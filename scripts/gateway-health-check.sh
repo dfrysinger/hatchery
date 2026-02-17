@@ -260,108 +260,98 @@ check_channel_connectivity() {
   
   log "  Checking channel connectivity..."
   
-  local token_valid=false
   local config_file="$H/.openclaw/openclaw.json"
   
-  # In safe mode, read tokens from ACTUAL config (not habitat-parsed.env)
-  # The safe mode config only contains the ONE working token
+  # In safe mode, just verify the safe mode config has a working token
+  # Safe mode recovery already found a working token, we just need to confirm it
   if [ -f /var/lib/init-status/safe-mode ] && [ -f "$config_file" ]; then
-    log "  Safe mode active - reading tokens from openclaw.json"
+    log "  Safe mode active - validating safe mode config token"
     
-    # Try to extract Telegram token from config
+    # Try Telegram token from config
     local tg_token
     tg_token=$(jq -r '.channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
     if [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       log "  Safe mode Telegram token valid"
-      token_valid=true
+      log "  Channel connectivity verified (safe mode)"
+      return 0
     fi
     
-    # Try Discord if Telegram not configured or failed
-    if [ "$token_valid" = "false" ]; then
-      local dc_token
-      dc_token=$(jq -r '.channels.discord.token // empty' "$config_file" 2>/dev/null)
-      if [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
-        log "  Safe mode Discord token valid"
-        token_valid=true
-      fi
+    # Try Discord token from config
+    local dc_token
+    dc_token=$(jq -r '.channels.discord.token // empty' "$config_file" 2>/dev/null)
+    if [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
+      log "  Safe mode Discord token valid"
+      log "  Channel connectivity verified (safe mode)"
+      return 0
     fi
     
-    if [ "$token_valid" = "false" ]; then
-      log "  Safe mode config has no working chat tokens"
-    fi
-  else
-    # Normal mode: check all tokens from habitat-parsed.env
-    [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
-    
-    local platform="${PLATFORM:-telegram}"
-    local count="${AGENT_COUNT:-1}"
-    
-    for i in $(seq 1 "$count"); do
-      if [ "$platform" = "telegram" ]; then
-        local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-        local token="${!token_var:-}"
-        if [ -z "$token" ]; then
-          token_var="AGENT${i}_BOT_TOKEN"
-          token="${!token_var:-}"
-        fi
-        
-        if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
-          log "  Agent${i} Telegram token valid"
-          token_valid=true
-          break
-        fi
-      elif [ "$platform" = "discord" ]; then
-        local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
-        local token="${!token_var:-}"
-        
-        if [ -n "$token" ] && validate_discord_token_direct "$token"; then
-          log "  Agent${i} Discord token valid"
-          token_valid=true
-          break
-        fi
-      fi
-    done
-  fi
-  
-  # Try fallback platform (only in normal mode - safe mode already checked both)
-  if [ "$token_valid" = "false" ] && [ ! -f /var/lib/init-status/safe-mode ]; then
-    local fallback=""
-    [ "$platform" = "telegram" ] && fallback="discord"
-    [ "$platform" = "discord" ] && fallback="telegram"
-    
-    for i in $(seq 1 "$count"); do
-      if [ "$fallback" = "telegram" ]; then
-        local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-        local token="${!token_var:-}"
-        if [ -z "$token" ]; then
-          token_var="AGENT${i}_BOT_TOKEN"
-          token="${!token_var:-}"
-        fi
-        
-        if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
-          log "  Agent${i} Telegram (fallback) token valid"
-          token_valid=true
-          break
-        fi
-      elif [ "$fallback" = "discord" ]; then
-        local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
-        local token="${!token_var:-}"
-        
-        if [ -n "$token" ] && validate_discord_token_direct "$token"; then
-          log "  Agent${i} Discord (fallback) token valid"
-          token_valid=true
-          break
-        fi
-      fi
-    done
-  fi
-  
-  if [ "$token_valid" = "false" ]; then
-    log "  All chat tokens are INVALID"
+    log "  Safe mode config has no working chat tokens"
     return 1
   fi
   
-  log "  Channel connectivity verified"
+  # Normal mode: validate ALL agents have working tokens for the specified platform(s)
+  # No fallback - if user says "telegram", ALL agents must have valid Telegram tokens
+  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  
+  local platform="${PLATFORM:-telegram}"
+  local count="${AGENT_COUNT:-1}"
+  local all_valid=true
+  local failed_agents=""
+  
+  log "  Platform: $platform, Agent count: $count"
+  
+  for i in $(seq 1 "$count"); do
+    local agent_valid=false
+    
+    # Check Telegram if platform is telegram or both
+    if [ "$platform" = "telegram" ] || [ "$platform" = "both" ]; then
+      local tg_token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
+      local tg_token="${!tg_token_var:-}"
+      if [ -z "$tg_token" ]; then
+        tg_token_var="AGENT${i}_BOT_TOKEN"
+        tg_token="${!tg_token_var:-}"
+      fi
+      
+      if [ -n "$tg_token" ]; then
+        if validate_telegram_token_direct "$tg_token"; then
+          log "  Agent${i} Telegram token valid"
+          agent_valid=true
+        else
+          log "  Agent${i} Telegram token INVALID"
+        fi
+      fi
+    fi
+    
+    # Check Discord if platform is discord or both
+    if [ "$platform" = "discord" ] || [ "$platform" = "both" ]; then
+      local dc_token_var="AGENT${i}_DISCORD_BOT_TOKEN"
+      local dc_token="${!dc_token_var:-}"
+      
+      if [ -n "$dc_token" ]; then
+        if validate_discord_token_direct "$dc_token"; then
+          log "  Agent${i} Discord token valid"
+          agent_valid=true
+        else
+          log "  Agent${i} Discord token INVALID"
+        fi
+      fi
+    fi
+    
+    # For "both" platform, agent needs at least one working token
+    # For single platform, agent needs that specific platform's token to work
+    if [ "$agent_valid" = "false" ]; then
+      all_valid=false
+      failed_agents="${failed_agents} agent${i}"
+      log "  Agent${i} has NO working tokens for platform '$platform'"
+    fi
+  done
+  
+  if [ "$all_valid" = "false" ]; then
+    log "  Channel check FAILED - broken agents:${failed_agents}"
+    return 1
+  fi
+  
+  log "  Channel connectivity verified (all $count agents valid)"
   return 0
 }
 
