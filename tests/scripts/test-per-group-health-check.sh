@@ -562,6 +562,32 @@ SCRIPT
 }
 
 # =============================================================================
+
+# =============================================================================
+# Test: Health check sets stage=11 and setup-complete on success
+# =============================================================================
+test_health_check_sets_ready_status() {
+  setup_test_env
+  
+  local script="$REPO_DIR/scripts/gateway-health-check.sh"
+  
+  # Check for stage=11 setting on success
+  if grep -q "echo '11' > /var/lib/init-status/stage" "$script"; then
+    pass "Health check sets stage=11 on success"
+  else
+    fail "Health check missing stage=11 setting"
+  fi
+  
+  # Check for setup-complete creation
+  if grep -q "touch /var/lib/init-status/setup-complete" "$script"; then
+    pass "Health check creates setup-complete on success"
+  else
+    fail "Health check missing setup-complete creation"
+  fi
+  
+  cleanup_test_env
+}
+
 # Run all tests
 # =============================================================================
 echo ""
@@ -577,6 +603,7 @@ test_group_isolation
 test_session_service_has_group_env
 test_health_check_group_mode
 test_notification_per_group
+test_health_check_sets_ready_status
 
 echo ""
 echo "========================================"

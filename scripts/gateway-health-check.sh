@@ -848,6 +848,13 @@ if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
   log "DECISION: SAFE MODE STABLE - recovery config working, keeping safe mode flag"
   rm -f "$RECOVERY_COUNTER_FILE"
   rm -f "$RECENTLY_RECOVERED_FILE"
+  
+  # Mark as ready (in safe mode)
+  echo '11' > /var/lib/init-status/stage
+  touch /var/lib/init-status/setup-complete
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready-safe-mode" >> /var/log/init-stages.log
+  log "Status: stage=11 (ready in safe mode), setup-complete created"
+  
   EXIT_CODE=0  # Don't restart, safe mode is working
 
 elif [ "$HEALTHY" = "true" ]; then
@@ -857,6 +864,13 @@ elif [ "$HEALTHY" = "true" ]; then
   rm -f "$RECOVERY_COUNTER_FILE"
   rm -f "$RECENTLY_RECOVERED_FILE"
   for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
+  
+  # Mark as ready
+  echo '11' > /var/lib/init-status/stage
+  touch /var/lib/init-status/setup-complete
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready" >> /var/log/init-stages.log
+  log "Status: stage=11 (ready), setup-complete created"
+  
   EXIT_CODE=0
 
 elif [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECOVERY_ATTEMPTS" ]; then
