@@ -301,9 +301,15 @@ if [ -z "${DRY_RUN:-}" ]; then
     
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
-        systemctl start "openclaw-${group}.service"
+        # Start service but don't fail if ExecStartPost health check triggers safe mode
+        # The health check returns exit 1 on safe mode entry, which would abort our loop
+        # Services will restart themselves via Restart=on-failure
+        systemctl start "openclaw-${group}.service" || {
+            echo "  [${group}] Service start returned non-zero (health check may have triggered safe mode)"
+            echo "  [${group}] Service will restart automatically via systemd"
+        }
     done
-    echo "Session services started."
+    echo "Session services started (or pending health check restart)."
 else
     echo "DRY_RUN mode — services written to ${OUTPUT_DIR}"
 fi
