@@ -1143,6 +1143,7 @@ run_smart_recovery() {
   log_recovery "========== SMART RECOVERY STARTING =========="
   log_recovery "PID: $$ | HOME_DIR=${HOME_DIR:-unset} | USERNAME=${USERNAME:-unset}"
   log_recovery "Environment check:"
+  log_recovery "  GROUP: ${GROUP:-unset} (session isolation mode: ${GROUP:+yes}${GROUP:-no})"
   log_recovery "  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:+SET (${#ANTHROPIC_API_KEY} chars)}"
   log_recovery "  OPENAI_API_KEY: ${OPENAI_API_KEY:+SET (${#OPENAI_API_KEY} chars)}"
   log_recovery "  GOOGLE_API_KEY: ${GOOGLE_API_KEY:+SET (${#GOOGLE_API_KEY} chars)}"
@@ -1244,9 +1245,19 @@ run_smart_recovery() {
   log_recovery "  Generated config: model=$config_model, env_keys=$config_keys"
   
   # Step 4: Write emergency config
+  # In session isolation mode (GROUP set), write to the session config
+  # Otherwise, write to the main config
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
-  local config_dir="${home}/.openclaw"
-  local config_path="${config_dir}/openclaw.json"
+  local config_dir config_path
+  
+  if [ -n "${GROUP:-}" ]; then
+    config_dir="${home}/.openclaw-sessions/${GROUP}"
+    config_path="${config_dir}/openclaw.session.json"
+    log_recovery "  Session isolation mode: writing to ${config_path}"
+  else
+    config_dir="${home}/.openclaw"
+    config_path="${config_dir}/openclaw.json"
+  fi
   
   if [ "${DRY_RUN:-}" != "1" ]; then
     # Ensure directory exists

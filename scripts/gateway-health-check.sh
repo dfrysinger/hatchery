@@ -18,18 +18,33 @@
 #   2 = critical failure (emergency config also broken, don't restart)
 # =============================================================================
 
-LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
+# Logging setup
+# In session isolation mode (GROUP set), use group-specific log file
+# This ensures we capture all health check runs for each group
 RUN_MODE="${RUN_MODE:-standalone}"
+RUN_ID="$$-$(date +%s)"  # Unique ID for this health check run
+
+if [ -n "${GROUP:-}" ]; then
+  LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check-${GROUP}.log}"
+else
+  LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
+fi
 
 # Security: restrict log file permissions (diagnostic context, no secrets)
 umask 077
 touch "$LOG" && chmod 600 "$LOG" 2>/dev/null || true
 
 log() {
-  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"
+  local msg="$(date -u +%Y-%m-%dT%H:%M:%SZ) [$RUN_ID] $*"
+  echo "$msg" >> "$LOG"
+  # Also log to journald for persistence (won't be lost on reboot)
+  logger -t "health-check${GROUP:+-$GROUP}" "$*" 2>/dev/null || true
 }
 
-log "========== GATEWAY HEALTH CHECK STARTING (mode=$RUN_MODE) =========="
+log "============================================================"
+log "========== GATEWAY HEALTH CHECK STARTING =========="
+log "============================================================"
+log "RUN_ID=$RUN_ID | MODE=$RUN_MODE | GROUP=${GROUP:-none} | PID=$$"
 
 # =============================================================================
 # Skip if recently recovered (prevents cascade from standalone → ExecStartPost)
@@ -106,9 +121,11 @@ MAX_RECOVERY_ATTEMPTS=2
 if [ -n "$GROUP" ]; then
   RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts-${GROUP}"
   SAFE_MODE_FILE="/var/lib/init-status/safe-mode-${GROUP}"
+  CONFIG_PATH="$H/.openclaw-sessions/${GROUP}/openclaw.session.json"
 else
   RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts"
   SAFE_MODE_FILE="/var/lib/init-status/safe-mode"
+  CONFIG_PATH="$H/.openclaw/openclaw.json"
 fi
 
 ALREADY_IN_SAFE_MODE=false
@@ -124,14 +141,15 @@ for f in /var/lib/init-status/*; do
   [ -f "$f" ] && log "  $f = $(cat "$f" 2>/dev/null || echo '(empty)')"
 done
 log "Config files:"
-[ -f "$H/.openclaw/openclaw.json" ] && log "  openclaw.json exists ($(wc -c < "$H/.openclaw/openclaw.json") bytes)"
+log "  CONFIG_PATH=$CONFIG_PATH"
+[ -f "$CONFIG_PATH" ] && log "  config exists ($(wc -c < "$CONFIG_PATH") bytes)"
 [ -f "$H/.openclaw/openclaw.emergency.json" ] && log "  openclaw.emergency.json exists ($(wc -c < "$H/.openclaw/openclaw.emergency.json") bytes)"
 [ -f "$H/.openclaw/openclaw.full.json" ] && log "  openclaw.full.json exists ($(wc -c < "$H/.openclaw/openclaw.full.json") bytes)"
 
 # Check current config model
-if [ -f "$H/.openclaw/openclaw.json" ]; then
-  CURRENT_MODEL=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
-  CURRENT_ENV_KEYS=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.json" 2>/dev/null)
+if [ -f "$CONFIG_PATH" ]; then
+  CURRENT_MODEL=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$CONFIG_PATH" 2>/dev/null)
+  CURRENT_ENV_KEYS=$(jq -r '.env | keys | join(",")' "$CONFIG_PATH" 2>/dev/null)
   log "Current config: model=$CURRENT_MODEL, env_keys=$CURRENT_ENV_KEYS"
 fi
 
@@ -658,20 +676,20 @@ enter_safe_mode() {
     else
       log "  ERROR: emergency.json does not exist!"
     fi
-    cp "$H/.openclaw/openclaw.emergency.json" "$H/.openclaw/openclaw.json"
-    chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
-    chmod 600 "$H/.openclaw/openclaw.json"
+    cp "$H/.openclaw/openclaw.emergency.json" "$CONFIG_PATH"
+    chown $USERNAME:$USERNAME "$CONFIG_PATH"
+    chmod 600 "$CONFIG_PATH"
     log "Config after fallback:"
     local new_model
-    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    log "  openclaw.json: model=$new_model"
+    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$CONFIG_PATH" 2>/dev/null)
+    log "  $CONFIG_PATH: model=$new_model"
   else
     log "Smart recovery succeeded - using recovery-generated config"
     log "Config after recovery:"
     local new_model new_keys
-    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    new_keys=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    log "  openclaw.json: model=$new_model, env_keys=$new_keys"
+    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$CONFIG_PATH" 2>/dev/null)
+    new_keys=$(jq -r '.env | keys | join(",")' "$CONFIG_PATH" 2>/dev/null)
+    log "  $CONFIG_PATH: model=$new_model, env_keys=$new_keys"
   fi
   
   # Mark safe mode
@@ -1065,11 +1083,11 @@ send_boot_notification() {
   local send_token=""
   local owner_id=""
   
-  if [ -f "$SAFE_MODE_FILE" ] && [ -f "$H/.openclaw/openclaw.json" ]; then
+  if [ -f "$SAFE_MODE_FILE" ] && [ -f "$CONFIG_PATH" ]; then
     # Check which channels are configured in safe mode config
     local tg_token dc_token
-    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts.default.botToken // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts.default.token // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts.default.botToken // empty' "$CONFIG_PATH" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts.default.token // empty' "$CONFIG_PATH" 2>/dev/null)
     
     # Prefer platform matching PLATFORM env, fall back to whatever is configured
     local preferred="${PLATFORM:-telegram}"
@@ -1352,5 +1370,8 @@ else
   generate_boot_report_md  # Still generate report for SafeModeBot to read
 fi
 
-log "========== GATEWAY HEALTH CHECK COMPLETE (exit=$EXIT_CODE) =========="
+log "============================================================"
+log "========== GATEWAY HEALTH CHECK COMPLETE =========="
+log "============================================================"
+log "RUN_ID=$RUN_ID | EXIT=$EXIT_CODE | HEALTHY=$HEALTHY | SAFE_MODE=$ALREADY_IN_SAFE_MODE"
 exit $EXIT_CODE
