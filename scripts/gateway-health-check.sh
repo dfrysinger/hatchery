@@ -226,7 +226,7 @@ check_api_key_validity() {
   
   log "  Checking API key validity..."
   
-  local config_file="$H/.openclaw/openclaw.json"
+  local config_file="$CONFIG_PATH"
   
   # In safe mode, read API key from actual config (recovery may have changed provider)
   if [ -f "$SAFE_MODE_FILE" ] && [ -f "$config_file" ]; then
@@ -342,7 +342,7 @@ check_channel_connectivity() {
   
   log "  Checking channel connectivity..."
   
-  local config_file="$H/.openclaw/openclaw.json"
+  local config_file="$CONFIG_PATH"
   
   # In safe mode, just verify the safe mode config has a working token
   # Safe mode recovery already found a working token, we just need to confirm it
@@ -1000,7 +1000,7 @@ send_discord_notification() {
 send_entering_safe_mode_warning() {
   log "========== SENDING SAFE MODE WARNING =========="
   
-  local config_file="$H/.openclaw/openclaw.json"
+  local config_file="$CONFIG_PATH"
   if [ ! -f "$config_file" ]; then
     log "  No config file found - cannot send warning"
     return 1
