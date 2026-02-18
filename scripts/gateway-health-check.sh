@@ -515,8 +515,12 @@ check_agents_e2e() {
     # Use openclaw agent with --deliver to send response to chat
     # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
     # but openclaw must run as the bot user to create files with correct ownership.
+    # In session isolation mode, point to the session-specific config (correct gateway port).
+    local env_prefix=""
+    [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH"
+    
     local output
-    output=$(timeout 90 sudo -u "$USERNAME" openclaw agent \
+    output=$(timeout 90 sudo -u "$USERNAME" env $env_prefix openclaw agent \
       --agent "$agent_id" \
       --message "$intro_prompt" \
       --deliver \
