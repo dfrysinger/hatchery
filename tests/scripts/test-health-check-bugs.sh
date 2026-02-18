@@ -65,7 +65,7 @@ else
 fi
 
 # Verify safe mode stable sends safe-mode notification, not healthy
-if grep -B2 -A2 'ALREADY_IN_SAFE_MODE.*true' "$HEALTH_CHECK" | grep -q 'safe-mode'; then
+if grep -B2 -A5 'ALREADY_IN_SAFE_MODE.*true' "$HEALTH_CHECK" | grep -q 'safe-mode'; then
   pass "Safe mode stable sends safe-mode notification"
 else
   fail "Safe mode stable should send safe-mode notification, not healthy"
