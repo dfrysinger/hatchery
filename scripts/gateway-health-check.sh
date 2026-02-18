@@ -1172,6 +1172,16 @@ Read your BOOT_REPORT.md file and reply with:
 
 Keep it to 3-5 sentences. Be helpful, not verbose."
       
+      # In session isolation mode, openclaw agent can't connect to clawdbot (port 18789)
+      # because session services use different ports. Set gateway URL to the correct port.
+      local gateway_url=""
+      local config_path=""
+      if [ "$ISOLATION" = "session" ] && [ -n "${GROUP:-}" ] && [ -n "${GROUP_PORT:-}" ]; then
+        gateway_url="ws://127.0.0.1:${GROUP_PORT}"
+        config_path="${H}/.openclaw-sessions/${GROUP}/openclaw.session.json"
+        log "  Session isolation mode: using gateway at $gateway_url"
+      fi
+      
       log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
       
       local start_time=$(date +%s)
@@ -1179,7 +1189,14 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
       # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
       # but openclaw must run as the bot user to create files with correct ownership.
       local output
-      output=$(timeout 120 sudo -u "$USERNAME" openclaw agent \
+      
+      # Build environment variables for session isolation
+      local env_prefix=""
+      if [ -n "$gateway_url" ]; then
+        env_prefix="OPENCLAW_GATEWAY_URL=$gateway_url OPENCLAW_CONFIG_PATH=$config_path"
+      fi
+      
+      output=$(timeout 120 sudo -u "$USERNAME" env $env_prefix openclaw agent \
         --agent "safe-mode" \
         --message "$safemode_prompt" \
         --deliver \
