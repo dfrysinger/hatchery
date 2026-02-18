@@ -1277,6 +1277,70 @@ run_smart_recovery() {
     chmod 600 "$config_path"
     [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$config_path" 2>/dev/null
     log_recovery "Emergency config written to $config_path"
+    
+    # Create auth-profiles.json for safe-mode agent
+    # OpenClaw looks for API keys in per-agent auth-profiles.json, not just env vars
+    local state_dir="${OPENCLAW_STATE_DIR:-${home}/.openclaw}"
+    [ -n "${GROUP:-}" ] && state_dir="${home}/.openclaw-sessions/${GROUP}"
+    local auth_dir="${state_dir}/agents/safe-mode/agent"
+    mkdir -p "$auth_dir" 2>/dev/null || true
+    
+    # Generate auth-profiles.json based on provider
+    local auth_profiles
+    case "$provider" in
+      google)
+        auth_profiles=$(cat <<AUTHEOF
+{
+  "version": 1,
+  "profiles": {
+    "google:default": {
+      "type": "api_key",
+      "provider": "google",
+      "token": "${api_key}"
+    }
+  }
+}
+AUTHEOF
+)
+        ;;
+      anthropic)
+        auth_profiles=$(cat <<AUTHEOF
+{
+  "version": 1,
+  "profiles": {
+    "anthropic:default": {
+      "type": "api_key",
+      "provider": "anthropic",
+      "token": "${api_key}"
+    }
+  }
+}
+AUTHEOF
+)
+        ;;
+      openai)
+        auth_profiles=$(cat <<AUTHEOF
+{
+  "version": 1,
+  "profiles": {
+    "openai:default": {
+      "type": "api_key",
+      "provider": "openai",
+      "token": "${api_key}"
+    }
+  }
+}
+AUTHEOF
+)
+        ;;
+    esac
+    
+    if [ -n "$auth_profiles" ]; then
+      echo "$auth_profiles" > "${auth_dir}/auth-profiles.json"
+      chmod 600 "${auth_dir}/auth-profiles.json"
+      [ -n "${USERNAME:-}" ] && chown -R "${USERNAME}:${USERNAME}" "${state_dir}/agents" 2>/dev/null
+      log_recovery "Created auth-profiles.json at ${auth_dir}/auth-profiles.json"
+    fi
   else
     log_recovery "DRY_RUN: Would write config to $config_path"
   fi
