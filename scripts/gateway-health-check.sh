@@ -121,11 +121,14 @@ MAX_RECOVERY_ATTEMPTS=2
 if [ -n "$GROUP" ]; then
   RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts-${GROUP}"
   SAFE_MODE_FILE="/var/lib/init-status/safe-mode-${GROUP}"
-  CONFIG_PATH="$H/.openclaw-sessions/${GROUP}/openclaw.session.json"
+  # Use OPENCLAW_CONFIG_PATH from systemd environment if set, otherwise construct it
+  # The systemd service sets this to /etc/systemd/system/${GROUP}/openclaw.session.json
+  # which is the ACTUAL config path the gateway uses
+  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$H/.openclaw-sessions/${GROUP}/openclaw.session.json}"
 else
   RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts"
   SAFE_MODE_FILE="/var/lib/init-status/safe-mode"
-  CONFIG_PATH="$H/.openclaw/openclaw.json"
+  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$H/.openclaw/openclaw.json}"
 fi
 
 ALREADY_IN_SAFE_MODE=false
