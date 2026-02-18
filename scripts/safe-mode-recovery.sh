@@ -252,8 +252,15 @@ validate_api_key() {
   
   case "$provider" in
     anthropic)
+      # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
+      local auth_header
+      if [[ "$key" == sk-ant-oat* ]]; then
+        auth_header="Authorization: Bearer ${key}"
+      else
+        auth_header="x-api-key: ${key}"
+      fi
       response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-        -H "x-api-key: ${key}" \
+        -H "$auth_header" \
         -H "anthropic-version: 2023-06-01" \
         -H "content-type: application/json" \
         -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \

@@ -231,8 +231,15 @@ check_api_key_validity() {
     
     if [ -n "$cfg_anthropic" ]; then
       local response
+      local auth_header
+      # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
+      if [[ "$cfg_anthropic" == sk-ant-oat* ]]; then
+        auth_header="Authorization: Bearer ${cfg_anthropic}"
+      else
+        auth_header="x-api-key: ${cfg_anthropic}"
+      fi
       response=$(curl -sf --max-time 5 \
-        -H "x-api-key: ${cfg_anthropic}" \
+        -H "$auth_header" \
         -H "anthropic-version: 2023-06-01" \
         "https://api.anthropic.com/v1/models" 2>&1)
       if [ $? -eq 0 ]; then
@@ -267,8 +274,19 @@ check_api_key_validity() {
   # Direct API validation from env vars
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     local response
+    local auth_header
+    
+    # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
+    # OAuth tokens use Authorization: Bearer, API keys use x-api-key
+    if [[ "${ANTHROPIC_API_KEY}" == sk-ant-oat* ]]; then
+      log "  Anthropic: detected OAuth token (oat), using Bearer auth"
+      auth_header="Authorization: Bearer ${ANTHROPIC_API_KEY}"
+    else
+      auth_header="x-api-key: ${ANTHROPIC_API_KEY}"
+    fi
+    
     response=$(curl -sf --max-time 5 \
-      -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+      -H "$auth_header" \
       -H "anthropic-version: 2023-06-01" \
       -H "content-type: application/json" \
       -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
