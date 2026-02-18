@@ -675,11 +675,20 @@ SAFEMD
   done
   
   # Stop isolation services if running
-  if [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
-    IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
-    for group in "${GROUP_ARRAY[@]}"; do
-      systemctl stop "openclaw-${group}.service" 2>/dev/null || true
-    done
+  # In per-group mode (GROUP set), only stop this group's service
+  # In all-groups mode (GROUP not set), stop all services (legacy)
+  if [ "$ISOLATION" = "session" ]; then
+    if [ -n "${GROUP:-}" ]; then
+      # Per-group mode: only stop this group's service
+      log "Stopping session service for group: $GROUP"
+      systemctl stop "openclaw-${GROUP}.service" 2>/dev/null || true
+    elif [ -n "$SESSION_GROUPS" ]; then
+      # Legacy all-groups mode: stop all services
+      IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+      for group in "${GROUP_ARRAY[@]}"; do
+        systemctl stop "openclaw-${group}.service" 2>/dev/null || true
+      done
+    fi
   elif [ "$ISOLATION" = "container" ]; then
     systemctl stop openclaw-containers.service 2>/dev/null || true
   fi
@@ -692,13 +701,62 @@ SAFEMD
 }
 
 restart_gateway() {
-  log "Restarting clawdbot with safe mode config..."
-  systemctl restart clawdbot
-  sleep 5
+  local target_service=""
+  local service_description=""
   
+  # Determine which service to restart based on isolation mode
+  if [ "$ISOLATION" = "session" ]; then
+    if [ -n "${GROUP:-}" ]; then
+      # Per-group mode: restart only this group's service
+      target_service="openclaw-${GROUP}.service"
+      service_description="session service ($GROUP)"
+    elif [ -n "$SESSION_GROUPS" ]; then
+      # Legacy all-groups mode: restart all session services
+      target_service="all-session-services"
+      service_description="all session services"
+    fi
+  elif [ "$ISOLATION" = "container" ]; then
+    target_service="openclaw-containers.service"
+    service_description="container service"
+  else
+    target_service="clawdbot"
+    service_description="clawdbot"
+  fi
+  
+  log "Restarting $service_description with safe mode config..."
+  
+  # Restart the appropriate service(s)
+  if [ "$target_service" = "all-session-services" ]; then
+    IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+    for group in "${GROUP_ARRAY[@]}"; do
+      systemctl restart "openclaw-${group}.service" 2>/dev/null || true
+    done
+    sleep 5
+  else
+    systemctl restart "$target_service"
+    sleep 5
+  fi
+  
+  # Verify service started
   for attempt in 1 2 3; do
-    if systemctl is-active --quiet clawdbot; then
-      log "Clawdbot started (attempt $attempt)"
+    local is_active=false
+    
+    if [ "$target_service" = "all-session-services" ]; then
+      # Check if any session service is active
+      is_active=true
+      IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+      for group in "${GROUP_ARRAY[@]}"; do
+        if ! systemctl is-active --quiet "openclaw-${group}.service"; then
+          is_active=false
+          break
+        fi
+      done
+    else
+      systemctl is-active --quiet "$target_service" && is_active=true
+    fi
+    
+    if [ "$is_active" = "true" ]; then
+      log "$service_description started (attempt $attempt)"
       
       # Rename bots
       /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || true
@@ -709,13 +767,28 @@ restart_gateway() {
       
       return 0
     fi
-    log "Clawdbot not active, retry $attempt/3..."
-    systemctl restart clawdbot
+    
+    log "$service_description not active, retry $attempt/3..."
+    
+    if [ "$target_service" = "all-session-services" ]; then
+      IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+      for group in "${GROUP_ARRAY[@]}"; do
+        systemctl restart "openclaw-${group}.service" 2>/dev/null || true
+      done
+    else
+      systemctl restart "$target_service"
+    fi
     sleep 5
   done
   
-  log "CRITICAL: Clawdbot failed to start"
-  touch /var/lib/init-status/gateway-failed
+  log "CRITICAL: $service_description failed to start"
+  
+  # Mark failure with group suffix if in per-group mode
+  if [ -n "${GROUP:-}" ]; then
+    touch "/var/lib/init-status/gateway-failed-${GROUP}"
+  else
+    touch /var/lib/init-status/gateway-failed
+  fi
   echo '13' > /var/lib/init-status/stage
   return 1
 }
