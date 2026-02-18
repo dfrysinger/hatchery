@@ -971,7 +971,7 @@ generate_emergency_config() {
   },
   "gateway": {
     "mode": "local",
-    "port": 18789,
+    "port": ${GROUP_PORT:-18789},
     "bind": "lan",
     "auth": {
       "mode": "token",
