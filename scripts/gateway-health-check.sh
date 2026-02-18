@@ -1169,6 +1169,16 @@ send_boot_notification() {
       log "  BOOT_REPORT.md created at $H/clawd/agents/safe-mode/BOOT_REPORT.md"
       
       # Trigger SafeModeBot intro via openclaw agent
+      # NOTE: In session isolation mode, session configs don't have a safe-mode agent,
+      # so we skip the LLM-powered intro and rely on the direct notification already sent.
+      if [ "$ISOLATION" = "session" ]; then
+        log "========== SAFE MODE BOT INTRO (SKIPPED) =========="
+        log "  Session isolation mode: SafeModeBot intro not available"
+        log "  (Session configs only contain group agents, no safe-mode agent)"
+        log "  User has been notified via direct Telegram/Discord API"
+        return 0
+      fi
+      
       log "========== SAFE MODE BOT INTRO =========="
       log "  SafeModeBot will introduce itself and provide diagnostics"
       log "  Delivery: channel=$send_platform, owner=$owner_id"
