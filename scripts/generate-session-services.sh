@@ -259,7 +259,7 @@ Wants=desktop.service
 Type=simple
 User=${SVC_USER}
 WorkingDirectory=${HOME_DIR}
-ExecStart=/usr/local/bin/openclaw gateway --bind lan --port ${port}
+ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port ${port}
 ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 Restart=on-failure
 RestartSec=10
