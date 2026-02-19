@@ -231,7 +231,7 @@ EOF
   
   if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
     source "$REPO_DIR/scripts/generate-boot-report.sh"
-    export CLAWDBOT_LOG="$TEST_TMPDIR/openclaw.log"
+    export OPENCLAW_LOG="$TEST_TMPDIR/openclaw.log"
     
     result=$(detect_component_failures)
     if [[ "$result" == *"telegram"* ]] && [[ "$result" == *"default"* ]] && [[ "$result" == *"404"* ]]; then
@@ -258,7 +258,7 @@ EOF
   
   if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
     source "$REPO_DIR/scripts/generate-boot-report.sh"
-    export CLAWDBOT_LOG="$TEST_TMPDIR/openclaw.log"
+    export OPENCLAW_LOG="$TEST_TMPDIR/openclaw.log"
     
     result=$(detect_successful_components)
     if [[ "$result" == *"agent2"* ]] && [[ "$result" == *"WorkingBot"* ]]; then
@@ -292,7 +292,7 @@ EOF
   
   if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
     source "$REPO_DIR/scripts/generate-boot-report.sh"
-    export CLAWDBOT_LOG="$TEST_TMPDIR/openclaw.log"
+    export OPENCLAW_LOG="$TEST_TMPDIR/openclaw.log"
     
     mock_validate_telegram_token() {
       case "$1" in

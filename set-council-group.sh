@@ -155,7 +155,7 @@ sleep 3
 
 # Verify service started successfully
 if systemctl is-active --quiet openclaw; then
-  echo "$MSG. Clawdbot restarted."
+  echo "$MSG. OpenClaw restarted."
 else
   echo "Restart failed, restoring backup" >&2
   cp "$CFG.bak" "$CFG"

@@ -30,7 +30,7 @@ SEND_DISCORD_FN="${SEND_DISCORD_FN:-send_discord_real}"
 # Paths (can be overridden for testing)
 HABITAT_JSON_PATH="${HABITAT_JSON_PATH:-/etc/habitat.json}"
 HABITAT_ENV_PATH="${HABITAT_ENV_PATH:-/etc/habitat-parsed.env}"
-CLAWDBOT_LOG="${CLAWDBOT_LOG:-/var/log/openclaw.log}"
+OPENCLAW_LOG="${OPENCLAW_LOG:-/var/log/openclaw.log}"
 HOME_DIR="${HOME_DIR:-/home/${USERNAME:-bot}}"
 
 # =============================================================================
@@ -177,7 +177,7 @@ designate_coordinator() {
 
 # Detect component failures from logs
 detect_component_failures() {
-  local log_file="${CLAWDBOT_LOG:-/var/log/openclaw.log}"
+  local log_file="${OPENCLAW_LOG:-/var/log/openclaw.log}"
   local failures=""
   
   if [ -f "$log_file" ]; then
@@ -204,7 +204,7 @@ detect_component_failures() {
 
 # Detect successful components from logs
 detect_successful_components() {
-  local log_file="${CLAWDBOT_LOG:-/var/log/openclaw.log}"
+  local log_file="${OPENCLAW_LOG:-/var/log/openclaw.log}"
   local successes=""
   
   if [ -f "$log_file" ]; then

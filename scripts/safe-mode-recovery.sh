@@ -890,6 +890,8 @@ EOF
 }
 
 # Generate emergency OpenClaw config with working credentials
+# SCHEMA NOTE: Emergency config structure must match build-full-config.sh
+# Update both files when OpenClaw config schema changes.
 # Uses bind=lan (not local) because:
 #   - iOS Shortcut API needs to reach the gateway from the LAN
 #   - Safe mode still needs config apply/health check endpoints accessible
