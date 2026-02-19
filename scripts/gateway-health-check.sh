@@ -5,6 +5,7 @@
 
 # Source permission utilities
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
+[ -f /usr/local/sbin/lib-auth.sh ] && source /usr/local/sbin/lib-auth.sh
 # Purpose:  Validates gateway health after any restart. If unhealthy, triggers
 #           safe mode recovery. Called by:
 #           - post-boot-check.sh (at system boot)

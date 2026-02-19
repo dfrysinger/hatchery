@@ -1,5 +1,6 @@
 #!/bin/bash
 # test-auth-headers.sh - Verify correct auth headers for different credential types
+source "$(dirname "$0")/test-helpers.sh"
 #
 # Tests that:
 # - Anthropic API keys (sk-ant-api*) use x-api-key header
@@ -13,22 +14,8 @@ TEST_PASSED=0
 TEST_FAILED=0
 
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
 
-pass() {
-  echo -e "${GREEN}✓ PASS${NC}: $1"
-  TEST_PASSED=$((TEST_PASSED + 1))
-}
 
-fail() {
-  echo -e "${RED}✗ FAIL${NC}: $1"
-  echo -e "  Expected: $2"
-  echo -e "  Got:      $3"
-  TEST_FAILED=$((TEST_FAILED + 1))
-}
 
 section() {
   echo ""
@@ -36,26 +23,17 @@ section() {
 }
 
 # =============================================================================
-# Test helper: Extract auth header logic from gateway-health-check.sh
+# Source actual auth functions from lib-auth.sh (not reimplementations)
 # =============================================================================
+source "$REPO_DIR/scripts/lib-auth.sh"
 
-# Simulates the Anthropic auth header selection logic
-get_anthropic_auth_header() {
-  local key="$1"
-  if [[ "$key" == sk-ant-oat* ]]; then
-    echo "Authorization: Bearer ${key}"
-  else
-    echo "x-api-key: ${key}"
-  fi
-}
-
-# Simulates the OpenAI auth header (always Bearer)
+# OpenAI auth header (always Bearer) — not in lib-auth.sh yet, simple enough inline
 get_openai_auth_header() {
   local key="$1"
   echo "Authorization: Bearer ${key}"
 }
 
-# Simulates the Google auth method
+# Google auth method — not in lib-auth.sh yet
 get_google_auth_method() {
   local key="$1"
   local is_oauth="${2:-false}"

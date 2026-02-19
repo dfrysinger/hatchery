@@ -1,5 +1,6 @@
 #!/bin/bash
 # =============================================================================
+source "$(dirname "$0")/test-helpers.sh"
 # test-health-check-e2e-fixes.sh -- Regression tests for E2E health check fixes
 # =============================================================================
 # Tests for bugs found during safe mode E2E testing (2026-02-19)
@@ -12,22 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTS_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_DIR="$(dirname "$TESTS_DIR")"
 
-PASSED=0
-FAILED=0
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
 
-pass() {
-  echo -e "${GREEN}✓${NC} $1"
-  PASSED=$((PASSED + 1))
-}
 
-fail() {
-  echo -e "${RED}✗${NC} $1"
-  FAILED=$((FAILED + 1))
-}
 
 HEALTH_CHECK="$REPO_DIR/scripts/gateway-health-check.sh"
 BUILD_CONFIG="$REPO_DIR/scripts/build-full-config.sh"

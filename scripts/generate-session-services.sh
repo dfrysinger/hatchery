@@ -5,6 +5,11 @@
 
 # Source permission utilities
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
+# Fallback if lib-permissions.sh unavailable
+if ! type ensure_bot_dir &>/dev/null; then
+  ensure_bot_dir() { mkdir -p "$1" && chmod "${2:-755}" "$1"; }
+  ensure_bot_file() { touch "$1" && chmod "${2:-644}" "$1"; }
+fi
 # Purpose:  For session isolation mode, generates one systemd service per
 #           isolation group, each running its own OpenClaw gateway instance
 #           on a unique port with only that group's agents.
@@ -110,12 +115,7 @@ echo "Generating session services for ${#SESSION_GROUPS[@]} group(s)..."
 # --- Generate per-group service and config ---
 # Ensure parent state directory exists and is owned by service user
 STATE_BASE="${HOME_DIR}/.openclaw-sessions"
-if type ensure_bot_dir &>/dev/null; then
-  ensure_bot_dir "$STATE_BASE" 700
-else
-  mkdir -p "$STATE_BASE"
-  [ -z "${DRY_RUN:-}" ] && chown "${SVC_USER}:${SVC_USER}" "$STATE_BASE" && chmod 700 "$STATE_BASE"
-fi
+ensure_bot_dir "$STATE_BASE" 700
 
 group_index=0
 for group in "${SESSION_GROUPS[@]}"; do
@@ -124,16 +124,8 @@ for group in "${SESSION_GROUPS[@]}"; do
     state_dir="${STATE_BASE}/${group}"
     
     # Create directories with proper ownership
-    if type ensure_bot_dir &>/dev/null; then
-      ensure_bot_dir "$state_dir" 700
-      # Config dir needs 755 for systemd to read
-      mkdir -p "$group_dir" && chmod 755 "$group_dir"
-    else
-      mkdir -p "$group_dir"
-      mkdir -p "$state_dir"
-      [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 700 "$state_dir"
-      chmod 755 "$group_dir"
-    fi
+    ensure_bot_dir "$state_dir" 700
+    mkdir -p "$group_dir" && chmod 755 "$group_dir"
 
     # Collect agents for this group
     agent_list_json="["
@@ -164,11 +156,7 @@ for group in "${SESSION_GROUPS[@]}"; do
             agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\"}"
             
             # Create agent directory structure (OpenClaw will create sessions/ inside)
-            if type ensure_bot_dir &>/dev/null; then
-              ensure_bot_dir "${state_dir}/agents/agent${i}/agent" 700
-            else
-              mkdir -p "${state_dir}/agents/agent${i}/agent"
-            fi
+            ensure_bot_dir "${state_dir}/agents/agent${i}/agent" 700
             
             # Copy auth-profiles.json from main agent directory if it exists
             main_auth="${HOME_DIR}/.openclaw/agents/agent${i}/agent/auth-profiles.json"

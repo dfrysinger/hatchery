@@ -25,9 +25,24 @@ SAFE_MODE_DIR="$HOME_DIR/clawd/agents/safe-mode"
 # Create directory structure
 mkdir -p "$SAFE_MODE_DIR/memory"
 
+# Template directory (installed alongside scripts)
+TEMPLATE_DIR="${TEMPLATE_DIR:-/usr/local/share/hatchery/templates/safe-mode}"
+
+# Helper: copy template file, or fall back to heredoc
+copy_template() {
+  local name="$1"
+  local dest="$2"
+  if [ -f "$TEMPLATE_DIR/$name" ]; then
+    cp "$TEMPLATE_DIR/$name" "$dest"
+    return 0
+  fi
+  return 1  # caller should use heredoc fallback
+}
+
 # -----------------------------------------------------------------------------
 # IDENTITY.md - Who is this bot?
 # -----------------------------------------------------------------------------
+copy_template "IDENTITY.md" "$SAFE_MODE_DIR/IDENTITY.md" || \
 cat > "$SAFE_MODE_DIR/IDENTITY.md" << 'IDENTITY_EOF'
 # Safe Mode Recovery Bot
 
@@ -83,6 +98,7 @@ IDENTITY_EOF
 # -----------------------------------------------------------------------------
 # SOUL.md - Personality and tone
 # -----------------------------------------------------------------------------
+copy_template "SOUL.md" "$SAFE_MODE_DIR/SOUL.md" || \
 cat > "$SAFE_MODE_DIR/SOUL.md" << 'SOUL_EOF'
 You are calm, competent, and focused on getting things working again.
 
@@ -111,6 +127,7 @@ SOUL_EOF
 # -----------------------------------------------------------------------------
 # AGENTS.md - Operating instructions
 # -----------------------------------------------------------------------------
+copy_template "AGENTS.md" "$SAFE_MODE_DIR/AGENTS.md" || \
 cat > "$SAFE_MODE_DIR/AGENTS.md" << 'AGENTS_EOF'
 # Safe Mode Agent Instructions
 
