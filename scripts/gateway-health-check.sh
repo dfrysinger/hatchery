@@ -33,9 +33,8 @@ else
   LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
 fi
 
-# Security: restrict log file permissions (diagnostic context, no secrets)
-umask 077
-touch "$LOG" && chmod 600 "$LOG" 2>/dev/null || true
+# Log file readable by bot user (diagnostic context, no secrets)
+touch "$LOG" && chmod 644 "$LOG" 2>/dev/null || true
 
 log() {
   local msg="$(date -u +%Y-%m-%dT%H:%M:%SZ) [$RUN_ID] $*"
