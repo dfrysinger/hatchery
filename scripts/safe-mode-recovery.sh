@@ -316,14 +316,24 @@ validate_api_key() {
 VALIDATION_REASON=""
 FOUND_TOKEN_RESULT=""
 
-# Find a working Telegram token from all agents
+# Find a working Telegram token from agents in current GROUP (or all if no GROUP)
 # Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
 # Side effect: populates DIAG_TELEGRAM_RESULTS
 find_working_telegram_token() {
   local count="${AGENT_COUNT:-0}"
+  local current_group="${GROUP:-}"
   FOUND_TOKEN_RESULT=""
   
   for i in $(seq 1 "$count"); do
+    # If GROUP is set (session isolation), only consider agents in this group
+    if [ -n "$current_group" ]; then
+      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
+      local agent_group="${!agent_group_var:-}"
+      if [ "$agent_group" != "$current_group" ]; then
+        continue  # Skip agents not in this group
+      fi
+    fi
+    
     local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
     local token="${!token_var:-}"
     
@@ -349,14 +359,24 @@ find_working_telegram_token() {
   return 1
 }
 
-# Find a working Discord token from all agents
+# Find a working Discord token from agents in current GROUP (or all if no GROUP)
 # Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
 # Side effect: populates DIAG_DISCORD_RESULTS
 find_working_discord_token() {
   local count="${AGENT_COUNT:-0}"
+  local current_group="${GROUP:-}"
   FOUND_TOKEN_RESULT=""
   
   for i in $(seq 1 "$count"); do
+    # If GROUP is set (session isolation), only consider agents in this group
+    if [ -n "$current_group" ]; then
+      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
+      local agent_group="${!agent_group_var:-}"
+      if [ "$agent_group" != "$current_group" ]; then
+        continue  # Skip agents not in this group
+      fi
+    fi
+    
     local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
     local token="${!token_var:-}"
     
