@@ -622,26 +622,61 @@ check_agents_e2e() {
 check_service_health() {
   local service="$1"
   local port="$2"
-  local max_attempts="${3:-6}"
-  
-  log "Health check: $service on port $port"
-  
-  for i in $(seq 1 $max_attempts); do
+  local max_attempts="${3:-12}"
+  local hard_max_seconds="${HEALTH_CHECK_HARD_MAX_SECS:-300}"  # 5 min absolute ceiling
+  local warn_after_seconds="${HEALTH_CHECK_WARN_SECS:-120}"    # "still waiting" at 2 min
+  local start_time
+  start_time=$(date +%s)
+  local warned=false
+
+  log "Health check: $service on port $port (max_attempts=$max_attempts, hard_max=${hard_max_seconds}s)"
+
+  local attempt=0
+  while true; do
+    attempt=$((attempt + 1))
     sleep 5
-    
-    # Skip is-active check in execstartpost mode - service is "activating" not "active"
-    # while ExecStartPost is running, so this check would always fail
-    if [ "$RUN_MODE" != "execstartpost" ]; then
+
+    local elapsed=$(( $(date +%s) - start_time ))
+
+    # Hard ceiling: give up no matter what
+    if [ "$elapsed" -ge "$hard_max_seconds" ]; then
+      log "  FAILED: hard timeout after ${elapsed}s"
+      return 1
+    fi
+
+    # "Still waiting" warning at 2 min mark
+    if [ "$warned" = "false" ] && [ "$elapsed" -ge "$warn_after_seconds" ]; then
+      warned=true
+      log "  WARNING: gateway still not ready after ${elapsed}s — process alive, continuing..."
+      send_still_waiting_notification "$elapsed"
+    fi
+
+    # Check if gateway process is alive (in execstartpost mode, the service
+    # is "activating" not "active", so check the actual process instead)
+    if [ "$RUN_MODE" = "execstartpost" ]; then
+      # Check if the openclaw process on our port is still running
+      if ! pgrep -f "openclaw gateway.*--port ${port}" >/dev/null 2>&1 && \
+         ! pgrep -f "openclaw gateway" >/dev/null 2>&1; then
+        log "  FAILED: gateway process died (attempt $attempt, ${elapsed}s elapsed)"
+        return 1
+      fi
+    else
       if ! systemctl is-active --quiet "$service"; then
-        log "  attempt $i/$max_attempts: service not active"
+        log "  attempt $attempt: service not active (${elapsed}s elapsed)"
+        # Process is dead — fail fast
+        if [ "$attempt" -ge 3 ]; then
+          log "  FAILED: service not active after $attempt attempts"
+          return 1
+        fi
         continue
       fi
     fi
-    
+
+    # Process is alive — try HTTP
     if curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
-      log "  HTTP gateway responding"
+      log "  HTTP gateway responding (after ${elapsed}s)"
       sleep 3
-      
+
       # In safe mode, use simple token/API validation (safe mode config is minimal)
       # In normal mode, use full end-to-end agent check
       if [ -f "$SAFE_MODE_FILE" ]; then
@@ -669,11 +704,15 @@ check_service_health() {
         fi
       fi
     fi
-    log "  attempt $i/$max_attempts: HTTP not responding"
+
+    # HTTP not responding but process alive — keep going past max_attempts
+    if [ "$attempt" -le "$max_attempts" ]; then
+      log "  attempt $attempt/$max_attempts: HTTP not responding (process alive, ${elapsed}s)"
+    else
+      # Past nominal max but process is alive — adaptive extension
+      log "  attempt $attempt (extended): HTTP not responding (process alive, ${elapsed}s)"
+    fi
   done
-  
-  log "  FAILED after $max_attempts attempts"
-  return 1
 }
 
 # =============================================================================
@@ -919,8 +958,10 @@ restart_gateway() {
 # =============================================================================
 
 # Wait for gateway to fully initialize
-# Total health check budget: 45s settle + 12 attempts × 5s = 105s
-# OpenClaw gateway can take 60-90s to start (config migration, provider init)
+# Settle time before polling. After this, adaptive polling begins:
+# - If gateway process is alive, keep polling up to hard max (5 min)
+# - If gateway process dies, fail immediately
+# - At 2 min mark, send "still waiting" notification to user
 log "Waiting 45s for gateway to settle..."
 sleep 45
 
@@ -1081,6 +1122,55 @@ send_discord_notification() {
     -H "Content-Type: application/json" \
     -X POST "https://discord.com/api/v10/channels/${dm_channel}/messages" \
     -d "{\"content\": $(echo "$discord_msg" | jq -Rs .)}" >> "$LOG" 2>&1
+}
+
+# Send "still waiting" notification when gateway is slow but process is alive
+# Lets user know something is happening (not silent failure)
+send_still_waiting_notification() {
+  local elapsed="${1:-unknown}"
+  local habitat_name="${HABITAT_NAME:-Droplet}"
+  local message="⏳ <b>[${habitat_name}] Gateway slow to start</b>
+
+Health check has been waiting ${elapsed}s. The gateway process is still alive — continuing to wait.
+
+This is usually caused by config migration or slow provider initialization. No action needed yet."
+
+  log "  Sending still-waiting notification"
+
+  # Try env-var tokens (config may not be readable yet during startup)
+  local platform="" token=""
+  for i in $(seq 1 "${AGENT_COUNT:-4}"); do
+    local tg_var="AGENT${i}_TELEGRAM_TOKEN"
+    if [ -n "${!tg_var:-}" ]; then
+      token="${!tg_var}"; platform="telegram"; break
+    fi
+  done
+  if [ -z "$token" ]; then
+    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
+      local dc_var="AGENT${i}_DISCORD_TOKEN"
+      if [ -n "${!dc_var:-}" ]; then
+        token="${!dc_var}"; platform="discord"; break
+      fi
+    done
+  fi
+
+  if [ -z "$token" ]; then
+    log "  No token available for still-waiting notification"
+    return 0  # Non-fatal
+  fi
+
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform")
+  if [ -z "$owner_id" ]; then
+    log "  No owner ID for $platform — skipping still-waiting notification"
+    return 0
+  fi
+
+  if [ "$platform" = "telegram" ]; then
+    send_telegram_notification "$token" "$owner_id" "$message"
+  elif [ "$platform" = "discord" ]; then
+    send_discord_notification "$token" "$owner_id" "$message"
+  fi
 }
 
 # Send warning BEFORE entering safe mode (uses token from recovery config)
