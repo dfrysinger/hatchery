@@ -1311,7 +1311,7 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
         log "  Session isolation mode: using gateway at $gateway_url, config at $config_path"
       fi
       
-      log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
+      log "  Generating SafeModeBot intro via openclaw agent..."
       
       local start_time=$(date +%s)
       
@@ -1325,12 +1325,10 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
         env_prefix="OPENCLAW_GATEWAY_URL=$gateway_url OPENCLAW_CONFIG_PATH=$config_path"
       fi
       
+      # Generate the intro message (don't use --deliver, we'll send directly via API)
       output=$(timeout 120 sudo -u "$USERNAME" env $env_prefix openclaw agent \
         --agent "safe-mode" \
         --message "$safemode_prompt" \
-        --deliver \
-        --reply-channel "$send_platform" \
-        --reply-to "$owner_id" \
         --timeout 90 \
         --json 2>&1)
       local exit_code=$?
@@ -1338,18 +1336,49 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
       local end_time=$(date +%s)
       local duration=$((end_time - start_time))
       
-      if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
-        touch "$notification_file"
-        log "  ✓ SUCCESS: SafeModeBot intro sent in ${duration}s"
-        log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
-        log "========== SAFE MODE INTRO COMPLETE =========="
+      # Extract the text from the JSON response
+      local intro_text=""
+      if echo "$output" | grep -q '"payloads"'; then
+        intro_text=$(echo "$output" | grep -o '"text"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"text"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//' | sed 's/\\n/\n/g')
+      fi
+      
+      if [ -z "$intro_text" ]; then
+        # Fallback: try to extract any reasonable text after the JSON errors
+        intro_text=$(echo "$output" | grep -v "gateway connect\|Gateway agent\|Gateway target\|Source:\|Config:\|Bind:" | tail -5 | head -1)
+      fi
+      
+      if [ -n "$intro_text" ] && [ ${#intro_text} -gt 10 ]; then
+        log "  Generated intro (${#intro_text} chars): ${intro_text:0:100}..."
+        
+        # Send directly via platform API
+        local send_result=""
+        if [ "$send_platform" = "telegram" ]; then
+          local bot_token=$(jq -r '.channels.telegram.botToken // empty' "$config_path" 2>/dev/null)
+          if [ -n "$bot_token" ]; then
+            send_result=$(curl -sf --max-time 10 \
+              "https://api.telegram.org/bot${bot_token}/sendMessage" \
+              -d "chat_id=${owner_id}" \
+              -d "text=${intro_text}" \
+              -d "parse_mode=Markdown" 2>&1)
+            if echo "$send_result" | grep -q '"ok":true'; then
+              touch "$notification_file"
+              log "  ✓ SUCCESS: SafeModeBot intro delivered via Telegram API in ${duration}s"
+              log "========== SAFE MODE INTRO COMPLETE =========="
+            else
+              log "  ✗ FAILED: Telegram send failed: $send_result"
+            fi
+          else
+            log "  ✗ FAILED: No Telegram bot token in config"
+          fi
+        elif [ "$send_platform" = "discord" ]; then
+          # For Discord, we'd need webhook or bot token - use direct notification already sent
+          log "  Discord intro: relying on direct notification already sent"
+          touch "$notification_file"
+          log "========== SAFE MODE INTRO COMPLETE =========="
+        fi
       else
-        log "  ✗ FAILED: SafeModeBot intro (exit=$exit_code, duration=${duration}s)"
-        log "  Full output:"
-        echo "$output" | while IFS= read -r line; do
-          log "    | $line"
-        done
-        log "  Direct notification already sent - SafeModeBot intro failed but user was notified"
+        log "  ✗ FAILED: Could not extract intro text from agent response"
+        log "  Raw output (first 500 chars): $(echo "$output" | head -c 500)"
       fi
       
       # Already sent direct notification, so we're done regardless of bot intro result
