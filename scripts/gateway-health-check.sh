@@ -785,23 +785,29 @@ SAFEMD
     fi
   done
   
-  # Stop isolation services if running
-  # In per-group mode (GROUP set), only stop this group's service
-  # In all-groups mode (GROUP not set), stop all services (legacy)
-  if [ "$ISOLATION" = "session" ]; then
-    if [ -n "${GROUP:-}" ]; then
-      # Per-group mode: only stop this group's service
-      log "Stopping session service for group: $GROUP"
+  # Stop the gateway service for this group
+  # Universal: use GROUP if set, otherwise fall back to isolation-specific service
+  if [ -n "${GROUP:-}" ]; then
+    if [ "$ISOLATION" = "container" ]; then
+      # Inside container: kill the gateway process directly
+      log "Stopping gateway process in container (group: $GROUP)"
+      pkill -f "openclaw gateway" 2>/dev/null || true
+      # Also try docker stop from host context if available
+      docker stop "openclaw-${GROUP}" 2>/dev/null || true
+    else
+      # Session or standard with GROUP: stop the systemd service
+      log "Stopping service for group: $GROUP"
       systemctl stop "openclaw-${GROUP}.service" 2>/dev/null || true
-    elif [ -n "$SESSION_GROUPS" ]; then
-      # Legacy all-groups mode: stop all services
-      IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
-      for group in "${GROUP_ARRAY[@]}"; do
-        systemctl stop "openclaw-${group}.service" 2>/dev/null || true
-      done
     fi
-  elif [ "$ISOLATION" = "container" ]; then
-    systemctl stop openclaw-containers.service 2>/dev/null || true
+  elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
+    # Legacy all-groups mode (should not reach here)
+    IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+    for group in "${GROUP_ARRAY[@]}"; do
+      systemctl stop "openclaw-${group}.service" 2>/dev/null || true
+    done
+  else
+    # Standard mode: stop clawdbot
+    systemctl stop clawdbot 2>/dev/null || true
   fi
   
   # Update stages
@@ -815,20 +821,20 @@ restart_gateway() {
   local target_service=""
   local service_description=""
   
-  # Determine which service to restart based on isolation mode
-  if [ "$ISOLATION" = "session" ]; then
-    if [ -n "${GROUP:-}" ]; then
-      # Per-group mode: restart only this group's service
+  # Determine which service to restart
+  # Universal: use GROUP if set, otherwise fall back to isolation-specific service
+  if [ -n "${GROUP:-}" ]; then
+    if [ "$ISOLATION" = "container" ]; then
+      target_service="docker:openclaw-${GROUP}"
+      service_description="container ($GROUP)"
+    else
       target_service="openclaw-${GROUP}.service"
-      service_description="session service ($GROUP)"
-    elif [ -n "$SESSION_GROUPS" ]; then
-      # Legacy all-groups mode: restart all session services
-      target_service="all-session-services"
-      service_description="all session services"
+      service_description="service ($GROUP)"
     fi
-  elif [ "$ISOLATION" = "container" ]; then
-    target_service="openclaw-containers.service"
-    service_description="container service"
+  elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
+    # Legacy all-groups mode
+    target_service="all-session-services"
+    service_description="all session services"
   else
     target_service="clawdbot"
     service_description="clawdbot"
@@ -843,6 +849,11 @@ restart_gateway() {
       systemctl restart "openclaw-${group}.service" 2>/dev/null || true
     done
     sleep 5
+  elif [[ "$target_service" == docker:* ]]; then
+    # Container mode: restart via docker
+    local container_name="${target_service#docker:}"
+    docker restart "$container_name" 2>/dev/null || docker-compose restart "$container_name" 2>/dev/null || true
+    sleep 5
   else
     systemctl restart "$target_service"
     sleep 5
@@ -853,7 +864,6 @@ restart_gateway() {
     local is_active=false
     
     if [ "$target_service" = "all-session-services" ]; then
-      # Check if any session service is active
       is_active=true
       IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
       for group in "${GROUP_ARRAY[@]}"; do
@@ -862,6 +872,9 @@ restart_gateway() {
           break
         fi
       done
+    elif [[ "$target_service" == docker:* ]]; then
+      local container_name="${target_service#docker:}"
+      docker inspect --format='{{.State.Running}}' "$container_name" 2>/dev/null | grep -q 'true' && is_active=true
     else
       systemctl is-active --quiet "$target_service" && is_active=true
     fi
@@ -939,7 +952,8 @@ elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
   HEALTHY=$ALL_HEALTHY
 
 elif [ "$ISOLATION" = "container" ]; then
-  log "Container isolation mode"
+  # Container mode without GROUP should not happen — each container runs its own check
+  log "Container isolation mode (no GROUP — legacy fallback)"
   check_service_health "openclaw-containers.service" 18790 6 && HEALTHY=true
 
 else
