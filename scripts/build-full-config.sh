@@ -2,6 +2,9 @@
 # =============================================================================
 # build-full-config.sh -- Generate full openclaw.json with all features
 # =============================================================================
+
+# Source permission utilities (creates dirs with correct ownership)
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  Builds the complete openclaw configuration with multi-agent
 #           support, browser config, auth profiles, skills, council setup,
 #           desktop integration, and all per-agent workspace files
@@ -454,9 +457,14 @@ systemctl daemon-reload
 # This must happen before generate-session-services.sh starts the gateways,
 # otherwise the health check will fail with permission errors when agents
 # try to create .openclaw directories in their workspaces.
-chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
-chmod 700 $H/.openclaw
-chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
+if type fix_bot_permissions &>/dev/null; then
+  fix_bot_permissions "$H"
+else
+  # Fallback if lib-permissions.sh not available
+  chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+  chmod 700 $H/.openclaw
+  chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
+fi
 
 # --- Agent Isolation: wire isolation scripts into pipeline ---
 if [ "$ISOLATION_DEFAULT" = "session" ]; then

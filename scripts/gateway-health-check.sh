@@ -2,6 +2,9 @@
 # =============================================================================
 # gateway-health-check.sh -- Universal gateway health check and safe mode recovery
 # =============================================================================
+
+# Source permission utilities
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  Validates gateway health after any restart. If unhealthy, triggers
 #           safe mode recovery. Called by:
 #           - post-boot-check.sh (at system boot)

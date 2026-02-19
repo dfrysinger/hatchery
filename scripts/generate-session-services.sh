@@ -2,6 +2,9 @@
 # =============================================================================
 # generate-session-services.sh — Generate per-group systemd services
 # =============================================================================
+
+# Source permission utilities
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  For session isolation mode, generates one systemd service per
 #           isolation group, each running its own OpenClaw gateway instance
 #           on a unique port with only that group's agents.

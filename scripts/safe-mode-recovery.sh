@@ -3,6 +3,9 @@
 # =============================================================================
 # safe-mode-recovery.sh -- Smart Safe Mode Recovery
 # =============================================================================
+
+# Source permission utilities
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  When full config fails, intelligently find working credentials
 #           and generate an emergency config to get a bot online.
 #
