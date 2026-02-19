@@ -54,11 +54,11 @@ else
   fail "Should set SERVICE_NAME=openclaw-\${GROUP} when GROUP is set"
 fi
 
-# GROUP not set, standard → service name is clawdbot
-if grep -q 'SERVICE_NAME="clawdbot"' "$HEALTH_CHECK"; then
-  pass "No GROUP → SERVICE_NAME=clawdbot"
+# GROUP not set, standard → service name is openclaw
+if grep -q 'SERVICE_NAME="openclaw"' "$HEALTH_CHECK"; then
+  pass "No GROUP → SERVICE_NAME=openclaw"
 else
-  fail "Should set SERVICE_NAME=clawdbot when GROUP not set"
+  fail "Should set SERVICE_NAME=openclaw when GROUP not set"
 fi
 
 # =============================================================================
@@ -152,7 +152,7 @@ else
 fi
 
 # Standard mode
-if grep -A30 'restart_gateway' "$HEALTH_CHECK" | grep -q 'clawdbot'; then
+if grep -A30 'restart_gateway' "$HEALTH_CHECK" | grep -q 'openclaw'; then
   pass "restart_gateway handles standard mode"
 else
   fail "restart_gateway should handle standard mode"

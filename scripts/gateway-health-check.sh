@@ -9,7 +9,7 @@
 #           safe mode recovery. Called by:
 #           - post-boot-check.sh (at system boot)
 #           - apply-config.sh (after config changes)
-#           - clawdbot.service ExecStartPost (on every restart)
+#           - openclaw.service ExecStartPost (on every restart)
 #
 # Modes:
 #   RUN_MODE=standalone (default): restarts service directly after recovery
@@ -104,7 +104,7 @@ if [ -n "$GROUP" ]; then
   SERVICE_NAME="openclaw-${GROUP}"
   log "Config: GROUP MODE - group=$GROUP port=$GROUP_PORT service=$SERVICE_NAME"
 else
-  SERVICE_NAME="clawdbot"
+  SERVICE_NAME="openclaw"
   log "Config: isolation=$ISOLATION groups=$SESSION_GROUPS agents=$AC"
 fi
 
@@ -806,8 +806,8 @@ SAFEMD
       systemctl stop "openclaw-${group}.service" 2>/dev/null || true
     done
   else
-    # Standard mode: stop clawdbot
-    systemctl stop clawdbot 2>/dev/null || true
+    # Standard mode: stop openclaw
+    systemctl stop openclaw 2>/dev/null || true
   fi
   
   # Update stages
@@ -836,8 +836,8 @@ restart_gateway() {
     target_service="all-session-services"
     service_description="all session services"
   else
-    target_service="clawdbot"
-    service_description="clawdbot"
+    target_service="openclaw"
+    service_description="openclaw"
   fi
   
   log "Restarting $service_description with safe mode config..."
@@ -958,7 +958,7 @@ elif [ "$ISOLATION" = "container" ]; then
 
 else
   log "Standard mode"
-  check_service_health "clawdbot" 18789 6 && HEALTHY=true
+  check_service_health "openclaw" 18789 6 && HEALTHY=true
 fi
 
 # =============================================================================
@@ -1344,7 +1344,7 @@ Read your BOOT_REPORT.md file and reply with:
 
 Keep it to 3-5 sentences. Be helpful, not verbose."
       
-      # In session isolation mode, openclaw agent can't connect to clawdbot (port 18789)
+      # In session isolation mode, openclaw agent can't connect to openclaw (port 18789)
       # because session services use different ports. Set gateway URL to the correct port.
       local gateway_url=""
       local config_path=""
@@ -1407,7 +1407,7 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
 Gateway failed to start after multiple attempts.
 Bot is OFFLINE - no connectivity available.
 
-Check logs: <code>journalctl -u clawdbot -n 50</code>
+Check logs: <code>journalctl -u openclaw -n 50</code>
 See CRITICAL_FAILURE.md for recovery steps."
       ;;
   esac

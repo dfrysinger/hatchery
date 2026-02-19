@@ -186,7 +186,7 @@ test_restart_gateway_session_mode() {
   # Check for session isolation handling
   local has_session_check=false
   local has_group_restart=false
-  local only_restarts_clawdbot=false
+  local only_restarts_openclaw=false
   
   if echo "$restart_fn" | grep -q 'ISOLATION.*=.*session\|session.*ISOLATION'; then
     has_session_check=true
@@ -196,16 +196,16 @@ test_restart_gateway_session_mode() {
     has_group_restart=true
   fi
   
-  # Check if it ONLY restarts clawdbot (the bug)
-  if echo "$restart_fn" | grep -q 'systemctl restart clawdbot' && \
+  # Check if it ONLY restarts openclaw (the bug)
+  if echo "$restart_fn" | grep -q 'systemctl restart openclaw' && \
      ! echo "$restart_fn" | grep -q 'session'; then
-    only_restarts_clawdbot=true
+    only_restarts_openclaw=true
   fi
   
   if [ "$has_session_check" = "true" ] && [ "$has_group_restart" = "true" ]; then
     pass "restart_gateway handles session mode with GROUP-aware restart"
-  elif [ "$only_restarts_clawdbot" = "true" ]; then
-    fail "restart_gateway only restarts clawdbot, ignores session mode" \
+  elif [ "$only_restarts_openclaw" = "true" ]; then
+    fail "restart_gateway only restarts openclaw, ignores session mode" \
          "Should restart openclaw-\${GROUP}.service in session mode"
   elif [ "$has_session_check" = "true" ]; then
     pass "restart_gateway has session mode check"

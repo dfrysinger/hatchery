@@ -78,7 +78,7 @@ OUTPUT="${1:-/tmp/habitat-debug-$(date +%Y%m%d-%H%M%S).txt}"
 
   # Journald entries for openclaw services
   echo "=== Journald: OpenClaw Services (last 50 entries each) ==="
-  for svc in clawdbot openclaw openclaw-browser openclaw-documents; do
+  for svc in openclaw openclaw openclaw-browser openclaw-documents; do
     if systemctl list-units --all | grep -q "$svc"; then
       echo ""
       echo "--- $svc ---"

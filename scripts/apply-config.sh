@@ -4,7 +4,7 @@
 # =============================================================================
 # Purpose:  Reads /etc/habitat.json and /etc/agents.json (if they exist),
 #           exports them as base64 env vars, re-runs parse-habitat.py and
-#           build-full-config.sh, then restarts the clawdbot service.
+#           build-full-config.sh, then restarts the openclaw service.
 #
 # Called by: api-server.py POST /config/apply or /config/upload with apply=true
 #
@@ -77,7 +77,7 @@ echo "Handling service restarts for isolation mode: ${ISOLATION_DEFAULT:-none}"
 systemctl daemon-reload
 
 # Don't start/restart services if phase 2 hasn't completed yet (still in initial boot)
-# Config is saved; clawdbot will start automatically after reboot
+# Config is saved; openclaw will start automatically after reboot
 if [ ! -f /var/lib/init-status/phase2-complete ]; then
     echo "Phase 2 not complete - config saved but skipping service restart"
     echo "OpenClaw will start automatically after the post-install reboot"
@@ -87,9 +87,9 @@ fi
 case "${ISOLATION_DEFAULT:-none}" in
     session)
         echo "Session isolation mode - managing per-group services"
-        # Stop the single clawdbot service if running
-        systemctl stop clawdbot 2>/dev/null || true
-        systemctl disable clawdbot 2>/dev/null || true
+        # Stop the single openclaw service if running
+        systemctl stop openclaw 2>/dev/null || true
+        systemctl disable openclaw 2>/dev/null || true
         
         # Start all openclaw-* group services
         for svc in /etc/systemd/system/openclaw-*.service; do
@@ -103,9 +103,9 @@ case "${ISOLATION_DEFAULT:-none}" in
     
     container)
         echo "Container isolation mode - managing docker-compose"
-        # Stop the single clawdbot service if running
-        systemctl stop clawdbot 2>/dev/null || true
-        systemctl disable clawdbot 2>/dev/null || true
+        # Stop the single openclaw service if running
+        systemctl stop openclaw 2>/dev/null || true
+        systemctl disable openclaw 2>/dev/null || true
         
         # Start containers via docker-compose
         COMPOSE_FILE="/home/${USERNAME:-bot}/docker-compose.yaml"
@@ -118,7 +118,7 @@ case "${ISOLATION_DEFAULT:-none}" in
         ;;
     
     *)
-        echo "Standard mode - restarting clawdbot service"
+        echo "Standard mode - restarting openclaw service"
         # Stop any isolation services that might be running
         for svc in /etc/systemd/system/openclaw-*.service; do
             [ -f "$svc" ] || continue
@@ -127,9 +127,9 @@ case "${ISOLATION_DEFAULT:-none}" in
             systemctl disable "$svc_name" 2>/dev/null || true
         done
         
-        # Restart the single clawdbot service
-        systemctl enable clawdbot 2>/dev/null || true
-        systemctl restart clawdbot
+        # Restart the single openclaw service
+        systemctl enable openclaw 2>/dev/null || true
+        systemctl restart openclaw
         ;;
 esac
 
@@ -153,11 +153,11 @@ case "${ISOLATION_DEFAULT:-none}" in
         docker-compose ps 2>/dev/null || echo "docker-compose status unavailable"
         ;;
     *)
-        if systemctl is-active --quiet clawdbot; then
-            echo "clawdbot service is active"
+        if systemctl is-active --quiet openclaw; then
+            echo "openclaw service is active"
         else
-            echo "WARNING: clawdbot service may not be active"
-            systemctl status clawdbot --no-pager || true
+            echo "WARNING: openclaw service may not be active"
+            systemctl status openclaw --no-pager || true
         fi
         ;;
 esac

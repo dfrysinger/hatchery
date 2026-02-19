@@ -223,7 +223,7 @@ test_detect_telegram_failures() {
   setup_test_env
   
   # Create mock log with Telegram failure
-  cat > "$TEST_TMPDIR/clawdbot.log" <<'EOF'
+  cat > "$TEST_TMPDIR/openclaw.log" <<'EOF'
 2026-02-15T02:10:47Z [telegram] [default] starting provider
 2026-02-15T02:10:48Z [telegram] [default] channel exited: Call to 'getMe' failed! (404: Not Found)
 2026-02-15T02:10:48Z [telegram] [agent2] starting provider (@WorkingBot)
@@ -231,7 +231,7 @@ EOF
   
   if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
     source "$REPO_DIR/scripts/generate-boot-report.sh"
-    export CLAWDBOT_LOG="$TEST_TMPDIR/clawdbot.log"
+    export CLAWDBOT_LOG="$TEST_TMPDIR/openclaw.log"
     
     result=$(detect_component_failures)
     if [[ "$result" == *"telegram"* ]] && [[ "$result" == *"default"* ]] && [[ "$result" == *"404"* ]]; then
@@ -251,14 +251,14 @@ test_detect_telegram_failures
 test_detect_successful_components() {
   setup_test_env
   
-  cat > "$TEST_TMPDIR/clawdbot.log" <<'EOF'
+  cat > "$TEST_TMPDIR/openclaw.log" <<'EOF'
 2026-02-15T02:10:47Z [telegram] [agent2] starting provider (@WorkingBot)
 2026-02-15T02:10:48Z [gateway] listening on port 18789
 EOF
   
   if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
     source "$REPO_DIR/scripts/generate-boot-report.sh"
-    export CLAWDBOT_LOG="$TEST_TMPDIR/clawdbot.log"
+    export CLAWDBOT_LOG="$TEST_TMPDIR/openclaw.log"
     
     result=$(detect_successful_components)
     if [[ "$result" == *"agent2"* ]] && [[ "$result" == *"WorkingBot"* ]]; then
@@ -284,7 +284,7 @@ echo "=== Boot Report Generation Tests ==="
 test_generate_boot_report() {
   setup_test_env
   
-  cat > "$TEST_TMPDIR/clawdbot.log" <<'EOF'
+  cat > "$TEST_TMPDIR/openclaw.log" <<'EOF'
 2026-02-15T02:10:47Z [telegram] [default] starting provider
 2026-02-15T02:10:48Z [telegram] [default] channel exited: Call to 'getMe' failed! (404: Not Found)
 2026-02-15T02:10:48Z [telegram] [agent2] starting provider (@WorkingBot)
@@ -292,7 +292,7 @@ EOF
   
   if [ -f "$REPO_DIR/scripts/generate-boot-report.sh" ]; then
     source "$REPO_DIR/scripts/generate-boot-report.sh"
-    export CLAWDBOT_LOG="$TEST_TMPDIR/clawdbot.log"
+    export CLAWDBOT_LOG="$TEST_TMPDIR/openclaw.log"
     
     mock_validate_telegram_token() {
       case "$1" in

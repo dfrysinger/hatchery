@@ -327,10 +327,10 @@ if [ -z "${DRY_RUN:-}" ]; then
     fi
     systemctl daemon-reload
     
-    # Stop main clawdbot service - session isolation replaces it
-    echo "Stopping main clawdbot service (replaced by session services)..."
-    systemctl stop clawdbot 2>/dev/null || true
-    systemctl disable clawdbot 2>/dev/null || true
+    # Stop main openclaw service - session isolation replaces it
+    echo "Stopping main openclaw service (replaced by session services)..."
+    systemctl stop openclaw 2>/dev/null || true
+    systemctl disable openclaw 2>/dev/null || true
     
     # Check if boot is complete - only START services after boot finishes
     # During initial boot, just ENABLE them; they'll auto-start after reboot

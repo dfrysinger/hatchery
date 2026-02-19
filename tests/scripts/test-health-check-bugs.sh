@@ -140,7 +140,7 @@ else
 fi
 
 # =============================================================================
-# Bug: apply-config.sh starts clawdbot before phase2 (commit 22f0434)
+# Bug: apply-config.sh starts openclaw before phase2 (commit 22f0434)
 # =============================================================================
 echo ""
 echo "=== Bug: apply-config.sh premature start ==="

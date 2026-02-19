@@ -135,10 +135,10 @@ Keep your first message SHORT (3-5 sentences). The user can ask follow-up questi
 openclaw status
 
 # Check service status  
-systemctl status clawdbot
+systemctl status openclaw
 
 # Check recent logs
-journalctl -u clawdbot -n 50 --no-pager
+journalctl -u openclaw -n 50 --no-pager
 
 # Check config
 cat ~/.openclaw/openclaw.json | jq .

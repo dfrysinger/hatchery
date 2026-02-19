@@ -39,7 +39,7 @@ cloud-init
 - **Purpose:** Generates the full `openclaw.json` with multi-agent support, browser, auth profiles, council, per-agent workspace files
 - **Original path:** `/usr/local/sbin/build-full-config.sh`
 - **Inputs:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `~/.openclaw/gateway-token.txt`
-- **Outputs:** `~/.openclaw/openclaw.full.json`, per-agent `IDENTITY.md`/`SOUL.md`/`AGENTS.md`/`BOOT.md`/`BOOTSTRAP.md`/`USER.md`, `auth-profiles.json`, updated clawdbot.service
+- **Outputs:** `~/.openclaw/openclaw.full.json`, per-agent `IDENTITY.md`/`SOUL.md`/`AGENTS.md`/`BOOT.md`/`BOOTSTRAP.md`/`USER.md`, `auth-profiles.json`, updated openclaw.service
 - **Dependencies:** `/etc/droplet.env`, `/etc/habitat-parsed.env`, `bc` (for background color)
 
 ### post-boot-check.sh

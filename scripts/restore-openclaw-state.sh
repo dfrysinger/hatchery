@@ -45,7 +45,7 @@ fi
 
 HN="${HABITAT_NAME:-default}"
 H="/home/$USERNAME"
-R="dropbox:clawdbot-memory/${HN}"
+R="dropbox:openclaw-memory/${HN}"
 AC=${AGENT_COUNT:-1}
 FAIL=0
 

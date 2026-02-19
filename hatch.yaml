@@ -77,7 +77,7 @@ write_files:
     content: |
       [Unit]
       Description=Post-boot health check
-      After=clawdbot.service network-online.target
+      After=openclaw.service network-online.target
       Wants=network-online.target
       [Service]
       Type=oneshot
@@ -85,7 +85,7 @@ write_files:
       RemainAfterExit=yes
       [Install]
       WantedBy=multi-user.target
-  - path: /etc/systemd/system/clawdbot-sync.service
+  - path: /etc/systemd/system/openclaw-sync.service
     permissions: "0644"
     content: |
       [Unit]
@@ -94,7 +94,7 @@ write_files:
       Type=oneshot
       ExecStart=/usr/local/bin/sync-openclaw-state.sh
       User=root
-  - path: /etc/systemd/system/clawdbot-sync.timer
+  - path: /etc/systemd/system/openclaw-sync.timer
     permissions: "0644"
     content: |
       [Unit]

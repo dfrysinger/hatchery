@@ -192,19 +192,19 @@ class TestBashScriptEnvSourcing:
 class TestScriptContent:
     """Validate key content patterns in critical scripts."""
 
-    def test_phase1_enables_clawdbot(self):
-        """phase1-critical.sh should enable the clawdbot service.
+    def test_phase1_enables_openclaw(self):
+        """phase1-critical.sh should enable the openclaw service.
         
-        Note: In the new architecture, phase1 only enables clawdbot (doesn't start it).
+        Note: In the new architecture, phase1 only enables openclaw (doesn't start it).
         The service starts on reboot when the full config is ready. Health check
-        runs via ExecStartPost in clawdbot.service.
+        runs via ExecStartPost in openclaw.service.
         """
         path = os.path.join(SCRIPTS_DIR, "phase1-critical.sh")
         if not os.path.isfile(path):
             pytest.skip("phase1-critical.sh does not exist")
         with open(path, "r") as f:
             content = f.read()
-        assert "systemctl enable clawdbot" in content
+        assert "systemctl enable openclaw" in content
 
     def test_phase1_installs_node(self):
         """phase1-critical.sh should install Node.js."""

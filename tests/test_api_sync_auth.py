@@ -291,7 +291,7 @@ class TestPrepareShutdownAuth(unittest.TestCase):
         """SEC-001 AC9: /prepare-shutdown prevents DoS by requiring auth.
         
         This test verifies that an attacker cannot DoS the system by stopping
-        clawdbot service without authentication.
+        openclaw service without authentication.
         """
         # Without valid credentials, verify_hmac_auth returns False
         result = self.api_module.verify_hmac_auth(

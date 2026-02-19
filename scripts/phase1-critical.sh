@@ -11,7 +11,7 @@
 #           /etc/habitat-parsed.env -- parsed habitat config (generated here)
 #
 # Outputs:  /home/$USERNAME/.openclaw/openclaw.json -- minimal bot config
-#           /etc/systemd/system/clawdbot.service -- systemd unit
+#           /etc/systemd/system/openclaw.service -- systemd unit
 #           /var/lib/init-status/phase1-complete -- completion marker
 #
 # Dependencies: parse-habitat.py, tg-notify.sh, set-stage.sh, npm, curl
@@ -163,7 +163,7 @@ cat > $H/.openclaw/openclaw.json <<CFG
   "gateway": {
     "mode": "local",
     "port": 18789,
-    "bind": "lan",
+    "bind": "loopback",
     "auth": {
       "mode": "token",
       "token": "${GT}"
@@ -226,7 +226,7 @@ cat > $H/.openclaw/openclaw.emergency.json <<EMCFG
   "gateway": {
     "mode": "local",
     "port": 18789,
-    "bind": "lan",
+    "bind": "loopback",
     "auth": {"mode": "token", "token": "${EMERGENCY_GT}"}
   },
   "channels": {
@@ -258,7 +258,7 @@ else
   chmod 700 $H/.openclaw
   chmod 600 $H/.openclaw/openclaw.json
 fi
-cat > /etc/systemd/system/clawdbot.service <<SVC
+cat > /etc/systemd/system/openclaw.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
 After=network.target openclaw-restore.service
@@ -267,7 +267,7 @@ Wants=openclaw-restore.service
 Type=simple
 User=$USERNAME
 WorkingDirectory=$H
-ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port 18789
 ExecStartPost=+/usr/local/bin/gateway-health-check.sh
 Restart=on-failure
 RestartSec=5
@@ -324,15 +324,15 @@ systemctl enable api-server
 systemctl start api-server || true
 ufw allow 8080/tcp
 
-# Enable and START restore service BEFORE clawdbot (if service file exists)
-# clawdbot has After=openclaw-restore.service, so it waits for restore to complete
+# Enable and START restore service BEFORE openclaw (if service file exists)
+# openclaw has After=openclaw-restore.service, so it waits for restore to complete
 if [ -f /etc/systemd/system/openclaw-restore.service ]; then
     systemctl enable openclaw-restore.service
     systemctl start openclaw-restore.service || true  # Don't fail if restore has issues
 fi
-# Enable clawdbot but DON'T start - reboot will start it with full config
+# Enable openclaw but DON'T start - reboot will start it with full config
 # ExecStartPost health check will validate and send notifications
-systemctl enable clawdbot
+systemctl enable openclaw
 ufw allow 18789/tcp
 $S 3 "phase1-complete"
 touch /var/lib/init-status/phase1-complete

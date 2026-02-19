@@ -57,8 +57,8 @@ Safe mode recovery and health check use `openclaw agent --deliver` via the CLI. 
 │                  • Install Node.js, OpenClaw                    │
 │                  • Write emergency config (openclaw.emergency)  │
 │                  • Write minimal config (openclaw.json)         │
-│                  • Create clawdbot.service                      │
-│                  • systemctl ENABLE clawdbot (NOT start!)       │
+│                  • Create openclaw.service                      │
+│                  • systemctl ENABLE openclaw (NOT start!)       │
 │                  • Fix permissions (lib-permissions.sh)         │
 │                  • Launch phase2-background.sh                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -88,7 +88,7 @@ Safe mode recovery and health check use `openclaw agent --deliver` via the CLI. 
 ┌─────────────────────────────────────────────────────────────────┐
 │                      AFTER REBOOT                               │
 ├─────────────────────────────────────────────────────────────────┤
-│  systemd starts openclaw-{group}.service (or clawdbot.service)  │
+│  systemd starts openclaw-{group}.service (or openclaw.service)  │
 │       │                                                         │
 │       ├── ExecStart: openclaw gateway --bind loopback           │
 │       │                                                         │
@@ -199,14 +199,57 @@ This is critical because OpenClaw's delivery-recovery system silently falls back
 2. Checks that the agent responds (no `--deliver`, just validates it works)
 3. If it passes → safe mode is stable, SafeModeBot introduces itself
 
+### Universal Pattern: One Health Check Per Group
+
+The same health check script runs identically across all isolation modes. Every invocation handles **one group** — no central orchestrator needed.
+
+| Isolation | Who runs the health check | GROUP env | PORT | Restart method |
+|-----------|--------------------------|-----------|------|----------------|
+| `none` | ExecStartPost on `openclaw` | _(empty)_ | 18789 | `systemctl restart openclaw` |
+| `session` | ExecStartPost on `openclaw-${group}` | `browser` | 18790+ | `systemctl restart openclaw-browser` |
+| `container` | Entrypoint inside Docker container | `browser` | 18789 | `docker restart openclaw-browser` |
+
+The health check reads `GROUP`, `GROUP_PORT`, and `ISOLATION` from environment variables. All state files are per-group when GROUP is set:
+
+| State file | Standard mode | Group mode |
+|-----------|--------------|------------|
+| Safe mode flag | `/var/lib/init-status/safe-mode` | `/var/lib/init-status/safe-mode-${GROUP}` |
+| Recovery counter | `/var/lib/init-status/recovery-attempts` | `/var/lib/init-status/recovery-attempts-${GROUP}` |
+| Health check log | `/var/log/gateway-health-check.log` | `/var/log/gateway-health-check-${GROUP}.log` |
+| Notification marker | `/var/lib/init-status/notification-sent-*` | Same (includes group in status) |
+
+### Container Isolation
+
+Each Docker container runs its own gateway + health check, identical to session isolation but inside a container:
+
+- `generate-docker-compose.sh` creates one service per isolation group
+- Each container gets `GROUP`, `GROUP_PORT`, `ISOLATION=container` env vars
+- Health check scripts, env files, and state directories are mounted as volumes
+- Entrypoint starts gateway in background, then runs health check (like ExecStart + ExecStartPost)
+- Restart uses `docker restart` instead of `systemctl restart`
+
+```yaml
+# Generated docker-compose.yaml (per group)
+services:
+  browser:
+    image: hatchery/agent:latest
+    container_name: openclaw-browser
+    environment:
+      - GROUP=browser
+      - GROUP_PORT=18789
+      - ISOLATION=container
+    volumes:
+      - ./config/browser:/home/bot/.openclaw
+      - /usr/local/bin/gateway-health-check.sh:/usr/local/bin/gateway-health-check.sh:ro
+      - /etc/droplet.env:/etc/droplet.env:ro
+      - /var/lib/init-status:/var/lib/init-status
+      - /var/log:/var/log
+```
+
 ### Session Isolation
 
-In session isolation mode, each isolation group runs its own gateway on a unique port. The health check runs per-group:
+Each isolation group runs as a separate systemd service (`openclaw-${group}.service`). The ExecStartPost runs the health check with `GROUP` and `GROUP_PORT` set.
 
-- `GROUP=browser` → checks agents in the browser group (e.g., agent3, agent4)
-- `GROUP=documents` → checks agents in the documents group (e.g., agent1, agent2)
-
-Environment variables point to the correct config:
 ```bash
 OPENCLAW_CONFIG_PATH=/etc/systemd/system/{group}/openclaw.session.json
 OPENCLAW_STATE_DIR=/home/bot/.openclaw-sessions/{group}
@@ -214,7 +257,7 @@ OPENCLAW_STATE_DIR=/home/bot/.openclaw-sessions/{group}
 
 ### Token Filtering by Group
 
-In session isolation, bot tokens are filtered by group to prevent 409 conflicts:
+In session and container isolation, bot tokens are filtered by group to prevent 409 conflicts:
 - `find_working_telegram_token()` only checks tokens from agents in the current `AGENT{N}_ISOLATION_GROUP`
 - `find_working_discord_token()` same
 

@@ -269,7 +269,7 @@ test_restart_gateway_session_mode() {
   # In session isolation with GROUP set, restart_gateway should:
   # - Restart openclaw-{GROUP}.service
   # NOT:
-  # - Restart clawdbot (which doesn't exist in session mode)
+  # - Restart openclaw (which doesn't exist in session mode)
   
   # Extract and test the restart logic
   cat > "$TEST_TMPDIR/restart-logic.sh" <<'SCRIPT'
@@ -287,7 +287,7 @@ restart_gateway() {
     # No GROUP - this shouldn't happen but fall back to all session services
     target_service="all-session-services"
   else
-    target_service="clawdbot"
+    target_service="openclaw"
   fi
   
   echo "RESTART_TARGET=$target_service"
@@ -315,13 +315,13 @@ SCRIPT
     fail "restart_gateway targets wrong service" "Got: $output"
   fi
   
-  # Test: non-session mode should still use clawdbot
+  # Test: non-session mode should still use openclaw
   output=$(ISOLATION_DEFAULT=none GROUP="" bash "$TEST_TMPDIR/restart-logic.sh")
   
-  if echo "$output" | grep -q "RESTART_TARGET=clawdbot"; then
-    pass "restart_gateway targets clawdbot in non-session mode"
+  if echo "$output" | grep -q "RESTART_TARGET=openclaw"; then
+    pass "restart_gateway targets openclaw in non-session mode"
   else
-    fail "restart_gateway should target clawdbot in non-session mode" "Got: $output"
+    fail "restart_gateway should target openclaw in non-session mode" "Got: $output"
   fi
   
   cleanup_test_env
@@ -358,7 +358,7 @@ enter_safe_mode_stop_services() {
       done
     fi
   else
-    stopped_services="clawdbot"
+    stopped_services="openclaw"
   fi
   
   echo "STOPPED:$stopped_services"

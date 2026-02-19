@@ -17,7 +17,7 @@
 # Outputs:  $HOME/.openclaw/openclaw.full.json -- full config
 #           $HOME/.openclaw/agents/*/agent/auth-profiles.json -- auth creds
 #           $HOME/clawd/agents/*/IDENTITY.md, SOUL.md, AGENTS.md, etc.
-#           /etc/systemd/system/clawdbot.service -- updated systemd unit
+#           /etc/systemd/system/openclaw.service -- updated systemd unit
 #
 # Dependencies: /etc/droplet.env, /etc/habitat-parsed.env, bc (for bg color), jq
 #
@@ -253,7 +253,7 @@ This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via
 - Habitat: ${HN}$([ -n "$HABITAT_DOMAIN" ] && echo " (${HABITAT_DOMAIN})")
 - YAML configs: dropbox:Droplets/yaml/ (current: cloud-browser-v3.20.yaml)
 - Project docs: dropbox:Droplets/yaml/CONTEXT.md
-- Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
+- Memory sync: dropbox:openclaw-memory/${HN}/ (every 2 min)
 - Habitat configs: dropbox:Droplets/habitats/
 - Previous transcripts restored from Dropbox on boot
 IDMD
@@ -318,7 +318,7 @@ If you see a file called BOOTSTRAP.md in your workspace, execute it once and del
 If asked about boot status or system health, check for BOOT_REPORT.md in your workspace - it contains the full boot report with coordinator designation and component status.
 
 Check these services silently. Only alert user if something is broken after 2 fix attempts:
-- systemctl is-active clawdbot
+- systemctl is-active openclaw
 - systemctl is-active xrdp (if desktop phase complete)
 - systemctl is-active desktop (if desktop phase complete)
 
@@ -458,7 +458,7 @@ if type fix_agent_workspace &>/dev/null; then
 fi
 chown -R "$USERNAME:$USERNAME" "$H/.openclaw/agents/safe-mode" 2>/dev/null || true
 
-cat > /etc/systemd/system/clawdbot.service <<SVC
+cat > /etc/systemd/system/openclaw.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
 After=network.target desktop.service openclaw-restore.service

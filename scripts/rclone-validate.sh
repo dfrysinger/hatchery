@@ -66,7 +66,7 @@ _validate_one_path() {
 
     # Expected remote layout for this repo.
     # Require habitat segment to avoid accidentally targeting the remote root.
-    if ! echo "$p" | grep -Eq '^dropbox:clawdbot-memory/[^/]+(/.*)?$'; then
+    if ! echo "$p" | grep -Eq '^dropbox:openclaw-memory/[^/]+(/.*)?$'; then
       echo "ERROR: refusing rclone copy: ${role} remote path is unexpected: '$p'" >&2
       return 1
     fi

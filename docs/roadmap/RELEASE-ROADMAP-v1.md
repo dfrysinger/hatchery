@@ -36,7 +36,7 @@
 - PR #77: rclone path validation guardrails
 - PR #78: globalTools support for TOOLS.md
 - PR #79: RDP/VNC delay until phase2 completes
-- PR #81: Migrate from clawdbot to openclaw
+- PR #81: Migrate from openclaw to openclaw
 - PR #82: Memory restore before bot starts
 - PR #83: x11vnc dependency chain fix
 
