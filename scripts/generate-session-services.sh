@@ -199,7 +199,7 @@ for group in "${SESSION_GROUPS[@]}"; do
   "gateway": {
     "mode": "local",
     "port": ${port},
-    "bind": "lan",
+    "bind": "loopback",
     "controlUi": {"enabled": true, "allowInsecureAuth": true},
     "auth": {"mode": "token", "token": "$(openssl rand -hex 16)"}
   },
