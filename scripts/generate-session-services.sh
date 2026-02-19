@@ -334,7 +334,7 @@ if [ -z "${DRY_RUN:-}" ]; then
     
     # Check if boot is complete - only START services after boot finishes
     # During initial boot, just ENABLE them; they'll auto-start after reboot
-    local boot_complete=false
+    boot_complete=false
     [ -f /var/lib/init-status/boot-complete ] && boot_complete=true
     
     for group in "${SESSION_GROUPS[@]}"; do
