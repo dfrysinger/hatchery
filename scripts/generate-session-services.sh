@@ -332,17 +332,30 @@ if [ -z "${DRY_RUN:-}" ]; then
     systemctl stop clawdbot 2>/dev/null || true
     systemctl disable clawdbot 2>/dev/null || true
     
+    # Check if boot is complete - only START services after boot finishes
+    # During initial boot, just ENABLE them; they'll auto-start after reboot
+    local boot_complete=false
+    [ -f /var/lib/init-status/boot-complete ] && boot_complete=true
+    
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
-        # Start service but don't fail if ExecStartPost health check triggers safe mode
-        # The health check returns exit 1 on safe mode entry, which would abort our loop
-        # Services will restart themselves via Restart=on-failure
-        systemctl start "openclaw-${group}.service" || {
-            echo "  [${group}] Service start returned non-zero (health check may have triggered safe mode)"
-            echo "  [${group}] Service will restart automatically via systemd"
-        }
+        
+        if [ "$boot_complete" = "true" ]; then
+            # Boot complete - this is a config update, start services now
+            systemctl start "openclaw-${group}.service" || {
+                echo "  [${group}] Service start returned non-zero (health check may have triggered safe mode)"
+                echo "  [${group}] Service will restart automatically via systemd"
+            }
+        else
+            echo "  [${group}] Boot not complete - service enabled but not started (will start after reboot)"
+        fi
     done
-    echo "Session services started (or pending health check restart)."
+    
+    if [ "$boot_complete" = "true" ]; then
+        echo "Session services started (or pending health check restart)."
+    else
+        echo "Session services enabled (will start automatically after reboot)."
+    fi
 else
     echo "DRY_RUN mode — services written to ${OUTPUT_DIR}"
 fi

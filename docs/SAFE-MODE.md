@@ -2,18 +2,46 @@
 
 When OpenClaw fails to start (bad API key, expired OAuth, invalid bot token), the system automatically recovers by finding working credentials and bringing a diagnostic bot online.
 
+## Critical Principle: No Services Before Reboot
+
+**OpenClaw services MUST NOT start until after the post-install reboot.**
+
+During initial boot (phase1 + phase2):
+- Services are **enabled** (systemctl enable) but **never started**
+- Config files are written and prepared
+- After phase2 completes, the system reboots
+
+After reboot:
+- Services auto-start via systemd (WantedBy=multi-user.target)
+- Health check runs exactly **once** per boot
+- E2E tests verify all agents can respond
+
+This prevents:
+- Race conditions between config generation and service startup
+- Multiple health check runs causing duplicate intro messages
+- Config overwrites mid-health-check
+
 ## Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         BOOT SEQUENCE                           │
+│                    INITIAL BOOT SEQUENCE                        │
 ├─────────────────────────────────────────────────────────────────┤
-│  cloud-init → bootstrap.sh → phase1-critical.sh → REBOOT       │
+│  cloud-init → bootstrap.sh → phase1-critical.sh                 │
+│       │                            │                            │
+│       │                  • Install OpenClaw                     │
+│       │                  • Write emergency config               │
+│       │                  • Enable service (NOT start!)          │
+│       │                  • Launch phase2 in background          │
+│       │                            │                            │
+│       └──────────────────────────► │                            │
+│                                    ▼                            │
+│                          phase2-background.sh                   │
 │                                    │                            │
-│                         Creates 3 configs:                      │
-│                         • openclaw.json (full config)           │
-│                         • openclaw.full.json (backup)           │
-│                         • openclaw.emergency.json (fallback)    │
+│                  • Install tools, build full config             │
+│                  • Enable session services (NOT start!)         │
+│                  • Touch phase2-complete                        │
+│                  • REBOOT                                       │
 └─────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
