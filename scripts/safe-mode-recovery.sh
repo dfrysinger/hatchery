@@ -4,8 +4,9 @@
 # safe-mode-recovery.sh -- Smart Safe Mode Recovery
 # =============================================================================
 
-# Source permission utilities
+# Source shared libraries
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
+[ -f /usr/local/sbin/lib-auth.sh ] && source /usr/local/sbin/lib-auth.sh
 # Purpose:  When full config fails, intelligently find working credentials
 #           and generate an emergency config to get a bot online.
 #
@@ -32,6 +33,12 @@ VALIDATE_API_KEY_FN="${VALIDATE_API_KEY_FN:-validate_api_key}"
 # =============================================================================
 # Globals & Cross-Function State
 # =============================================================================
+# Error handling convention:
+#   - All functions use 'return 0/1', never 'exit' (caller decides severity)
+#   - Validation functions set VALIDATION_REASON (global) as a side effect
+#     to communicate details without subshell overhead
+#   - Token search functions set FOUND_TOKEN_RESULT (global) with results
+#   - log_recovery() for persistent logging, echo for user-facing output
 # IMPORTANT: Many functions set global variables instead of returning values.
 # This is intentional - Bash loses variable assignments made in subshells, so
 # patterns like `result=$(some_func)` would discard side effects.
@@ -236,76 +243,14 @@ validate_discord_token() {
   esac
 }
 
-# Validate an API key by making a minimal request
-validate_api_key() {
-  local provider="$1"
-  local key="$2"
-  
-  if [ -z "$key" ]; then
-    VALIDATION_REASON="no key"
+# validate_api_key() — provided by lib-auth.sh (sourced above)
+# Fallback definition if lib-auth.sh is not available
+if ! type validate_api_key &>/dev/null; then
+  validate_api_key() {
+    VALIDATION_REASON="lib-auth.sh not loaded"
     return 1
-  fi
-  
-  if [ "${TEST_MODE:-}" = "1" ]; then
-    VALIDATION_REASON="test-mode"
-    return 1
-  fi
-  
-  local http_code response
-  
-  case "$provider" in
-    anthropic)
-      # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
-      local auth_header
-      if [[ "$key" == sk-ant-oat* ]]; then
-        # OAuth tokens cannot be validated via API, trust them if present
-        VALIDATION_REASON="OAuth token (trusted)"
-        return 0
-      else
-        auth_header="x-api-key: ${key}"
-      fi
-      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-        -H "$auth_header" \
-        -H "anthropic-version: 2023-06-01" \
-        -H "content-type: application/json" \
-        -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
-        "https://api.anthropic.com/v1/messages" 2>/dev/null)
-      ;;
-    openai)
-      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-        -H "Authorization: Bearer ${key}" \
-        "https://api.openai.com/v1/models" 2>/dev/null)
-      ;;
-    google)
-      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-        "https://generativelanguage.googleapis.com/v1/models?key=${key}" 2>/dev/null)
-      ;;
-    *)
-      VALIDATION_REASON="unknown provider"
-      return 1
-      ;;
-  esac
-  
-  http_code=$(echo "$response" | tail -1)
-  
-  case "$http_code" in
-    200) VALIDATION_REASON="valid"; return 0 ;;
-    400) 
-      # Anthropic returns 400 for bad request but auth OK
-      if [ "$provider" = "anthropic" ]; then
-        VALIDATION_REASON="valid"
-        return 0
-      fi
-      VALIDATION_REASON="400 bad request"
-      return 1
-      ;;
-    401) VALIDATION_REASON="401 unauthorized"; return 1 ;;
-    403) VALIDATION_REASON="403 forbidden"; return 1 ;;
-    429) VALIDATION_REASON="429 rate limited"; return 1 ;;
-    000) VALIDATION_REASON="timeout"; return 1 ;;
-    *)   VALIDATION_REASON="http ${http_code}"; return 1 ;;
-  esac
-}
+  }
+fi
 
 # =============================================================================
 # Token Hunting Functions
@@ -315,85 +260,14 @@ validate_api_key() {
 VALIDATION_REASON=""
 FOUND_TOKEN_RESULT=""
 
-# Find a working Telegram token from agents in current GROUP (or all if no GROUP)
-# Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
-# Side effect: populates DIAG_TELEGRAM_RESULTS
+# find_working_token() — provided by lib-auth.sh (sourced above)
+# Backward-compatible wrappers for callers that use platform-specific names
 find_working_telegram_token() {
-  local count="${AGENT_COUNT:-0}"
-  local current_group="${GROUP:-}"
-  FOUND_TOKEN_RESULT=""
-  
-  for i in $(seq 1 "$count"); do
-    # If GROUP is set (session isolation), only consider agents in this group
-    if [ -n "$current_group" ]; then
-      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
-      local agent_group="${!agent_group_var:-}"
-      if [ "$agent_group" != "$current_group" ]; then
-        continue  # Skip agents not in this group
-      fi
-    fi
-    
-    local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-    local token="${!token_var:-}"
-    
-    # Also try generic BOT_TOKEN
-    [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-    
-    if [ -z "$token" ]; then
-      # Don't log "not configured" for every agent - only if none have tokens
-      continue
-    fi
-    
-    # Run validation - captures reason via VALIDATION_REASON global
-    VALIDATION_REASON=""
-    if $VALIDATE_TELEGRAM_TOKEN_FN "$token"; then
-      diag_add "telegram" "agent${i}" "✅" "valid"
-      [ -z "$FOUND_TOKEN_RESULT" ] && FOUND_TOKEN_RESULT="${i}:${token}"
-    else
-      diag_add "telegram" "agent${i}" "❌" "${VALIDATION_REASON:-unknown}"
-    fi
-  done
-  
-  [ -n "$FOUND_TOKEN_RESULT" ] && return 0
-  return 1
+  find_working_token "telegram"
 }
 
-# Find a working Discord token from agents in current GROUP (or all if no GROUP)
-# Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
-# Side effect: populates DIAG_DISCORD_RESULTS
 find_working_discord_token() {
-  local count="${AGENT_COUNT:-0}"
-  local current_group="${GROUP:-}"
-  FOUND_TOKEN_RESULT=""
-  
-  for i in $(seq 1 "$count"); do
-    # If GROUP is set (session isolation), only consider agents in this group
-    if [ -n "$current_group" ]; then
-      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
-      local agent_group="${!agent_group_var:-}"
-      if [ "$agent_group" != "$current_group" ]; then
-        continue  # Skip agents not in this group
-      fi
-    fi
-    
-    local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
-    local token="${!token_var:-}"
-    
-    if [ -z "$token" ]; then
-      continue
-    fi
-    
-    VALIDATION_REASON=""
-    if $VALIDATE_DISCORD_TOKEN_FN "$token"; then
-      diag_add "discord" "agent${i}" "✅" "valid"
-      [ -z "$FOUND_TOKEN_RESULT" ] && FOUND_TOKEN_RESULT="${i}:${token}"
-    else
-      diag_add "discord" "agent${i}" "❌" "${VALIDATION_REASON:-unknown}"
-    fi
-  done
-  
-  [ -n "$FOUND_TOKEN_RESULT" ] && return 0
-  return 1
+  find_working_token "discord"
 }
 
 # Global variable for function results (avoids subshell issues)
@@ -1320,57 +1194,11 @@ run_smart_recovery() {
     local auth_dir="${state_dir}/agents/safe-mode/agent"
     mkdir -p "$auth_dir" 2>/dev/null || true
     
-    # Generate auth-profiles.json based on provider
+    # Generate auth-profiles.json — uses lib-auth.sh's generate_auth_profiles_json()
     local auth_profiles
-    case "$provider" in
-      google)
-        auth_profiles=$(cat <<AUTHEOF
-{
-  "version": 1,
-  "profiles": {
-    "google:default": {
-      "type": "api_key",
-      "provider": "google",
-      "token": "${api_key}"
-    }
-  }
-}
-AUTHEOF
-)
-        ;;
-      anthropic)
-        auth_profiles=$(cat <<AUTHEOF
-{
-  "version": 1,
-  "profiles": {
-    "anthropic:default": {
-      "type": "api_key",
-      "provider": "anthropic",
-      "token": "${api_key}"
-    }
-  }
-}
-AUTHEOF
-)
-        ;;
-      openai)
-        auth_profiles=$(cat <<AUTHEOF
-{
-  "version": 1,
-  "profiles": {
-    "openai:default": {
-      "type": "api_key",
-      "provider": "openai",
-      "token": "${api_key}"
-    }
-  }
-}
-AUTHEOF
-)
-        ;;
-    esac
-    
-    if [ -n "$auth_profiles" ]; then
+    auth_profiles="$(generate_auth_profiles_json "$provider" "$api_key")"
+
+    if [ -n "$auth_profiles" ] && [ "$auth_profiles" != '{}' ]; then
       echo "$auth_profiles" > "${auth_dir}/auth-profiles.json"
       chmod 600 "${auth_dir}/auth-profiles.json"
       [ -n "${USERNAME:-}" ] && chown -R "${USERNAME}:${USERNAME}" "${state_dir}/agents" 2>/dev/null

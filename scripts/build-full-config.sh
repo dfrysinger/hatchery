@@ -5,6 +5,11 @@
 
 # Source permission utilities (creates dirs with correct ownership)
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
+# Fallback if lib-permissions.sh unavailable
+if ! type ensure_bot_dir &>/dev/null; then
+  ensure_bot_dir() { mkdir -p "$1" && chmod "${2:-755}" "$1"; }
+  ensure_bot_file() { touch "$1" && chmod "${2:-644}" "$1"; }
+fi
 # Purpose:  Builds the complete openclaw configuration with multi-agent
 #           support, browser config, auth profiles, skills, council setup,
 #           desktop integration, and all per-agent workspace files
@@ -72,17 +77,10 @@ OR_ESC=$(json_escape "$OR")
 # shellcheck disable=SC2034
 OI_ESC=$(json_escape "$OI")
 # Use helper if available, fallback to mkdir+chmod
-if type ensure_bot_dir &>/dev/null; then
-  ensure_bot_dir "$H/.openclaw/credentials" 700
-  for i in $(seq 1 $AC); do
-    ensure_bot_dir "$H/clawd/agents/agent${i}/memory" 755
-  done
-else
-  mkdir -p $H/.openclaw/credentials && chmod 700 $H/.openclaw/credentials
-  for i in $(seq 1 $AC); do
-    mkdir -p "$H/clawd/agents/agent${i}/memory"
-  done
-fi
+ensure_bot_dir "$H/.openclaw/credentials" 700
+for i in $(seq 1 $AC); do
+  ensure_bot_dir "$H/clawd/agents/agent${i}/memory" 755
+done
 AL="["
 for i in $(seq 1 $AC); do
   NV="AGENT${i}_NAME"; NAME="${!NV}"
@@ -365,11 +363,7 @@ BOOTMD
   [ -n "$CGI" ] && ln -sf "$H/clawd/shared" "$AD/shared" 2>/dev/null || true
 done
 if [ -n "$CGI" ]; then
-  if type ensure_bot_dir &>/dev/null; then
-    ensure_bot_dir "$H/clawd/shared" 755
-  else
-    mkdir -p "$H/clawd/shared"
-  fi
+  ensure_bot_dir "$H/clawd/shared" 755
   for sf in KNOWLEDGE.md DECISIONS.md CONTEXT.md; do
     [ ! -f "$H/clawd/shared/$sf" ] && cat > "$H/clawd/shared/$sf" <<SHMD
 # ${sf%.md}
@@ -381,34 +375,17 @@ fi
 # Create global TOOLS.md if provided
 if [ -n "$GTO" ]; then
   printf '%s\n' "$GTO" > "$H/clawd/TOOLS.md"
-  if type ensure_bot_file &>/dev/null; then
-    ensure_bot_file "$H/clawd/TOOLS.md" 644
-  else
-    chown $USERNAME:$USERNAME "$H/clawd/TOOLS.md" 2>/dev/null || true
-  fi
+  ensure_bot_file "$H/clawd/TOOLS.md" 644
 fi
 # Create auth-profiles directory structure
-if type ensure_bot_dir &>/dev/null; then
-  ensure_bot_dir "$H/.openclaw/agents/main/agent" 700
-else
-  mkdir -p "$H/.openclaw/agents/main/agent"
-fi
+ensure_bot_dir "$H/.openclaw/agents/main/agent" 700
 cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
 {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
 APJ
 # SECURITY: auth-profiles.json contains credentials - restrict permissions
-if type ensure_bot_file &>/dev/null; then
-  ensure_bot_file "$H/.openclaw/agents/main/agent/auth-profiles.json" 600
-else
-  chmod 600 $H/.openclaw/agents/main/agent/auth-profiles.json
-  chown $USERNAME:$USERNAME $H/.openclaw/agents/main/agent/auth-profiles.json
-fi
+ensure_bot_file "$H/.openclaw/agents/main/agent/auth-profiles.json" 600
 for i in $(seq 1 $AC); do
-  if type ensure_bot_dir &>/dev/null; then
-    ensure_bot_dir "$H/.openclaw/agents/agent${i}/agent" 700
-  else
-    mkdir -p "$H/.openclaw/agents/agent${i}/agent"
-  fi
+  ensure_bot_dir "$H/.openclaw/agents/agent${i}/agent" 700
   ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/agent${i}/agent/auth-profiles.json"
 done
 
@@ -442,15 +419,9 @@ SMSO
 }
 # Link auth-profiles for safe-mode agent too
 # Also create sessions dir and ensure proper ownership (prevents EACCES errors)
-if type ensure_bot_dir &>/dev/null; then
-  ensure_bot_dir "$H/.openclaw/agents/safe-mode/agent" 700
-  ensure_bot_dir "$H/.openclaw/agents/safe-mode/sessions" 700
-  ensure_bot_dir "$H/clawd/agents/safe-mode/.openclaw" 700
-else
-  mkdir -p "$H/.openclaw/agents/safe-mode/agent"
-  mkdir -p "$H/.openclaw/agents/safe-mode/sessions"
-  mkdir -p "$H/clawd/agents/safe-mode/.openclaw"
-fi
+ensure_bot_dir "$H/.openclaw/agents/safe-mode/agent" 700
+ensure_bot_dir "$H/.openclaw/agents/safe-mode/sessions" 700
+ensure_bot_dir "$H/clawd/agents/safe-mode/.openclaw" 700
 ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/safe-mode/agent/auth-profiles.json"
 # Fix ownership for safe-mode directories
 if type fix_agent_workspace &>/dev/null; then

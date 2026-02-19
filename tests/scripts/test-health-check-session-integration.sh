@@ -1,5 +1,6 @@
 #!/bin/bash
 # =============================================================================
+source "$(dirname "$0")/test-helpers.sh"
 # test-health-check-session-integration.sh -- Integration tests for health check
 # =============================================================================
 # These tests source the actual gateway-health-check.sh functions and verify
@@ -12,24 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTS_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_DIR="$(dirname "$TESTS_DIR")"
 
-PASSED=0
-FAILED=0
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
 
-pass() {
-  echo -e "${GREEN}✓${NC} $1"
-  PASSED=$((PASSED + 1))
-}
 
-fail() {
-  echo -e "${RED}✗${NC} $1"
-  [ -n "${2:-}" ] && echo "    $2"
-  FAILED=$((FAILED + 1))
-}
 
 # =============================================================================
 # Setup mock environment

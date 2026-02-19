@@ -86,7 +86,7 @@ for f in "$INSTALL_DIR"/scripts/*.sh; do
   case "$bn" in
     bootstrap.sh)
       ;; # skip -- do not overwrite ourselves mid-execution
-    phase1-critical.sh|phase2-background.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh|lib-permissions.sh)
+    phase1-critical.sh|phase2-background.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh|lib-permissions.sh|lib-auth.sh)
       cp "$f" /usr/local/sbin/
       ;;
     *)
