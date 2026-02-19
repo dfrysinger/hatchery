@@ -2,7 +2,7 @@
 Description=Restore openclaw state from Dropbox
 After=network-online.target
 Wants=network-online.target
-Before=clawdbot.service
+Before=openclaw.service
 
 [Service]
 Type=oneshot

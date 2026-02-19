@@ -1,6 +1,6 @@
 [Unit]
 Description=Post-boot health check and config upgrade
-After=clawdbot.service network-online.target
+After=openclaw.service network-online.target
 Wants=network-online.target
 
 [Service]

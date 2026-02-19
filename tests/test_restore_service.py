@@ -189,7 +189,7 @@ class TestRestoreServiceOrdering:
         
         # Find the position of both commands
         enable_restore = re.search(r'systemctl\s+enable\s+openclaw-restore', content)
-        enable_openclaw = re.search(r'systemctl\s+enable\s+openclaw', content)
+        enable_openclaw = re.search(r'systemctl\s+enable\s+openclaw\b(?!-)', content)
         
         assert enable_restore, \
             "phase1-critical.sh must have 'systemctl enable openclaw-restore'"

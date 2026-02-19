@@ -29,8 +29,8 @@
 set -euo pipefail
 
 # --- Source environment files (may be called standalone or from another script) ---
-[ -f /etc/droplet.env ] && source /etc/droplet.env
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+[ -f /etc/droplet.env ] && [ -r /etc/droplet.env ] && source /etc/droplet.env
+[ -f /etc/habitat-parsed.env ] && [ -r /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 
 # --- Validate required inputs ---
 if [ -z "${AGENT_COUNT:-}" ]; then
@@ -239,12 +239,12 @@ NET
     fi
 
     # Port for this group (base 18789, offset by group index)
-    local group_idx=0
+    group_idx=0
     for g in "${CONTAINER_GROUPS[@]}"; do
         [ "$g" = "$group" ] && break
         group_idx=$((group_idx + 1))
     done
-    local group_port=$((18789 + group_idx))
+    group_port=$((18789 + group_idx))
 
     # Environment — pass GROUP and GROUP_PORT so health check is universal
     cat >> "$COMPOSE_FILE" <<ENV

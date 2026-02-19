@@ -174,7 +174,7 @@ class TestSessionServiceGeneration(unittest.TestCase):
         env = make_session_env()
         files, _, _ = run_generator(env)
         svc = files['openclaw-council.service']
-        self.assertIn('Restart=always', svc)
+        self.assertIn('Restart=on-failure', svc)
 
     def test_service_after_dependency(self):
         """Service depends on network.target."""

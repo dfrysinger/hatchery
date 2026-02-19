@@ -37,7 +37,8 @@ fi
 touch "$LOG" && chmod 644 "$LOG" 2>/dev/null || true
 
 log() {
-  local msg="$(date -u +%Y-%m-%dT%H:%M:%SZ) [$RUN_ID] $*"
+  local msg
+  msg="$(date -u +%Y-%m-%dT%H:%M:%SZ) [$RUN_ID] $*"
   echo "$msg" >> "$LOG"
   # Also log to journald for persistence (won't be lost on reboot)
   logger -t "health-check${GROUP:+-$GROUP}" "$*" 2>/dev/null || true
@@ -343,8 +344,6 @@ check_api_key_validity() {
 }
 
 check_channel_connectivity() {
-  local service="$1"
-  
   log "  Checking channel connectivity..."
   
   local config_file="$CONFIG_PATH"
@@ -567,7 +566,8 @@ check_agents_e2e() {
     log "  Model: $agent_model"
     log "  Command: openclaw agent --agent $agent_id --deliver --reply-channel $channel --reply-account $agent_id --reply-to $owner_id"
     
-    local start_time=$(date +%s)
+    local start_time
+    start_time=$(date +%s)
     
     # Use openclaw agent with --deliver to send response to chat
     # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
@@ -588,7 +588,8 @@ check_agents_e2e() {
       --json 2>&1)
     local exit_code=$?
     
-    local end_time=$(date +%s)
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - start_time))
     
     if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
@@ -1357,7 +1358,8 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
       
       log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-account safe-mode --reply-to $owner_id"
       
-      local start_time=$(date +%s)
+      local start_time
+      start_time=$(date +%s)
       
       # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
       # but openclaw must run as the bot user to create files with correct ownership.
@@ -1380,7 +1382,8 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
         --json 2>&1)
       local exit_code=$?
       
-      local end_time=$(date +%s)
+      local end_time
+      end_time=$(date +%s)
       local duration=$((end_time - start_time))
       
       if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
