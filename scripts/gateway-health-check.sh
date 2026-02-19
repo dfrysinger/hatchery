@@ -356,7 +356,7 @@ check_channel_connectivity() {
     
     # Try Telegram token from config
     local tg_token
-    tg_token=$(jq -r '.channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
     if [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       log "  Safe mode Telegram token valid"
       log "  Channel connectivity verified (safe mode)"
@@ -365,7 +365,7 @@ check_channel_connectivity() {
     
     # Try Discord token from config
     local dc_token
-    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts.default.token // empty' "$config_file" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
     if [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       log "  Safe mode Discord token valid"
       log "  Channel connectivity verified (safe mode)"
@@ -1081,12 +1081,12 @@ send_entering_safe_mode_warning() {
   local token=""
   
   # Try Discord first
-  token=$(jq -r '.channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
+  token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
   if [ -n "$token" ]; then
     platform="discord"
   else
     # Try Telegram
-    token=$(jq -r '.channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
     if [ -n "$token" ]; then
       platform="telegram"
     fi
@@ -1156,8 +1156,8 @@ send_boot_notification() {
   if [ -f "$SAFE_MODE_FILE" ] && [ -f "$CONFIG_PATH" ]; then
     # Check which channels are configured in safe mode config
     local tg_token dc_token
-    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts.default.botToken // empty' "$CONFIG_PATH" 2>/dev/null)
-    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts.default.token // empty' "$CONFIG_PATH" 2>/dev/null)
+    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.accounts.default.botToken // empty' "$CONFIG_PATH" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // empty' "$CONFIG_PATH" 2>/dev/null)
     
     # Prefer platform matching PLATFORM env, fall back to whatever is configured
     local preferred="${PLATFORM:-telegram}"

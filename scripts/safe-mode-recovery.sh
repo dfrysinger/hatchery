@@ -943,7 +943,9 @@ generate_emergency_config() {
     if [ -n "$owner_id" ]; then
       telegram_config="\"telegram\": {
         \"enabled\": true,
-        \"botToken\": \"${token}\",
+        \"accounts\": {
+          \"safe-mode\": { \"botToken\": \"${token}\" }
+        },
         \"dmPolicy\": \"allowlist\",
         \"allowFrom\": [\"${owner_id}\"]
       }"
@@ -951,7 +953,9 @@ generate_emergency_config() {
       # No owner ID - use pairing mode (safest default)
       telegram_config="\"telegram\": {
         \"enabled\": true,
-        \"botToken\": \"${token}\",
+        \"accounts\": {
+          \"safe-mode\": { \"botToken\": \"${token}\" }
+        },
         \"dmPolicy\": \"pairing\"
       }"
     fi
@@ -963,7 +967,7 @@ generate_emergency_config() {
       discord_config="\"discord\": {
         \"enabled\": true,
         \"accounts\": {
-          \"default\": { \"token\": \"${token}\" }
+          \"safe-mode\": { \"token\": \"${token}\" }
         },
         \"dmPolicy\": \"allowlist\",
         \"allowFrom\": [\"${owner_id}\"]
@@ -972,7 +976,7 @@ generate_emergency_config() {
       discord_config="\"discord\": {
         \"enabled\": true,
         \"accounts\": {
-          \"default\": { \"token\": \"${token}\" }
+          \"safe-mode\": { \"token\": \"${token}\" }
         },
         \"dmPolicy\": \"pairing\"
       }"

@@ -195,21 +195,6 @@ USER_EOF
 fi
 
 # -----------------------------------------------------------------------------
-# BOOT.md - triggers intro message on first wake
-# -----------------------------------------------------------------------------
-cat > "$SAFE_MODE_DIR/BOOT.md" << 'BOOT_EOF'
-## System Health (DO NOT MODIFY)
-If this is your first message since the system started, announce yourself:
-"[SAFE MODE] SafeModeBot is online. Reading BOOT_REPORT.md to diagnose what went wrong..."
-
-Then immediately read BOOT_REPORT.md and give the user a concise summary of what failed and what recovery actions were taken.
-
-If you see a file called BOOT_REPORT.md in your workspace, read it and summarize the findings.
-
-Check the health check log at /var/log/gateway-health-check.log for additional details.
-BOOT_EOF
-
-# -----------------------------------------------------------------------------
 # Set permissions
 # -----------------------------------------------------------------------------
 # Chown the workspace directory
