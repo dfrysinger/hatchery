@@ -28,9 +28,19 @@ This prevents:
 
 All directories and files are created with correct ownership from the start using `lib-permissions.sh` (see [Permissions Helper](#permissions-helper-lib-permissionssh) below). This avoids the timing bug where services start before a deferred `chown -R` runs.
 
-### 3. Each Agent Uses Its Own Token
+### 3. Account Name = Agent ID
 
-The E2E health check delivers each agent's intro through that agent's own bot account using `--reply-account $agent_id`. Without this, all intros would go through the default account and appear in the wrong chat thread.
+Bot tokens are stored under accounts named after the agent ID — **never** `default`:
+
+| Mode | Agent ID | Account Name | Config Path |
+|------|----------|-------------|-------------|
+| Normal | `agent1` | `agent1` | `channels.telegram.accounts.agent1.botToken` |
+| Normal | `agent2` | `agent2` | `channels.telegram.accounts.agent2.botToken` |
+| Safe mode | `safe-mode` | `safe-mode` | `channels.telegram.accounts.safe-mode.botToken` |
+
+This ensures `--reply-account $agent_id` always finds the correct token. Using `default` causes two problems:
+- `--reply-account agent1` can't find a token named `default`
+- Duplicating tokens under both `default` and `agent1` creates **two polling instances** on the same token → Telegram 409 conflicts with itself
 
 ### 4. Gateway Must Bind to Loopback
 
@@ -133,9 +143,33 @@ Safe mode recovery and health check use `openclaw agent --deliver` via the CLI. 
 
 ## E2E Health Check
 
-The health check is the core of safe mode. Rather than just validating credentials exist, it performs a **full end-to-end test**: send a prompt to each agent, verify it responds, and deliver the response to the user.
+The health check is the core of safe mode. It runs two stages in normal mode:
 
-### Normal Mode (Full Config)
+### Stage 1: Chat Token Validation
+
+`check_channel_connectivity()` validates every agent's bot token **before** the E2E check.
+
+This is critical because OpenClaw's delivery-recovery system silently falls back to other accounts when a token fails. Without this step, a broken Telegram token would be invisible — the agent responds fine (LLM works), and delivery succeeds through another account's token.
+
+**Platform selection rules:**
+- Only validates tokens for the **configured platform** (`$PLATFORM` from habitat config)
+- `platform=telegram` → only checks Telegram tokens
+- `platform=discord` → only checks Discord tokens
+- `platform=both` → agent needs **at least one** working token
+- Tokens for unconfigured platforms are **not checked** (a broken Discord token won't trigger safe mode if platform is telegram-only)
+
+**Per-agent validation:**
+- Each agent's token is validated via API (`getMe` for Telegram, `/users/@me` for Discord)
+- **Missing token** (empty) → agent fails (treated as broken)
+- **Invalid token** (API returns error) → agent fails
+- **Any single agent failure** → entire group enters safe mode
+
+```bash
+# Telegram: curl https://api.telegram.org/bot${token}/getMe
+# Discord:  curl -H "Authorization: Bot ${token}" https://discord.com/api/v10/users/@me
+```
+
+### Stage 2: End-to-End Agent Check (Normal Mode)
 
 `check_agents_e2e()` in `gateway-health-check.sh`:
 
@@ -229,17 +263,25 @@ The emergency config has **no fallback logic** — it's intentionally simple to 
 
 ## Notification Flow
 
-Only **one notification** is sent per boot, reflecting the **final state**:
+Notifications are sent **once per boot** (duplicate prevention via `/var/lib/init-status/notification-sent-*` marker files).
 
-| Scenario | Run 1 | Run 2 | Notification |
-|----------|-------|-------|--------------|
-| Full config healthy | ✓ pass | — | ✅ **Ready!** (agents introduce themselves) |
-| Safe mode recovery works | ✗ fail | ✓ pass | ⚠️ **SAFE MODE** (SafeModeBot introduces itself) |
-| Everything broken | ✗ fail | ✗ fail | 🔴 **CRITICAL** (Telegram/Discord API notification) |
+| Scenario | Run 1 | Run 2 | What User Receives |
+|----------|-------|-------|-------------------|
+| Full config healthy | ✓ pass | — | Each agent introduces itself via E2E check |
+| Safe mode recovery works | ✗ fail | ✓ pass | ⚠️ Script notification + SafeModeBot intro |
+| Everything broken | ✗ fail | ✗ fail | 🔴 CRITICAL (raw API notification only) |
 
-**No intermediate notifications** — user isn't confused by "entering safe mode" followed by "ready" messages.
+### Healthy Boot
+No separate notification needed — the E2E check doubles as the intro. Each agent introduces itself through its own bot token during `check_agents_e2e()`.
 
-When healthy, the E2E check doubles as the intro: each agent introduces itself through its own bot token during the health check. No separate notification is needed.
+### Safe Mode Boot (two messages)
+1. **Script notification** (instant) — sent via raw Telegram/Discord API by the health check script. Simple alert: "Health check failed. SafeModeBot is online to diagnose."
+2. **SafeModeBot intro** (seconds later) — sent via `openclaw agent --deliver --reply-account safe-mode`. AI-generated diagnostics: what failed, what's working, offers to help.
+
+Both are needed: the script notification is immediate and guaranteed (no LLM required), while the SafeModeBot intro provides intelligent diagnostics.
+
+### Critical Failure
+Raw API notification only — no bot is available to introduce itself.
 
 ## SafeModeBot
 
