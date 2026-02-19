@@ -449,6 +449,15 @@ $([ -n "$BK" ] && echo "Environment=BRAVE_API_KEY=${BK}")
 WantedBy=multi-user.target
 SVC
 systemctl daemon-reload
+
+# --- Fix permissions BEFORE starting services ---
+# This must happen before generate-session-services.sh starts the gateways,
+# otherwise the health check will fail with permission errors when agents
+# try to create .openclaw directories in their workspaces.
+chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+chmod 700 $H/.openclaw
+chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
+
 # --- Agent Isolation: wire isolation scripts into pipeline ---
 if [ "$ISOLATION_DEFAULT" = "session" ]; then
   # Export API keys for session services
@@ -473,6 +482,4 @@ BGXML
     DISPLAY=:10 su - $USERNAME -c "xfdesktop --reload" 2>/dev/null || true
   fi
 fi
-chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
-chmod 700 $H/.openclaw
-chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
+# Note: chown/chmod already done before starting services (prevents health check permission errors)
