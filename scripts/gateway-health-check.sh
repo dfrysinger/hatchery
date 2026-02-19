@@ -447,6 +447,58 @@ check_channel_connectivity() {
 # This tests EVERYTHING: chat token, API credentials, model validity, OAuth.
 # The agent sends an introduction message to the chat channel.
 
+# Check safe-mode agent can actually respond (E2E test)
+# This runs a simple prompt through the safe-mode agent to verify:
+# 1. Gateway is receiving messages
+# 2. Agent can process them  
+# 3. LLM API credentials work
+check_safe_mode_e2e() {
+  log "========== SAFE MODE E2E CHECK =========="
+  log "  Testing safe-mode agent can actually respond"
+  
+  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  
+  local platform="${PLATFORM:-telegram}"
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform" "with_prefix")
+  
+  log "  Platform: $platform, Owner: $owner_id"
+  
+  if [ -z "$owner_id" ] || [ "$owner_id" = "user:" ]; then
+    log "  ERROR: No owner ID for platform"
+    return 1
+  fi
+  
+  local test_prompt="Reply with exactly: HEALTH_CHECK_OK"
+  
+  log "  Running: openclaw agent --agent safe-mode --message \"$test_prompt\""
+  
+  local env_prefix=""
+  [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=/home/bot/.openclaw-sessions/$GROUP"
+  
+  local output
+  output=$(timeout 60 sudo -u "$USERNAME" env $env_prefix openclaw agent \
+    --agent "safe-mode" \
+    --message "$test_prompt" \
+    --timeout 30 \
+    --json 2>&1)
+  local exit_code=$?
+  
+  if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+    log "  ✓ safe-mode agent responded successfully"
+    log "  Output preview: $(echo "$output" | head -c 300)"
+    log "========== SAFE MODE E2E PASSED =========="
+    return 0
+  else
+    log "  ✗ safe-mode agent FAILED (exit=$exit_code)"
+    log "  Full output:"
+    echo "$output" | while IFS= read -r line; do
+      log "    | $line"
+    done
+    log "========== SAFE MODE E2E FAILED =========="
+    return 1
+  fi
+}
 check_agents_e2e() {
   log "========== E2E AGENT HEALTH CHECK =========="
   log "  This test asks each agent to introduce itself via chat"
@@ -520,7 +572,7 @@ check_agents_e2e() {
     # but openclaw must run as the bot user to create files with correct ownership.
     # In session isolation mode, point to the session-specific config (correct gateway port).
     local env_prefix=""
-    [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH"
+    [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=/home/bot/.openclaw-sessions/$GROUP"
     
     local output
     output=$(timeout 90 sudo -u "$USERNAME" env $env_prefix openclaw agent \
@@ -536,7 +588,7 @@ check_agents_e2e() {
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
     
-    if [ $exit_code -eq 0 ]; then
+    if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
       log "  ✓ SUCCESS: $agent_name responded in ${duration}s"
       log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
     else
@@ -589,12 +641,12 @@ check_service_health() {
       # In safe mode, use simple token/API validation (safe mode config is minimal)
       # In normal mode, use full end-to-end agent check
       if [ -f "$SAFE_MODE_FILE" ]; then
-        log "  Safe mode: using simple validation"
-        if check_channel_connectivity "$service" && check_api_key_validity "$service"; then
-          log "  HEALTHY (safe mode)"
+        log "  Safe mode: running E2E check on safe-mode agent"
+        if check_safe_mode_e2e; then
+          log "  HEALTHY (safe mode E2E passed)"
           return 0
         else
-          log "  HTTP OK but channel/API check failed"
+          log "  HTTP OK but safe-mode E2E check failed"
           return 1
         fi
       else
@@ -1276,7 +1328,7 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
       local end_time=$(date +%s)
       local duration=$((end_time - start_time))
       
-      if [ $exit_code -eq 0 ]; then
+      if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
         touch "$notification_file"
         log "  ✓ SUCCESS: SafeModeBot intro sent in ${duration}s"
         log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
