@@ -566,7 +566,7 @@ check_agents_e2e() {
     log "  -------- Testing $agent_id --------"
     log "  Agent: $agent_name ($agent_id)"
     log "  Model: $agent_model"
-    log "  Command: openclaw agent --agent $agent_id --deliver --reply-channel $channel --reply-to $owner_id"
+    log "  Command: openclaw agent --agent $agent_id --deliver --reply-channel $channel --reply-account $agent_id --reply-to $owner_id"
     
     local start_time=$(date +%s)
     
@@ -583,6 +583,7 @@ check_agents_e2e() {
       --message "$intro_prompt" \
       --deliver \
       --reply-channel "$channel" \
+      --reply-account "$agent_id" \
       --reply-to "$owner_id" \
       --timeout 60 \
       --json 2>&1)
@@ -1322,7 +1323,7 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
         log "  Session isolation mode: using gateway at $gateway_url, config at $config_path"
       fi
       
-      log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
+      log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-account safe-mode --reply-to $owner_id"
       
       local start_time=$(date +%s)
       
@@ -1341,6 +1342,7 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
         --message "$safemode_prompt" \
         --deliver \
         --reply-channel "$send_platform" \
+        --reply-account "safe-mode" \
         --reply-to "$owner_id" \
         --timeout 90 \
         --json 2>&1)
