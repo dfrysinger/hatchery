@@ -563,12 +563,14 @@ check_agents_e2e() {
     log "  -------- Testing $agent_id --------"
     log "  Agent: $agent_name ($agent_id)"
     log "  Model: $agent_model"
+    log "  Command: openclaw agent --agent $agent_id --deliver --reply-channel $channel --reply-to $owner_id"
     
     local start_time=$(date +%s)
     
-    # Generate the intro (don't use --deliver, we'll send directly via API)
+    # Use openclaw agent with --deliver to send response to chat
     # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
     # but openclaw must run as the bot user to create files with correct ownership.
+    # In session isolation mode, point to the session-specific config (correct gateway port).
     local env_prefix=""
     [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=/home/bot/.openclaw-sessions/$GROUP"
     
@@ -576,6 +578,9 @@ check_agents_e2e() {
     output=$(timeout 90 sudo -u "$USERNAME" env $env_prefix openclaw agent \
       --agent "$agent_id" \
       --message "$intro_prompt" \
+      --deliver \
+      --reply-channel "$channel" \
+      --reply-to "$owner_id" \
       --timeout 60 \
       --json 2>&1)
     local exit_code=$?
@@ -583,55 +588,15 @@ check_agents_e2e() {
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
     
-    # Extract the intro text from JSON response
-    local intro_text=""
-    if echo "$output" | grep -q '"payloads"'; then
-      intro_text=$(echo "$output" | grep -o '"text"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"text"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//' | sed 's/\\n/\n/g')
-    fi
-    
-    if [ -z "$intro_text" ]; then
-      # Fallback: try to extract any reasonable text
-      intro_text=$(echo "$output" | grep -v "gateway connect\|Gateway agent\|Gateway target\|Source:\|Config:\|Bind:" | tail -5 | head -1)
-    fi
-    
-    local send_success=false
-    if [ -n "$intro_text" ] && [ ${#intro_text} -gt 10 ]; then
-      log "  Generated intro (${#intro_text} chars)"
-      
-      # Send directly via platform API
-      if [ "$channel" = "telegram" ]; then
-        local bot_token_var="AGENT${agent_num}_BOT_TOKEN"
-        local bot_token="${!bot_token_var:-}"
-        [ -z "$bot_token" ] && bot_token_var="AGENT${agent_num}_TELEGRAM_BOT_TOKEN" && bot_token="${!bot_token_var:-}"
-        
-        if [ -n "$bot_token" ]; then
-          local send_result
-          send_result=$(curl -sf --max-time 10 \
-            "https://api.telegram.org/bot${bot_token}/sendMessage" \
-            -d "chat_id=${owner_id#user:}" \
-            -d "text=${intro_text}" \
-            -d "parse_mode=Markdown" 2>&1)
-          if echo "$send_result" | grep -q '"ok":true'; then
-            send_success=true
-            log "  ✓ SUCCESS: $agent_name responded and delivered in ${duration}s"
-          else
-            log "  ✗ FAILED: Telegram send failed: $send_result"
-          fi
-        else
-          log "  ✗ FAILED: No bot token for $agent_id"
-        fi
-      elif [ "$channel" = "discord" ]; then
-        # For Discord, would need to send via Discord API
-        # For now, just log success if agent responded (delivery handled by gateway)
-        log "  Generated intro for Discord - gateway should deliver"
-        send_success=true
-      fi
+    if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+      log "  ✓ SUCCESS: $agent_name responded in ${duration}s"
+      log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
     else
-      log "  ✗ FAILED: $agent_name - no valid response (exit=$exit_code, duration=${duration}s)"
-      log "  Output (first 300 chars): $(echo "$output" | head -c 300)"
-    fi
-    
-    if [ "$send_success" = "false" ]; then
+      log "  ✗ FAILED: $agent_name (exit=$exit_code, duration=${duration}s)"
+      log "  Full output:"
+      echo "$output" | while IFS= read -r line; do
+        log "    | $line"
+      done
       all_healthy=false
       failed_agents="${failed_agents} ${agent_name}"
     fi
@@ -1346,7 +1311,7 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
         log "  Session isolation mode: using gateway at $gateway_url, config at $config_path"
       fi
       
-      log "  Generating SafeModeBot intro via openclaw agent..."
+      log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
       
       local start_time=$(date +%s)
       
@@ -1360,10 +1325,12 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
         env_prefix="OPENCLAW_GATEWAY_URL=$gateway_url OPENCLAW_CONFIG_PATH=$config_path"
       fi
       
-      # Generate the intro message (don't use --deliver, we'll send directly via API)
       output=$(timeout 120 sudo -u "$USERNAME" env $env_prefix openclaw agent \
         --agent "safe-mode" \
         --message "$safemode_prompt" \
+        --deliver \
+        --reply-channel "$send_platform" \
+        --reply-to "$owner_id" \
         --timeout 90 \
         --json 2>&1)
       local exit_code=$?
@@ -1371,49 +1338,18 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
       local end_time=$(date +%s)
       local duration=$((end_time - start_time))
       
-      # Extract the text from the JSON response
-      local intro_text=""
-      if echo "$output" | grep -q '"payloads"'; then
-        intro_text=$(echo "$output" | grep -o '"text"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"text"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//' | sed 's/\\n/\n/g')
-      fi
-      
-      if [ -z "$intro_text" ]; then
-        # Fallback: try to extract any reasonable text after the JSON errors
-        intro_text=$(echo "$output" | grep -v "gateway connect\|Gateway agent\|Gateway target\|Source:\|Config:\|Bind:" | tail -5 | head -1)
-      fi
-      
-      if [ -n "$intro_text" ] && [ ${#intro_text} -gt 10 ]; then
-        log "  Generated intro (${#intro_text} chars): ${intro_text:0:100}..."
-        
-        # Send directly via platform API
-        local send_result=""
-        if [ "$send_platform" = "telegram" ]; then
-          local bot_token=$(jq -r '.channels.telegram.botToken // empty' "$config_path" 2>/dev/null)
-          if [ -n "$bot_token" ]; then
-            send_result=$(curl -sf --max-time 10 \
-              "https://api.telegram.org/bot${bot_token}/sendMessage" \
-              -d "chat_id=${owner_id}" \
-              -d "text=${intro_text}" \
-              -d "parse_mode=Markdown" 2>&1)
-            if echo "$send_result" | grep -q '"ok":true'; then
-              touch "$notification_file"
-              log "  ✓ SUCCESS: SafeModeBot intro delivered via Telegram API in ${duration}s"
-              log "========== SAFE MODE INTRO COMPLETE =========="
-            else
-              log "  ✗ FAILED: Telegram send failed: $send_result"
-            fi
-          else
-            log "  ✗ FAILED: No Telegram bot token in config"
-          fi
-        elif [ "$send_platform" = "discord" ]; then
-          # For Discord, we'd need webhook or bot token - use direct notification already sent
-          log "  Discord intro: relying on direct notification already sent"
-          touch "$notification_file"
-          log "========== SAFE MODE INTRO COMPLETE =========="
-        fi
+      if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+        touch "$notification_file"
+        log "  ✓ SUCCESS: SafeModeBot intro sent in ${duration}s"
+        log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
+        log "========== SAFE MODE INTRO COMPLETE =========="
       else
-        log "  ✗ FAILED: Could not extract intro text from agent response"
-        log "  Raw output (first 500 chars): $(echo "$output" | head -c 500)"
+        log "  ✗ FAILED: SafeModeBot intro (exit=$exit_code, duration=${duration}s)"
+        log "  Full output:"
+        echo "$output" | while IFS= read -r line; do
+          log "    | $line"
+        done
+        log "  Direct notification already sent - SafeModeBot intro failed but user was notified"
       fi
       
       # Already sent direct notification, so we're done regardless of bot intro result
