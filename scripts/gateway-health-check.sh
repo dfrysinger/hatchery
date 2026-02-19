@@ -653,7 +653,12 @@ check_service_health() {
           return 1
         fi
       else
-        log "  Normal mode: using end-to-end agent check"
+        log "  Normal mode: validating chat tokens first"
+        if ! check_channel_connectivity; then
+          log "  Chat token validation FAILED — skipping E2E, marking unhealthy"
+          return 1
+        fi
+        log "  Chat tokens OK — running end-to-end agent check"
         if check_agents_e2e; then
           log "  HEALTHY"
           return 0
