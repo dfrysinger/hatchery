@@ -1264,12 +1264,21 @@ send_boot_notification() {
       log "  BOOT_REPORT.md created at $H/clawd/agents/safe-mode/BOOT_REPORT.md"
       
       # Trigger SafeModeBot intro via openclaw agent
-      # NOTE: In session isolation mode, session configs don't have a safe-mode agent,
-      # so we skip the LLM-powered intro and rely on the direct notification already sent.
-      if [ "$ISOLATION" = "session" ]; then
+      # In session isolation + safe mode, the recovery-generated config DOES have a safe-mode agent.
+      # Only skip if safe-mode agent is not present in the config.
+      local config_to_check="${CONFIG_PATH:-}"
+      if [ -z "$config_to_check" ] && [ -n "${GROUP:-}" ]; then
+        config_to_check="/etc/systemd/system/${GROUP}/openclaw.session.json"
+      fi
+      
+      local has_safe_mode_agent=""
+      if [ -f "$config_to_check" ]; then
+        has_safe_mode_agent=$(jq -r '.agents.list[]? | select(.id == "safe-mode") | .id' "$config_to_check" 2>/dev/null)
+      fi
+      
+      if [ -z "$has_safe_mode_agent" ]; then
         log "========== SAFE MODE BOT INTRO (SKIPPED) =========="
-        log "  Session isolation mode: SafeModeBot intro not available"
-        log "  (Session configs only contain group agents, no safe-mode agent)"
+        log "  No safe-mode agent found in config: $config_to_check"
         log "  User has been notified via direct Telegram/Discord API"
         return 0
       fi
@@ -1297,8 +1306,9 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
       local config_path=""
       if [ "$ISOLATION" = "session" ] && [ -n "${GROUP:-}" ] && [ -n "${GROUP_PORT:-}" ]; then
         gateway_url="ws://127.0.0.1:${GROUP_PORT}"
-        config_path="${H}/.openclaw-sessions/${GROUP}/openclaw.session.json"
-        log "  Session isolation mode: using gateway at $gateway_url"
+        # Use OPENCLAW_CONFIG_PATH from systemd env if available, otherwise construct it
+        config_path="${CONFIG_PATH:-/etc/systemd/system/${GROUP}/openclaw.session.json}"
+        log "  Session isolation mode: using gateway at $gateway_url, config at $config_path"
       fi
       
       log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-to $owner_id"
