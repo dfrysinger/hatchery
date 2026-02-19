@@ -255,6 +255,9 @@ validate_api_key() {
       # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
       local auth_header
       if [[ "$key" == sk-ant-oat* ]]; then
+        # OAuth tokens cannot be validated via API, trust them if present
+        VALIDATION_REASON="OAuth token (trusted)"
+        return 0
         auth_header="Authorization: Bearer ${key}"
         # OAuth tokens cannot be validated via API, trust them if present
         VALIDATION_REASON="OAuth token (trusted)"
