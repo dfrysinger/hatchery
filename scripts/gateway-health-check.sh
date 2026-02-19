@@ -739,8 +739,12 @@ enter_safe_mode() {
       log "  ERROR: emergency.json does not exist!"
     fi
     cp "$H/.openclaw/openclaw.emergency.json" "$CONFIG_PATH"
-    chown $USERNAME:$USERNAME "$CONFIG_PATH"
-    chmod 600 "$CONFIG_PATH"
+    if type ensure_bot_file &>/dev/null; then
+      ensure_bot_file "$CONFIG_PATH" 600
+    else
+      chown $USERNAME:$USERNAME "$CONFIG_PATH"
+      chmod 600 "$CONFIG_PATH"
+    fi
     log "Config after fallback:"
     local new_model
     new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$CONFIG_PATH" 2>/dev/null)
@@ -769,7 +773,11 @@ Recovery: **${status}**
 
 Check logs: cat /var/log/gateway-health-check.log
 SAFEMD
-    chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
+    if type ensure_bot_file &>/dev/null; then
+      ensure_bot_file "$H/clawd/agents/agent${si}/SAFE_MODE.md" 644
+    else
+      chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
+    fi
   done
   
   # Stop isolation services if running
@@ -1419,7 +1427,11 @@ $(cat /var/log/safe-mode-diagnostics.txt 2>/dev/null || echo "No diagnostics ava
 4. Upload new config via API or recreate droplet
 REPORT
   
-  chown $USERNAME:$USERNAME "$report_path" 2>/dev/null
+  if type ensure_bot_file &>/dev/null; then
+    ensure_bot_file "$report_path" 644
+  else
+    chown $USERNAME:$USERNAME "$report_path" 2>/dev/null
+  fi
   log "Generated BOOT_REPORT.md"
 }
 

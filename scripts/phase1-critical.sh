@@ -18,6 +18,9 @@
 #
 # Original: /usr/local/sbin/phase1-critical.sh (in hatch.yaml write_files)
 # =============================================================================
+
+# Source permission utilities (may not exist during early boot)
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 set -e
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
@@ -247,9 +250,14 @@ cat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'
 Desktop setup in progress. RDP will be ready soon.
 If nothing needs attention, reply with ONLY: NO_REPLY.
 BOOTMD
-chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
-chmod 700 $H/.openclaw
-chmod 600 $H/.openclaw/openclaw.json
+# Fix permissions (use helper if available, fallback otherwise)
+if type fix_bot_permissions &>/dev/null; then
+  fix_bot_permissions "$H"
+else
+  chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+  chmod 700 $H/.openclaw
+  chmod 600 $H/.openclaw/openclaw.json
+fi
 cat > /etc/systemd/system/clawdbot.service <<SVC
 [Unit]
 Description=Clawdbot Gateway

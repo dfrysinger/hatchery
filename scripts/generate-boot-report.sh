@@ -3,6 +3,9 @@
 # =============================================================================
 # generate-boot-report.sh -- Boot Report & Coordinator System
 # =============================================================================
+
+# Source permission utilities
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  Generate comprehensive boot report showing intended vs actual
 #           configuration, designate a coordinator bot, and notify user.
 #
@@ -468,8 +471,12 @@ distribute_boot_report() {
     if [ -d "$workspace" ] || [ "${TEST_MODE:-}" = "1" ]; then
       mkdir -p "$workspace" 2>/dev/null || true
       echo "$report" > "$workspace/BOOT_REPORT.md"
-      chmod 600 "$workspace/BOOT_REPORT.md" 2>/dev/null || true
-      [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$workspace/BOOT_REPORT.md" 2>/dev/null || true
+      if type ensure_bot_file &>/dev/null; then
+        ensure_bot_file "$workspace/BOOT_REPORT.md" 644
+      else
+        chmod 644 "$workspace/BOOT_REPORT.md" 2>/dev/null || true
+        [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$workspace/BOOT_REPORT.md" 2>/dev/null || true
+      fi
     fi
   done
   
@@ -478,16 +485,24 @@ distribute_boot_report() {
   if [ -d "$safe_mode_workspace" ] || [ "${TEST_MODE:-}" = "1" ]; then
     mkdir -p "$safe_mode_workspace" 2>/dev/null || true
     echo "$report" > "$safe_mode_workspace/BOOT_REPORT.md"
-    chmod 600 "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
-    [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
+    if type ensure_bot_file &>/dev/null; then
+      ensure_bot_file "$safe_mode_workspace/BOOT_REPORT.md" 644
+    else
+      chmod 644 "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
+      [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
+    fi
   fi
   
   # Also copy to shared folder
   local shared="$home/clawd/shared"
   mkdir -p "$shared" 2>/dev/null || true
   echo "$report" > "$shared/BOOT_REPORT.md"
-  chmod 600 "$shared/BOOT_REPORT.md" 2>/dev/null || true
-  [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$shared/BOOT_REPORT.md" 2>/dev/null || true
+  if type ensure_bot_file &>/dev/null; then
+    ensure_bot_file "$shared/BOOT_REPORT.md" 644
+  else
+    chmod 644 "$shared/BOOT_REPORT.md" 2>/dev/null || true
+    [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$shared/BOOT_REPORT.md" 2>/dev/null || true
+  fi
 }
 
 # =============================================================================

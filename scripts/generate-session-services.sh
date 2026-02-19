@@ -110,19 +110,30 @@ echo "Generating session services for ${#SESSION_GROUPS[@]} group(s)..."
 # --- Generate per-group service and config ---
 # Ensure parent state directory exists and is owned by service user
 STATE_BASE="${HOME_DIR}/.openclaw-sessions"
-mkdir -p "$STATE_BASE"
-[ -z "${DRY_RUN:-}" ] && chown "${SVC_USER}:${SVC_USER}" "$STATE_BASE" && chmod 755 "$STATE_BASE"
+if type ensure_bot_dir &>/dev/null; then
+  ensure_bot_dir "$STATE_BASE" 700
+else
+  mkdir -p "$STATE_BASE"
+  [ -z "${DRY_RUN:-}" ] && chown "${SVC_USER}:${SVC_USER}" "$STATE_BASE" && chmod 700 "$STATE_BASE"
+fi
 
 group_index=0
 for group in "${SESSION_GROUPS[@]}"; do
     port=$((BASE_PORT + group_index))
     group_dir="${OUTPUT_DIR}/${group}"
     state_dir="${STATE_BASE}/${group}"
-    mkdir -p "$group_dir"
-    mkdir -p "$state_dir"
-    [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 755 "$state_dir"
-    # Config dir needs to be readable by service user
-    chmod 755 "$group_dir"
+    
+    # Create directories with proper ownership
+    if type ensure_bot_dir &>/dev/null; then
+      ensure_bot_dir "$state_dir" 700
+      # Config dir needs 755 for systemd to read
+      mkdir -p "$group_dir" && chmod 755 "$group_dir"
+    else
+      mkdir -p "$group_dir"
+      mkdir -p "$state_dir"
+      [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 700 "$state_dir"
+      chmod 755 "$group_dir"
+    fi
 
     # Collect agents for this group
     agent_list_json="["
@@ -153,7 +164,11 @@ for group in "${SESSION_GROUPS[@]}"; do
             agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\"}"
             
             # Create agent directory structure (OpenClaw will create sessions/ inside)
-            mkdir -p "${state_dir}/agents/agent${i}/agent"
+            if type ensure_bot_dir &>/dev/null; then
+              ensure_bot_dir "${state_dir}/agents/agent${i}/agent" 700
+            else
+              mkdir -p "${state_dir}/agents/agent${i}/agent"
+            fi
             
             # Copy auth-profiles.json from main agent directory if it exists
             main_auth="${HOME_DIR}/.openclaw/agents/agent${i}/agent/auth-profiles.json"
@@ -165,7 +180,13 @@ for group in "${SESSION_GROUPS[@]}"; do
                 echo "  [agent${i}] WARNING: No auth-profiles.json found at $main_auth"
             fi
             
-            [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}"
+            # Fix ownership
+            if type fix_session_state &>/dev/null && [ -z "${DRY_RUN:-}" ]; then
+              chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}" 2>/dev/null || true
+              [ -f "$session_auth" ] && chmod 600 "$session_auth"
+            elif [ -z "${DRY_RUN:-}" ]; then
+              chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}"
+            fi
             
             # Build Telegram account for this agent
             if [ -n "$agent_bot_token" ]; then
@@ -239,13 +260,22 @@ for group in "${SESSION_GROUPS[@]}"; do
 SESSIONCFG
     # Make config AND directory writable by service user (OpenClaw needs to persist config changes)
     # SECURITY: Use restrictive permissions - only owner (bot user) should have write access
-    chown -R "${SVC_USER}:${SVC_USER}" "$group_dir" 2>/dev/null || true
-    chmod 750 "$group_dir"
-    chmod 600 "${group_dir}/openclaw.session.json"
+    if type fix_session_config_dir &>/dev/null; then
+      fix_session_config_dir "$group_dir"
+    else
+      chown -R "${SVC_USER}:${SVC_USER}" "$group_dir" 2>/dev/null || true
+      chmod 750 "$group_dir"
+      chmod 600 "${group_dir}/openclaw.session.json"
+    fi
+    
     # Final ownership fix for entire state tree (ensure all subdirs are accessible)
     if [ -z "${DRY_RUN:-}" ]; then
-        chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}"
-        chmod -R u+rwX "${state_dir}"
+        if type fix_session_state &>/dev/null; then
+          fix_session_state "${state_dir}"
+        else
+          chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}"
+          chmod -R u+rwX "${state_dir}"
+        fi
         echo "  [${group}] state_dir permissions:"
         ls -la "${state_dir}" 2>&1 | head -5
     fi
