@@ -687,14 +687,14 @@ This is usually caused by config migration or slow provider initialization. No a
   # Try env-var tokens (config may not be readable yet during startup)
   local platform="" token=""
   for i in $(seq 1 "${AGENT_COUNT:-4}"); do
-    local tg_var="AGENT${i}_TELEGRAM_TOKEN"
+    local tg_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
     if [ -n "${!tg_var:-}" ]; then
       token="${!tg_var}"; platform="telegram"; break
     fi
   done
   if [ -z "$token" ]; then
     for i in $(seq 1 "${AGENT_COUNT:-4}"); do
-      local dc_var="AGENT${i}_DISCORD_TOKEN"
+      local dc_var="AGENT${i}_DISCORD_BOT_TOKEN"
       if [ -n "${!dc_var:-}" ]; then
         token="${!dc_var}"; platform="discord"; break
       fi
@@ -752,7 +752,7 @@ send_entering_safe_mode_warning() {
     log "  No token in config - trying env vars"
     # Try Telegram tokens from any agent
     for i in $(seq 1 "${AGENT_COUNT:-4}"); do
-      local tg_var="AGENT${i}_TELEGRAM_TOKEN"
+      local tg_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
       if [ -n "${!tg_var:-}" ]; then
         token="${!tg_var}"
         platform="telegram"
@@ -765,7 +765,7 @@ send_entering_safe_mode_warning() {
   if [ -z "$token" ]; then
     # Try Discord tokens
     for i in $(seq 1 "${AGENT_COUNT:-4}"); do
-      local dc_var="AGENT${i}_DISCORD_TOKEN"
+      local dc_var="AGENT${i}_DISCORD_BOT_TOKEN"
       if [ -n "${!dc_var:-}" ]; then
         token="${!dc_var}"
         platform="discord"
@@ -1020,34 +1020,31 @@ SAFEMD
     fi
   done
   
-  # Notify user BEFORE stopping service (systemctl stop will SIGTERM this
-  # ExecStartPost process, so anything after the stop never executes)
+  # Notify user about safe mode entry
   if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
     send_entering_safe_mode_warning
   fi
   
-  # Stop the gateway service for this group
-  # Universal: use GROUP if set, otherwise fall back to isolation-specific service
-  if [ -n "${GROUP:-}" ]; then
+  # In ExecStartPost mode, do NOT stop the service — we need to return an
+  # exit code so systemd can restart with the new config. Stopping here
+  # would SIGTERM this process before we can return.
+  if [ "$RUN_MODE" = "execstartpost" ]; then
+    log "ExecStartPost mode: skipping service stop (will exit 1 for systemd restart)"
+  elif [ -n "${GROUP:-}" ]; then
     if [ "$ISOLATION" = "container" ]; then
-      # Inside container: kill the gateway process directly
       log "Stopping gateway process in container (group: $GROUP)"
       pkill -f "openclaw gateway" 2>/dev/null || true
-      # Also try docker stop from host context if available
       docker stop "openclaw-${GROUP}" 2>/dev/null || true
     else
-      # Session or standard with GROUP: stop the systemd service
       log "Stopping service for group: $GROUP"
       systemctl stop "openclaw-${GROUP}.service" 2>/dev/null || true
     fi
   elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
-    # Legacy all-groups mode (should not reach here)
     IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
     for group in "${GROUP_ARRAY[@]}"; do
       systemctl stop "openclaw-${group}.service" 2>/dev/null || true
     done
   else
-    # Standard mode: stop openclaw
     systemctl stop openclaw 2>/dev/null || true
   fi
   
