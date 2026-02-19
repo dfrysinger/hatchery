@@ -702,11 +702,6 @@ enter_safe_mode() {
       log "Recovery succeeded"
       log "Recovery output: $recovery_output"
       SMART_RECOVERY_SUCCESS=true
-      
-      # Send warning to user BEFORE restart (only on first entry, not retries)
-      if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
-        send_entering_safe_mode_warning
-      fi
     else
       log "Recovery FAILED (exit $recovery_exit)"
       log "Recovery output: $recovery_output"
@@ -722,11 +717,6 @@ enter_safe_mode() {
     if [ $recovery_exit -eq 0 ]; then
       log "Recovery succeeded"
       SMART_RECOVERY_SUCCESS=true
-      
-      # Send warning to user BEFORE restart (only on first entry, not retries)
-      if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
-        send_entering_safe_mode_warning
-      fi
     else
       log "Recovery FAILED (exit $recovery_exit): $recovery_output"
     fi
@@ -785,6 +775,12 @@ SAFEMD
       chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
     fi
   done
+  
+  # Notify user BEFORE stopping service (systemctl stop will SIGTERM this
+  # ExecStartPost process, so anything after the stop never executes)
+  if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
+    send_entering_safe_mode_warning
+  fi
   
   # Stop the gateway service for this group
   # Universal: use GROUP if set, otherwise fall back to isolation-specific service
@@ -923,8 +919,10 @@ restart_gateway() {
 # =============================================================================
 
 # Wait for gateway to fully initialize
-log "Waiting 30s for gateway to settle..."
-sleep 30
+# Total health check budget: 45s settle + 12 attempts × 5s = 105s
+# OpenClaw gateway can take 60-90s to start (config migration, provider init)
+log "Waiting 45s for gateway to settle..."
+sleep 45
 
 HEALTHY=false
 
@@ -932,7 +930,7 @@ HEALTHY=false
 if [ -n "$GROUP" ]; then
   # Per-group health check (session isolation - each group checks itself)
   log "Group mode: checking group '$GROUP' on port $GROUP_PORT"
-  check_service_health "$SERVICE_NAME" "$GROUP_PORT" 6 && HEALTHY=true
+  check_service_health "$SERVICE_NAME" "$GROUP_PORT" 12 && HEALTHY=true
 
 elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
   # Legacy: session isolation without per-group health check
@@ -944,7 +942,7 @@ elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
   idx=0
   ALL_HEALTHY=true
   for group in "${GROUP_ARRAY[@]}"; do
-    if ! check_service_health "openclaw-${group}.service" $((BASE_PORT + idx)) 6; then
+    if ! check_service_health "openclaw-${group}.service" $((BASE_PORT + idx)) 12; then
       log "  Session group '$group' FAILED"
       ALL_HEALTHY=false
     fi
@@ -955,11 +953,11 @@ elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
 elif [ "$ISOLATION" = "container" ]; then
   # Container mode without GROUP should not happen — each container runs its own check
   log "Container isolation mode (no GROUP — legacy fallback)"
-  check_service_health "openclaw-containers.service" 18790 6 && HEALTHY=true
+  check_service_health "openclaw-containers.service" 18790 12 && HEALTHY=true
 
 else
   log "Standard mode"
-  check_service_health "openclaw" 18789 6 && HEALTHY=true
+  check_service_health "openclaw" 18789 12 && HEALTHY=true
 fi
 
 # =============================================================================
@@ -1112,8 +1110,36 @@ send_entering_safe_mode_warning() {
     fi
   fi
   
+  # Fallback: try env vars from habitat-parsed.env (emergency.json may lack chat tokens)
   if [ -z "$token" ]; then
-    log "  No working token found in config - cannot send warning"
+    log "  No token in config - trying env vars"
+    # Try Telegram tokens from any agent
+    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
+      local tg_var="AGENT${i}_TELEGRAM_TOKEN"
+      if [ -n "${!tg_var:-}" ]; then
+        token="${!tg_var}"
+        platform="telegram"
+        log "  Found Telegram token from $tg_var"
+        break
+      fi
+    done
+  fi
+  
+  if [ -z "$token" ]; then
+    # Try Discord tokens
+    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
+      local dc_var="AGENT${i}_DISCORD_TOKEN"
+      if [ -n "${!dc_var:-}" ]; then
+        token="${!dc_var}"
+        platform="discord"
+        log "  Found Discord token from $dc_var"
+        break
+      fi
+    done
+  fi
+  
+  if [ -z "$token" ]; then
+    log "  No working token found in config or env - cannot send warning"
     return 1
   fi
   
