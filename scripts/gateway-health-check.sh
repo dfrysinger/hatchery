@@ -817,8 +817,8 @@ check_service_health() {
   local service="$1"
   local port="$2"
   local max_attempts="${3:-12}"
-  local hard_max_seconds="${HEALTH_CHECK_HARD_MAX_SECS:-300}"  # 5 min absolute ceiling
-  local warn_after_seconds="${HEALTH_CHECK_WARN_SECS:-120}"    # "still waiting" at 2 min
+  local hard_max_seconds="${HEALTH_CHECK_HARD_MAX_SECS:-15}"   # TESTING: 15s to force timeout
+  local warn_after_seconds="${HEALTH_CHECK_WARN_SECS:-8}"      # TESTING: 8s to test warning
   local start_time
   start_time=$(date +%s)
   local warned=false
@@ -1167,8 +1167,8 @@ restart_gateway() {
 # - If gateway process is alive, keep polling up to hard max (5 min)
 # - If gateway process dies, fail immediately
 # - At 2 min mark, send "still waiting" notification to user
-log "Waiting 45s for gateway to settle..."
-sleep 45
+log "Waiting 5s for gateway to settle..."  # TESTING: lowered from 45s
+sleep 5
 
 HEALTHY=false
 
