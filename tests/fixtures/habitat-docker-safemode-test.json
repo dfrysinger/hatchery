@@ -1,0 +1,84 @@
+{
+  "name": "TestHabitat-DockerSafeMode",
+  "platform": "both",
+  "domain": "bot2.frysinger.org",
+  "destructMinutes": 30,
+  "bgColor": "FF4444",
+  "remoteApi": true,
+  "isolation": "container",
+  "sharedPaths": [
+    "/home/bot/clawd/shared"
+  ],
+  "platforms": {
+    "telegram": {
+      "ownerId": "5874850284"
+    },
+    "discord": {
+      "ownerId": "795380005466800159",
+      "serverId": "1468992121901027582"
+    }
+  },
+  "agents": [
+    {
+      "agent": "broken-bot-1",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "will-fail",
+      "network": "host",
+      "resources": {
+        "memory": "1g",
+        "cpu": "1.0"
+      },
+      "tokens": {
+        "telegram": "INVALID_TOKEN_000000:XXXXXXXXXXXXXXXXXXXXXXXXX",
+        "discord": "INVALID_DISCORD_TOKEN_WILL_FAIL_BOT1"
+      }
+    },
+    {
+      "agent": "broken-bot-2",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "will-fail",
+      "tokens": {
+        "telegram": "INVALID_TOKEN_111111:YYYYYYYYYYYYYYYYYYYYYYYYY",
+        "discord": "INVALID_DISCORD_TOKEN_WILL_FAIL_BOT2"
+      }
+    },
+    {
+      "agent": "healthy-bot-1",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "should-survive",
+      "network": "host",
+      "resources": {
+        "memory": "1g",
+        "cpu": "1.0"
+      },
+      "tokens": {
+        "telegram": "8513046756:AAGA45Bl4MhJ0d9cJQzhP6ZEQVLKLilD_O0",
+        "discord": "TEST_DISCORD_TOKEN_HEALTHY1"
+      }
+    },
+    {
+      "agent": "healthy-bot-2",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "should-survive",
+      "tokens": {
+        "telegram": "8484612152:AAFkgERGjnpqbZ9C_WYwsNHSbj8VYg0FXfs",
+        "discord": "TEST_DISCORD_TOKEN_HEALTHY2"
+      }
+    },
+    {
+      "agent": "mixed-tokens",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "partial-fail",
+      "network": "internal",
+      "capabilities": ["exec", "read", "write"],
+      "resources": {
+        "memory": "512m",
+        "cpu": "0.5"
+      },
+      "tokens": {
+        "telegram": "INVALID_TOKEN_222222:ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "discord": "INVALID_DISCORD_TOKEN_MIXED"
+      }
+    }
+  ]
+}
