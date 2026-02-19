@@ -998,7 +998,7 @@ generate_emergency_config() {
   "gateway": {
     "mode": "local",
     "port": ${GROUP_PORT:-18789},
-    "bind": "lan",
+    "bind": "loopback",
     "controlUi": {
       "enabled": true,
       "allowInsecureAuth": true
