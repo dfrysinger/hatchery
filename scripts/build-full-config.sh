@@ -172,7 +172,7 @@ CONFIG_JSON=$(cat <<CFG
   "gateway": {
     "mode": "local",
     "port": 18789,
-    "bind": "lan",
+    "bind": "loopback",
     "controlUi": {"enabled": true, "allowInsecureAuth": true},
     "auth": {"mode": "token", "token": "${GT_ESC}"}
   },
