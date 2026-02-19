@@ -1271,8 +1271,22 @@ send_boot_notification() {
       ;;
       
     safe-mode)
-      # Pre-restart warning already sent by send_entering_safe_mode_warning()
-      # Now just trigger SafeModeBot intro for detailed diagnostics
+      # Send the safe mode notification via raw Telegram/Discord API first
+      local habitat_name="${HABITAT_NAME:-Droplet}"
+      local sm_message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
+
+Health check failed. SafeModeBot is online to diagnose.
+
+See BOOT_REPORT.md for details."
+
+      log "  Sending safe mode notification via $send_platform"
+      if [ "$send_platform" = "telegram" ] && [ -n "$send_token" ]; then
+        send_telegram_notification "$send_token" "$owner_id" "$sm_message" && log "  Script notification sent" || log "  Script notification failed"
+      elif [ "$send_platform" = "discord" ] && [ -n "$send_token" ]; then
+        send_discord_notification "$send_token" "$owner_id" "$sm_message" && log "  Script notification sent" || log "  Script notification failed"
+      fi
+
+      # Now trigger SafeModeBot intro for detailed diagnostics
       
       # Generate boot report for SafeModeBot to read
       log "  Generating BOOT_REPORT.md for SafeModeBot to read..."
