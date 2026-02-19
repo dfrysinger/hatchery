@@ -112,7 +112,8 @@ if [ "$DC_ENABLED" = "true" ]; then
 fi
 BD="$BD]"
 A1_TG_TOK_ESC=$(json_escape "$AGENT1_BOT_TOKEN")
-TA="\"default\":{\"botToken\":\"${A1_TG_TOK_ESC}\"}"
+TA="\"default\":{\"botToken\":\"${A1_TG_TOK_ESC}\"},\"agent1\":{\"botToken\":\"${A1_TG_TOK_ESC}\"}"
+# agent1 duplicated under both "default" and "agent1" so --reply-account agent1 works
 if [ "$AC" -gt 1 ]; then
   for i in $(seq 2 $AC); do
     TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"; TOK_ESC=$(json_escape "$TOK")
@@ -121,7 +122,8 @@ if [ "$AC" -gt 1 ]; then
 fi
 TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI_ESC}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
 A1_DC_TOK_ESC=$(json_escape "$AGENT1_DISCORD_BOT_TOKEN")
-DA="\"default\":{\"token\":\"${A1_DC_TOK_ESC}\"}"
+DA="\"default\":{\"token\":\"${A1_DC_TOK_ESC}\"},\"agent1\":{\"token\":\"${A1_DC_TOK_ESC}\"}"
+# agent1 duplicated under both "default" and "agent1" so --reply-account agent1 works
 if [ "$AC" -gt 1 ]; then
   for i in $(seq 2 $AC); do
     DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"; DTOK_ESC=$(json_escape "$DTOK")
