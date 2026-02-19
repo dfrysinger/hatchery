@@ -34,6 +34,7 @@ def run_parse_habitat(habitat_json: dict, agent_lib: dict = None) -> tuple[dict,
     
     # Create temp files to capture output
     with tempfile.TemporaryDirectory() as tmpdir:
+        env['HABITAT_OUTPUT_DIR'] = tmpdir
         # Patch the output paths in a wrapper script
         wrapper = f'''
 import sys
@@ -94,7 +95,7 @@ class TestIsolationDefaultParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_DEFAULT") == "none"
 
     def test_isolation_none_explicit(self):
@@ -106,7 +107,7 @@ class TestIsolationDefaultParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_DEFAULT") == "none"
 
     def test_isolation_session(self):
@@ -118,7 +119,7 @@ class TestIsolationDefaultParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_DEFAULT") == "session"
 
     def test_isolation_container(self):
@@ -130,7 +131,7 @@ class TestIsolationDefaultParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_DEFAULT") == "container"
 
     def test_isolation_droplet(self):
@@ -154,7 +155,7 @@ class TestIsolationDefaultParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_DEFAULT") == "none"
         assert "Invalid isolation level" in stderr
 
@@ -170,7 +171,7 @@ class TestSharedPathsParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_SHARED_PATHS") == ""
 
     def test_shared_paths_single(self):
@@ -182,7 +183,7 @@ class TestSharedPathsParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_SHARED_PATHS") == "/clawd/shared"
 
     def test_shared_paths_multiple(self):
@@ -194,7 +195,7 @@ class TestSharedPathsParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_SHARED_PATHS") == "/clawd/shared,/clawd/reports,/data"
 
 
@@ -209,7 +210,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Claude"
 
     def test_explicit_isolation_group(self):
@@ -220,7 +221,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "council"
 
     def test_isolation_group_with_hyphens(self):
@@ -231,7 +232,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "team-alpha-1"
         assert "WARN" not in stderr
 
@@ -243,7 +244,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Claude"
         assert "invalid isolationGroup" in stderr
         assert "my group" in stderr
@@ -256,7 +257,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Worker"
         assert "invalid isolationGroup" in stderr
         assert "team,other" in stderr
@@ -269,7 +270,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Agent-X"
 
     def test_isolation_group_special_chars_warns_and_sanitizes(self):
@@ -280,7 +281,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
         assert "invalid isolationGroup" in stderr
 
@@ -292,7 +293,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "My-Bot"
 
     def test_agent_name_only_special_chars_falls_back_to_generic(self):
@@ -303,7 +304,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "agent"
         # No warning should be emitted for default isolation group sanitization
         assert "invalid isolationGroup" not in stderr
@@ -316,7 +317,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "123"
         # No warning for valid numeric values that coerce cleanly
         assert "invalid isolationGroup" not in stderr
@@ -329,7 +330,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         # Float "1.5" is invalid (contains dot), falls back to agent name
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
         assert "invalid isolationGroup" in stderr
@@ -342,7 +343,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "True"
         # No warning for valid boolean values that coerce cleanly
         assert "invalid isolationGroup" not in stderr
@@ -355,7 +356,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
         assert "invalid isolationGroup type 'dict'" in stderr
 
@@ -367,7 +368,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Worker"
         assert "invalid isolationGroup type 'list'" in stderr
 
@@ -379,7 +380,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Bot"
         # No warning for None/null values (treated as missing)
         assert "invalid isolationGroup" not in stderr
@@ -397,7 +398,7 @@ class TestAgentIsolationGroupParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "council"
         assert env_vars.get("AGENT2_ISOLATION_GROUP") == "council"
         assert env_vars.get("AGENT3_ISOLATION_GROUP") == "workers"
@@ -418,7 +419,7 @@ class TestAgentIsolationParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION") == ""
 
     def test_agent_isolation_override(self):
@@ -430,7 +431,7 @@ class TestAgentIsolationParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION") == "session"
 
     def test_invalid_agent_isolation_warns(self):
@@ -441,7 +442,7 @@ class TestAgentIsolationParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_ISOLATION") == ""
         assert "invalid isolation" in stderr.lower()
 
@@ -458,7 +459,7 @@ class TestAgentNetworkParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_NETWORK") == "host"
 
     def test_network_internal(self):
@@ -470,7 +471,7 @@ class TestAgentNetworkParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_NETWORK") == "internal"
 
     def test_network_none(self):
@@ -482,7 +483,7 @@ class TestAgentNetworkParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_NETWORK") == "none"
 
     def test_invalid_network_warns_and_defaults(self):
@@ -494,7 +495,7 @@ class TestAgentNetworkParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_NETWORK") == "host"
         assert "invalid network" in stderr.lower()
 
@@ -507,7 +508,7 @@ class TestAgentNetworkParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         # Should still set the value but warn
         assert env_vars.get("AGENT1_NETWORK") == "none"
         assert "network only applies to container/droplet" in stderr.lower()
@@ -524,7 +525,7 @@ class TestAgentCapabilitiesParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_CAPABILITIES") == ""
 
     def test_capabilities_single(self):
@@ -535,7 +536,7 @@ class TestAgentCapabilitiesParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_CAPABILITIES") == "exec"
 
     def test_capabilities_multiple(self):
@@ -546,7 +547,7 @@ class TestAgentCapabilitiesParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_CAPABILITIES") == "web_search,web_fetch,read"
 
 
@@ -561,7 +562,7 @@ class TestAgentResourcesParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_RESOURCES_MEMORY") == ""
         assert env_vars.get("AGENT1_RESOURCES_CPU") == ""
 
@@ -574,7 +575,7 @@ class TestAgentResourcesParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_RESOURCES_MEMORY") == "512Mi"
         assert env_vars.get("AGENT1_RESOURCES_CPU") == ""
 
@@ -587,7 +588,7 @@ class TestAgentResourcesParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_RESOURCES_CPU") == "0.5"
 
     def test_resources_both(self):
@@ -599,7 +600,7 @@ class TestAgentResourcesParsing:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_RESOURCES_MEMORY") == "1Gi"
         assert env_vars.get("AGENT1_RESOURCES_CPU") == "2"
 
@@ -615,7 +616,7 @@ class TestIsolationGroupsOutput:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_GROUPS") == "Claude"
 
     def test_multiple_agents_unique_groups(self):
@@ -630,7 +631,7 @@ class TestIsolationGroupsOutput:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         groups = set(env_vars.get("ISOLATION_GROUPS", "").split(","))
         assert groups == {"A", "B", "C"}
 
@@ -648,7 +649,7 @@ class TestIsolationGroupsOutput:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         groups = set(env_vars.get("ISOLATION_GROUPS", "").split(","))
         assert groups == {"team1", "team2", "E"}
 
@@ -664,7 +665,7 @@ class TestBackwardCompatibility:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("HABITAT_NAME") == "SimpleBot"
         assert env_vars.get("AGENT_COUNT") == "1"
         assert env_vars.get("AGENT1_NAME") == "Claude"
@@ -684,7 +685,7 @@ class TestBackwardCompatibility:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("AGENT1_NAME") == "Claude"
         assert env_vars.get("AGENT1_ISOLATION_GROUP") == "Claude"
 
@@ -723,7 +724,7 @@ class TestComplexScenarios:
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
         
-        assert rc == 0
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         assert env_vars.get("ISOLATION_DEFAULT") == "session"
         assert env_vars.get("ISOLATION_SHARED_PATHS") == "/clawd/shared,/clawd/reports"
         
