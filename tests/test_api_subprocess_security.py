@@ -151,8 +151,8 @@ class TestSubprocessFunctionality(unittest.TestCase):
         self.assertIn('sync-openclaw-state.sh', shutdown_code,
                      "/prepare-shutdown should call sync-openclaw-state.sh")
     
-    def test_prepare_shutdown_stops_clawdbot(self):
-        """TASK-171 AC7: /prepare-shutdown calls systemctl stop clawdbot."""
+    def test_prepare_shutdown_stops_openclaw(self):
+        """TASK-171 AC7: /prepare-shutdown calls systemctl stop openclaw."""
         shutdown_pattern = r"self\.path\s*==\s*'/prepare-shutdown'(.*?)(?=elif|else:)"
         match = re.search(shutdown_pattern, self.source_code, re.DOTALL)
         
@@ -164,8 +164,8 @@ class TestSubprocessFunctionality(unittest.TestCase):
                      "/prepare-shutdown should call systemctl")
         self.assertIn('stop', shutdown_code,
                      "/prepare-shutdown should stop service")
-        self.assertIn('clawdbot', shutdown_code,
-                     "/prepare-shutdown should stop clawdbot")
+        self.assertIn('openclaw', shutdown_code,
+                     "/prepare-shutdown should stop openclaw")
 
 
 if __name__ == '__main__':

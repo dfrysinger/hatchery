@@ -3,6 +3,9 @@
 # =============================================================================
 # safe-mode-recovery.sh -- Smart Safe Mode Recovery
 # =============================================================================
+
+# Source permission utilities
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  When full config fails, intelligently find working credentials
 #           and generate an emergency config to get a bot online.
 #
@@ -252,8 +255,17 @@ validate_api_key() {
   
   case "$provider" in
     anthropic)
+      # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
+      local auth_header
+      if [[ "$key" == sk-ant-oat* ]]; then
+        # OAuth tokens cannot be validated via API, trust them if present
+        VALIDATION_REASON="OAuth token (trusted)"
+        return 0
+      else
+        auth_header="x-api-key: ${key}"
+      fi
       response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-        -H "x-api-key: ${key}" \
+        -H "$auth_header" \
         -H "anthropic-version: 2023-06-01" \
         -H "content-type: application/json" \
         -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
@@ -303,14 +315,24 @@ validate_api_key() {
 VALIDATION_REASON=""
 FOUND_TOKEN_RESULT=""
 
-# Find a working Telegram token from all agents
+# Find a working Telegram token from agents in current GROUP (or all if no GROUP)
 # Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
 # Side effect: populates DIAG_TELEGRAM_RESULTS
 find_working_telegram_token() {
   local count="${AGENT_COUNT:-0}"
+  local current_group="${GROUP:-}"
   FOUND_TOKEN_RESULT=""
   
   for i in $(seq 1 "$count"); do
+    # If GROUP is set (session isolation), only consider agents in this group
+    if [ -n "$current_group" ]; then
+      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
+      local agent_group="${!agent_group_var:-}"
+      if [ "$agent_group" != "$current_group" ]; then
+        continue  # Skip agents not in this group
+      fi
+    fi
+    
     local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
     local token="${!token_var:-}"
     
@@ -336,14 +358,24 @@ find_working_telegram_token() {
   return 1
 }
 
-# Find a working Discord token from all agents
+# Find a working Discord token from agents in current GROUP (or all if no GROUP)
 # Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
 # Side effect: populates DIAG_DISCORD_RESULTS
 find_working_discord_token() {
   local count="${AGENT_COUNT:-0}"
+  local current_group="${GROUP:-}"
   FOUND_TOKEN_RESULT=""
   
   for i in $(seq 1 "$count"); do
+    # If GROUP is set (session isolation), only consider agents in this group
+    if [ -n "$current_group" ]; then
+      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
+      local agent_group="${!agent_group_var:-}"
+      if [ "$agent_group" != "$current_group" ]; then
+        continue  # Skip agents not in this group
+      fi
+    fi
+    
     local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
     local token="${!token_var:-}"
     
@@ -858,6 +890,8 @@ EOF
 }
 
 # Generate emergency OpenClaw config with working credentials
+# SCHEMA NOTE: Emergency config structure must match build-full-config.sh
+# Update both files when OpenClaw config schema changes.
 # Uses bind=lan (not local) because:
 #   - iOS Shortcut API needs to reach the gateway from the LAN
 #   - Safe mode still needs config apply/health check endpoints accessible
@@ -907,7 +941,9 @@ generate_emergency_config() {
     if [ -n "$owner_id" ]; then
       telegram_config="\"telegram\": {
         \"enabled\": true,
-        \"botToken\": \"${token}\",
+        \"accounts\": {
+          \"safe-mode\": { \"botToken\": \"${token}\" }
+        },
         \"dmPolicy\": \"allowlist\",
         \"allowFrom\": [\"${owner_id}\"]
       }"
@@ -915,28 +951,32 @@ generate_emergency_config() {
       # No owner ID - use pairing mode (safest default)
       telegram_config="\"telegram\": {
         \"enabled\": true,
-        \"botToken\": \"${token}\",
+        \"accounts\": {
+          \"safe-mode\": { \"botToken\": \"${token}\" }
+        },
         \"dmPolicy\": \"pairing\"
       }"
     fi
   elif [ "$platform" = "discord" ]; then
     # Use correct OpenClaw schema for Discord
+    # Token under accounts.default, DM config uses flat keys (dmPolicy, allowFrom)
     local owner_id="${DISCORD_OWNER_ID:-}"
-    # Note: guild_id removed - not used in emergency config (DM-only recovery)
     if [ -n "$owner_id" ]; then
       discord_config="\"discord\": {
         \"enabled\": true,
-        \"token\": \"${token}\",
-        \"dm\": {
-          \"policy\": \"allowlist\",
-          \"allowFrom\": [\"${owner_id}\"]
-        }
+        \"accounts\": {
+          \"safe-mode\": { \"token\": \"${token}\" }
+        },
+        \"dmPolicy\": \"allowlist\",
+        \"allowFrom\": [\"${owner_id}\"]
       }"
     else
       discord_config="\"discord\": {
         \"enabled\": true,
-        \"token\": \"${token}\",
-        \"dm\": { \"policy\": \"pairing\" }
+        \"accounts\": {
+          \"safe-mode\": { \"token\": \"${token}\" }
+        },
+        \"dmPolicy\": \"pairing\"
       }"
     fi
   fi
@@ -962,8 +1002,12 @@ generate_emergency_config() {
   },
   "gateway": {
     "mode": "local",
-    "port": 18789,
-    "bind": "lan",
+    "port": ${GROUP_PORT:-18789},
+    "bind": "loopback",
+    "controlUi": {
+      "enabled": true,
+      "allowInsecureAuth": true
+    },
     "auth": {
       "mode": "token",
       "token": "${gateway_token}"
@@ -1134,6 +1178,7 @@ run_smart_recovery() {
   log_recovery "========== SMART RECOVERY STARTING =========="
   log_recovery "PID: $$ | HOME_DIR=${HOME_DIR:-unset} | USERNAME=${USERNAME:-unset}"
   log_recovery "Environment check:"
+  log_recovery "  GROUP: ${GROUP:-unset} (session isolation mode: ${GROUP:+yes}${GROUP:-no})"
   log_recovery "  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:+SET (${#ANTHROPIC_API_KEY} chars)}"
   log_recovery "  OPENAI_API_KEY: ${OPENAI_API_KEY:+SET (${#OPENAI_API_KEY} chars)}"
   log_recovery "  GOOGLE_API_KEY: ${GOOGLE_API_KEY:+SET (${#GOOGLE_API_KEY} chars)}"
@@ -1235,9 +1280,25 @@ run_smart_recovery() {
   log_recovery "  Generated config: model=$config_model, env_keys=$config_keys"
   
   # Step 4: Write emergency config
+  # Use OPENCLAW_CONFIG_PATH if set (from systemd environment) - this is the ACTUAL
+  # config path the gateway uses. For session isolation, systemd sets this to
+  # /etc/systemd/system/${GROUP}/openclaw.session.json
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
-  local config_dir="${home}/.openclaw"
-  local config_path="${config_dir}/openclaw.json"
+  local config_dir config_path
+  
+  if [ -n "${OPENCLAW_CONFIG_PATH:-}" ]; then
+    # Use the config path from systemd environment
+    config_path="$OPENCLAW_CONFIG_PATH"
+    config_dir="$(dirname "$config_path")"
+    log_recovery "  Using OPENCLAW_CONFIG_PATH: ${config_path}"
+  elif [ -n "${GROUP:-}" ]; then
+    config_dir="${home}/.openclaw-sessions/${GROUP}"
+    config_path="${config_dir}/openclaw.session.json"
+    log_recovery "  Session isolation mode (fallback): writing to ${config_path}"
+  else
+    config_dir="${home}/.openclaw"
+    config_path="${config_dir}/openclaw.json"
+  fi
   
   if [ "${DRY_RUN:-}" != "1" ]; then
     # Ensure directory exists
@@ -1251,6 +1312,70 @@ run_smart_recovery() {
     chmod 600 "$config_path"
     [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$config_path" 2>/dev/null
     log_recovery "Emergency config written to $config_path"
+    
+    # Create auth-profiles.json for safe-mode agent
+    # OpenClaw looks for API keys in per-agent auth-profiles.json, not just env vars
+    local state_dir="${OPENCLAW_STATE_DIR:-${home}/.openclaw}"
+    [ -n "${GROUP:-}" ] && state_dir="${home}/.openclaw-sessions/${GROUP}"
+    local auth_dir="${state_dir}/agents/safe-mode/agent"
+    mkdir -p "$auth_dir" 2>/dev/null || true
+    
+    # Generate auth-profiles.json based on provider
+    local auth_profiles
+    case "$provider" in
+      google)
+        auth_profiles=$(cat <<AUTHEOF
+{
+  "version": 1,
+  "profiles": {
+    "google:default": {
+      "type": "api_key",
+      "provider": "google",
+      "token": "${api_key}"
+    }
+  }
+}
+AUTHEOF
+)
+        ;;
+      anthropic)
+        auth_profiles=$(cat <<AUTHEOF
+{
+  "version": 1,
+  "profiles": {
+    "anthropic:default": {
+      "type": "api_key",
+      "provider": "anthropic",
+      "token": "${api_key}"
+    }
+  }
+}
+AUTHEOF
+)
+        ;;
+      openai)
+        auth_profiles=$(cat <<AUTHEOF
+{
+  "version": 1,
+  "profiles": {
+    "openai:default": {
+      "type": "api_key",
+      "provider": "openai",
+      "token": "${api_key}"
+    }
+  }
+}
+AUTHEOF
+)
+        ;;
+    esac
+    
+    if [ -n "$auth_profiles" ]; then
+      echo "$auth_profiles" > "${auth_dir}/auth-profiles.json"
+      chmod 600 "${auth_dir}/auth-profiles.json"
+      [ -n "${USERNAME:-}" ] && chown -R "${USERNAME}:${USERNAME}" "${state_dir}/agents" 2>/dev/null
+      log_recovery "Created auth-profiles.json at ${auth_dir}/auth-profiles.json"
+    fi
   else
     log_recovery "DRY_RUN: Would write config to $config_path"
   fi

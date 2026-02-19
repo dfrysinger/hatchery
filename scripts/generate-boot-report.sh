@@ -3,6 +3,9 @@
 # =============================================================================
 # generate-boot-report.sh -- Boot Report & Coordinator System
 # =============================================================================
+
+# Source permission utilities
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  Generate comprehensive boot report showing intended vs actual
 #           configuration, designate a coordinator bot, and notify user.
 #
@@ -27,7 +30,7 @@ SEND_DISCORD_FN="${SEND_DISCORD_FN:-send_discord_real}"
 # Paths (can be overridden for testing)
 HABITAT_JSON_PATH="${HABITAT_JSON_PATH:-/etc/habitat.json}"
 HABITAT_ENV_PATH="${HABITAT_ENV_PATH:-/etc/habitat-parsed.env}"
-CLAWDBOT_LOG="${CLAWDBOT_LOG:-/var/log/clawdbot.log}"
+OPENCLAW_LOG="${OPENCLAW_LOG:-/var/log/openclaw.log}"
 HOME_DIR="${HOME_DIR:-/home/${USERNAME:-bot}}"
 
 # =============================================================================
@@ -174,7 +177,7 @@ designate_coordinator() {
 
 # Detect component failures from logs
 detect_component_failures() {
-  local log_file="${CLAWDBOT_LOG:-/var/log/clawdbot.log}"
+  local log_file="${OPENCLAW_LOG:-/var/log/openclaw.log}"
   local failures=""
   
   if [ -f "$log_file" ]; then
@@ -201,7 +204,7 @@ detect_component_failures() {
 
 # Detect successful components from logs
 detect_successful_components() {
-  local log_file="${CLAWDBOT_LOG:-/var/log/clawdbot.log}"
+  local log_file="${OPENCLAW_LOG:-/var/log/openclaw.log}"
   local successes=""
   
   if [ -f "$log_file" ]; then
@@ -365,7 +368,7 @@ EOF
 - Full habitat file: ${HABITAT_JSON_PATH}
 - Parsed environment: ${HABITAT_ENV_PATH}
 - Boot logs: /var/log/post-boot-check.log
-- Service logs: journalctl -u clawdbot -n 100
+- Service logs: journalctl -u openclaw -n 100
 
 EOF
 
@@ -381,7 +384,7 @@ Review the errors above. Use these commands to investigate:
 
 \`\`\`bash
 # Check what went wrong
-journalctl -u clawdbot --since "10 minutes ago" | grep -iE "error|failed|401|403|404"
+journalctl -u openclaw --since "10 minutes ago" | grep -iE "error|failed|401|403|404"
 
 # Check the recovery log
 cat /var/log/post-boot-check.log | tail -50
@@ -422,10 +425,10 @@ EOF
 **Diagnostic Commands:**
 \`\`\`bash
 # Check service status
-systemctl is-active clawdbot openclaw-browser openclaw-documents 2>/dev/null
+systemctl is-active openclaw openclaw-browser openclaw-documents 2>/dev/null
 
 # Check recent errors (look for patterns matching errors above)
-journalctl -u clawdbot --since "5 minutes ago" | grep -iE "error|failed|unauthorized"
+journalctl -u openclaw --since "5 minutes ago" | grep -iE "error|failed|unauthorized"
 
 # Validate tokens (platform-specific):
 # Telegram: curl -s "https://api.telegram.org/bot<TOKEN>/getMe" | jq .ok
@@ -440,7 +443,7 @@ journalctl -u clawdbot --since "5 minutes ago" | grep -iE "error|failed|unauthor
 | Unauthorized / 401 | Both | Bad token | Alert user - needs new token |
 | connection refused | Both | Network or service down | Check firewall, restart service |
 
-**After Fixing:** \`sudo systemctl restart clawdbot\` then verify with \`systemctl is-active clawdbot\`
+**After Fixing:** \`sudo systemctl restart openclaw\` then verify with \`systemctl is-active openclaw\`
 
 **Escalate to User if:** Token/key needs regeneration, or problem persists after 2 fix attempts.
 
@@ -468,8 +471,12 @@ distribute_boot_report() {
     if [ -d "$workspace" ] || [ "${TEST_MODE:-}" = "1" ]; then
       mkdir -p "$workspace" 2>/dev/null || true
       echo "$report" > "$workspace/BOOT_REPORT.md"
-      chmod 600 "$workspace/BOOT_REPORT.md" 2>/dev/null || true
-      [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$workspace/BOOT_REPORT.md" 2>/dev/null || true
+      if type ensure_bot_file &>/dev/null; then
+        ensure_bot_file "$workspace/BOOT_REPORT.md" 644
+      else
+        chmod 644 "$workspace/BOOT_REPORT.md" 2>/dev/null || true
+        [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$workspace/BOOT_REPORT.md" 2>/dev/null || true
+      fi
     fi
   done
   
@@ -478,16 +485,24 @@ distribute_boot_report() {
   if [ -d "$safe_mode_workspace" ] || [ "${TEST_MODE:-}" = "1" ]; then
     mkdir -p "$safe_mode_workspace" 2>/dev/null || true
     echo "$report" > "$safe_mode_workspace/BOOT_REPORT.md"
-    chmod 600 "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
-    [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
+    if type ensure_bot_file &>/dev/null; then
+      ensure_bot_file "$safe_mode_workspace/BOOT_REPORT.md" 644
+    else
+      chmod 644 "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
+      [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$safe_mode_workspace/BOOT_REPORT.md" 2>/dev/null || true
+    fi
   fi
   
   # Also copy to shared folder
   local shared="$home/clawd/shared"
   mkdir -p "$shared" 2>/dev/null || true
   echo "$report" > "$shared/BOOT_REPORT.md"
-  chmod 600 "$shared/BOOT_REPORT.md" 2>/dev/null || true
-  [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$shared/BOOT_REPORT.md" 2>/dev/null || true
+  if type ensure_bot_file &>/dev/null; then
+    ensure_bot_file "$shared/BOOT_REPORT.md" 644
+  else
+    chmod 644 "$shared/BOOT_REPORT.md" 2>/dev/null || true
+    [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$shared/BOOT_REPORT.md" 2>/dev/null || true
+  fi
 }
 
 # =============================================================================
@@ -579,7 +594,7 @@ generate_notification_message() {
 Gateway failed to start after multiple attempts.
 Bot is OFFLINE - no connectivity available.
 
-Check logs: <code>journalctl -u clawdbot -n 50</code>
+Check logs: <code>journalctl -u openclaw -n 50</code>
 See CRITICAL_FAILURE.md for recovery steps.
 EOF
     return

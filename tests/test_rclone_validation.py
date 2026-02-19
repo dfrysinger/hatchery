@@ -73,7 +73,7 @@ class TestValidateFunction:
         """Valid local->remote paths should succeed."""
         result = run_validation(
             "/home/user/clawd/MEMORY.md",
-            "dropbox:clawdbot-memory/habitat1/"
+            "dropbox:openclaw-memory/habitat1/"
         )
         assert result.returncode == 0, f"Unexpected failure: {result.stderr}"
 
@@ -81,13 +81,13 @@ class TestValidateFunction:
         """Valid .openclaw paths should succeed."""
         result = run_validation(
             "/home/user/.openclaw/sessions/",
-            "dropbox:clawdbot-memory/habitat1/sessions/"
+            "dropbox:openclaw-memory/habitat1/sessions/"
         )
         assert result.returncode == 0, f"Unexpected failure: {result.stderr}"
 
     def test_empty_source_rejected(self, run_validation):
         """Empty source should be rejected."""
-        result = run_validation("", "dropbox:clawdbot-memory/test/")
+        result = run_validation("", "dropbox:openclaw-memory/test/")
         assert result.returncode != 0
         assert "empty" in result.stderr.lower()
 
@@ -99,7 +99,7 @@ class TestValidateFunction:
 
     def test_root_source_rejected(self, run_validation):
         """Root path '/' as source should be rejected."""
-        result = run_validation("/", "dropbox:clawdbot-memory/test/")
+        result = run_validation("/", "dropbox:openclaw-memory/test/")
         assert result.returncode != 0
         assert "refusing" in result.stderr.lower()
 
@@ -129,13 +129,13 @@ class TestValidateFunction:
         """Local paths outside /home/<user>/clawd or .openclaw should be rejected."""
         result = run_validation(
             "/etc/passwd",
-            "dropbox:clawdbot-memory/test/"
+            "dropbox:openclaw-memory/test/"
         )
         assert result.returncode != 0
         assert "unexpected" in result.stderr.lower()
 
     def test_unexpected_remote_rejected(self, run_validation):
-        """Remote paths outside clawdbot-memory should be rejected."""
+        """Remote paths outside openclaw-memory should be rejected."""
         result = run_validation(
             "/home/user/clawd/data",
             "dropbox:other-bucket/data/"
@@ -145,7 +145,7 @@ class TestValidateFunction:
 
     def test_whitespace_only_rejected(self, run_validation):
         """Whitespace-only paths should be rejected."""
-        result = run_validation("   ", "dropbox:clawdbot-memory/test/")
+        result = run_validation("   ", "dropbox:openclaw-memory/test/")
         assert result.returncode != 0
         assert "empty" in result.stderr.lower()
 
@@ -174,7 +174,7 @@ class TestSafeCopyFunction:
 
     def test_safe_copy_validates_source(self, run_safe_copy):
         """safe_copy should reject empty source."""
-        result = run_safe_copy("", "dropbox:clawdbot-memory/test/")
+        result = run_safe_copy("", "dropbox:openclaw-memory/test/")
         assert result.returncode != 0
         assert "empty" in result.stderr.lower()
 
@@ -188,7 +188,7 @@ class TestSafeCopyFunction:
         """safe_copy should pass validation for valid paths (rclone may fail if path doesn't exist)."""
         result = run_safe_copy(
             "/home/user/clawd/MEMORY.md",
-            "dropbox:clawdbot-memory/test/"
+            "dropbox:openclaw-memory/test/"
         )
         # Validation passes - any failure would be from rclone, not validation
         assert "refusing" not in result.stderr.lower()
@@ -222,7 +222,7 @@ class TestSafeSuCopyFunction:
         result = run_safe_su_copy(
             "",
             "/home/user/clawd/data",
-            "dropbox:clawdbot-memory/test/"
+            "dropbox:openclaw-memory/test/"
         )
         assert result.returncode != 0
         assert "empty" in result.stderr.lower()
@@ -232,7 +232,7 @@ class TestSafeSuCopyFunction:
         result = run_safe_su_copy(
             "testuser",
             "",
-            "dropbox:clawdbot-memory/test/"
+            "dropbox:openclaw-memory/test/"
         )
         assert result.returncode != 0
         assert "empty" in result.stderr.lower()
@@ -252,7 +252,7 @@ class TestSafeSuCopyFunction:
         result = run_safe_su_copy(
             "testuser",
             "/home/testuser/clawd/MEMORY.md",
-            "dropbox:clawdbot-memory/test/"
+            "dropbox:openclaw-memory/test/"
         )
         assert result.returncode == 0
         assert "SU:" in result.stdout
@@ -326,7 +326,7 @@ class TestNoRcloneOnEmptyPath:
             ["bash", "-c", f'''
                 export PATH="{fake_rclone.parent}:$PATH"
                 source "{VALIDATE_SCRIPT}"
-                safe_rclone_copy "" "dropbox:clawdbot-memory/test/"
+                safe_rclone_copy "" "dropbox:openclaw-memory/test/"
             '''],
             capture_output=True,
             text=True,
@@ -348,7 +348,7 @@ class TestNoRcloneOnEmptyPath:
             ["bash", "-c", f'''
                 export PATH="{fake_rclone.parent}:$PATH"
                 source "{VALIDATE_SCRIPT}"
-                safe_rclone_copy "/" "dropbox:clawdbot-memory/test/"
+                safe_rclone_copy "/" "dropbox:openclaw-memory/test/"
             '''],
             capture_output=True,
             text=True,
@@ -370,7 +370,7 @@ class TestNoRcloneOnEmptyPath:
             ["bash", "-c", f'''
                 export PATH="{fake_su.parent}:$PATH"
                 source "{VALIDATE_SCRIPT}"
-                safe_rclone_su_copy "" "/home/user/clawd/data" "dropbox:clawdbot-memory/test/"
+                safe_rclone_su_copy "" "/home/user/clawd/data" "dropbox:openclaw-memory/test/"
             '''],
             capture_output=True,
             text=True,

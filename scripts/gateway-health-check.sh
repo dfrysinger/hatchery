@@ -2,11 +2,14 @@
 # =============================================================================
 # gateway-health-check.sh -- Universal gateway health check and safe mode recovery
 # =============================================================================
+
+# Source permission utilities
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  Validates gateway health after any restart. If unhealthy, triggers
 #           safe mode recovery. Called by:
 #           - post-boot-check.sh (at system boot)
 #           - apply-config.sh (after config changes)
-#           - clawdbot.service ExecStartPost (on every restart)
+#           - openclaw.service ExecStartPost (on every restart)
 #
 # Modes:
 #   RUN_MODE=standalone (default): restarts service directly after recovery
@@ -18,18 +21,33 @@
 #   2 = critical failure (emergency config also broken, don't restart)
 # =============================================================================
 
-LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
+# Logging setup
+# In session isolation mode (GROUP set), use group-specific log file
+# This ensures we capture all health check runs for each group
 RUN_MODE="${RUN_MODE:-standalone}"
+RUN_ID="$$-$(date +%s)"  # Unique ID for this health check run
 
-# Security: restrict log file permissions (diagnostic context, no secrets)
-umask 077
-touch "$LOG" && chmod 600 "$LOG" 2>/dev/null || true
+if [ -n "${GROUP:-}" ]; then
+  LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check-${GROUP}.log}"
+else
+  LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
+fi
+
+# Log file readable by bot user (diagnostic context, no secrets)
+touch "$LOG" && chmod 644 "$LOG" 2>/dev/null || true
 
 log() {
-  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"
+  local msg
+  msg="$(date -u +%Y-%m-%dT%H:%M:%SZ) [$RUN_ID] $*"
+  echo "$msg" >> "$LOG"
+  # Also log to journald for persistence (won't be lost on reboot)
+  logger -t "health-check${GROUP:+-$GROUP}" "$*" 2>/dev/null || true
 }
 
-log "========== GATEWAY HEALTH CHECK STARTING (mode=$RUN_MODE) =========="
+log "============================================================"
+log "========== GATEWAY HEALTH CHECK STARTING =========="
+log "============================================================"
+log "RUN_ID=$RUN_ID | MODE=$RUN_MODE | GROUP=${GROUP:-none} | PID=$$"
 
 # =============================================================================
 # Skip if recently recovered (prevents cascade from standalone → ExecStartPost)
@@ -77,7 +95,19 @@ H="/home/$USERNAME"
 ISOLATION="${ISOLATION_DEFAULT:-none}"
 SESSION_GROUPS="${ISOLATION_GROUPS:-}"
 
-log "Config: isolation=$ISOLATION groups=$SESSION_GROUPS agents=$AC"
+# Per-group health check mode (for session isolation)
+# When GROUP is set, we only check agents in that group
+# Agents are derived from AGENT{N}_ISOLATION_GROUP in habitat-parsed.env (single source of truth)
+GROUP="${GROUP:-}"
+GROUP_PORT="${GROUP_PORT:-18789}"
+
+if [ -n "$GROUP" ]; then
+  SERVICE_NAME="openclaw-${GROUP}"
+  log "Config: GROUP MODE - group=$GROUP port=$GROUP_PORT service=$SERVICE_NAME"
+else
+  SERVICE_NAME="openclaw"
+  log "Config: isolation=$ISOLATION groups=$SESSION_GROUPS agents=$AC"
+fi
 
 # =============================================================================
 # Recovery Attempt Tracking (prevents infinite loops)
@@ -88,7 +118,21 @@ log "Config: isolation=$ISOLATION groups=$SESSION_GROUPS agents=$AC"
 # - True critical failure (give up after 2 attempts)
 
 MAX_RECOVERY_ATTEMPTS=2
-RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts"
+
+# Per-group state files when GROUP is set (session isolation)
+# This prevents different groups from interfering with each other's recovery state
+if [ -n "$GROUP" ]; then
+  RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts-${GROUP}"
+  SAFE_MODE_FILE="/var/lib/init-status/safe-mode-${GROUP}"
+  # Use OPENCLAW_CONFIG_PATH from systemd environment if set, otherwise construct it
+  # The systemd service sets this to /etc/systemd/system/${GROUP}/openclaw.session.json
+  # which is the ACTUAL config path the gateway uses
+  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$H/.openclaw-sessions/${GROUP}/openclaw.session.json}"
+else
+  RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts"
+  SAFE_MODE_FILE="/var/lib/init-status/safe-mode"
+  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$H/.openclaw/openclaw.json}"
+fi
 
 ALREADY_IN_SAFE_MODE=false
 RECOVERY_ATTEMPTS=0
@@ -103,18 +147,19 @@ for f in /var/lib/init-status/*; do
   [ -f "$f" ] && log "  $f = $(cat "$f" 2>/dev/null || echo '(empty)')"
 done
 log "Config files:"
-[ -f "$H/.openclaw/openclaw.json" ] && log "  openclaw.json exists ($(wc -c < "$H/.openclaw/openclaw.json") bytes)"
+log "  CONFIG_PATH=$CONFIG_PATH"
+[ -f "$CONFIG_PATH" ] && log "  config exists ($(wc -c < "$CONFIG_PATH") bytes)"
 [ -f "$H/.openclaw/openclaw.emergency.json" ] && log "  openclaw.emergency.json exists ($(wc -c < "$H/.openclaw/openclaw.emergency.json") bytes)"
 [ -f "$H/.openclaw/openclaw.full.json" ] && log "  openclaw.full.json exists ($(wc -c < "$H/.openclaw/openclaw.full.json") bytes)"
 
 # Check current config model
-if [ -f "$H/.openclaw/openclaw.json" ]; then
-  CURRENT_MODEL=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
-  CURRENT_ENV_KEYS=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.json" 2>/dev/null)
+if [ -f "$CONFIG_PATH" ]; then
+  CURRENT_MODEL=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$CONFIG_PATH" 2>/dev/null)
+  CURRENT_ENV_KEYS=$(jq -r '.env | keys | join(",")' "$CONFIG_PATH" 2>/dev/null)
   log "Current config: model=$CURRENT_MODEL, env_keys=$CURRENT_ENV_KEYS"
 fi
 
-if [ -f /var/lib/init-status/safe-mode ]; then
+if [ -f "$SAFE_MODE_FILE" ]; then
   ALREADY_IN_SAFE_MODE=true
   [ -f "$RECOVERY_COUNTER_FILE" ] && RECOVERY_ATTEMPTS=$(cat "$RECOVERY_COUNTER_FILE" 2>/dev/null || echo 0)
   log "NOTE: Already in safe mode (recovery attempts: $RECOVERY_ATTEMPTS/$MAX_RECOVERY_ATTEMPTS)"
@@ -124,6 +169,31 @@ log "ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE, RECOVERY_ATTEMPTS=$RECOVERY_ATT
 # =============================================================================
 # Health Check Functions
 # =============================================================================
+
+# Get owner ID for a platform (single source of truth for owner ID logic)
+# Usage: owner_id=$(get_owner_id_for_platform "telegram")
+#        owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
+get_owner_id_for_platform() {
+  local platform="$1"
+  local with_prefix="${2:-}"  # Pass "with_prefix" to add "user:" for Discord
+  
+  case "$platform" in
+    telegram)
+      echo "${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      ;;
+    discord)
+      local raw_id="${DISCORD_OWNER_ID:-}"
+      if [ "$with_prefix" = "with_prefix" ] && [ -n "$raw_id" ]; then
+        echo "user:${raw_id}"
+      else
+        echo "$raw_id"
+      fi
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
 
 validate_telegram_token_direct() {
   local token="$1"
@@ -162,10 +232,10 @@ check_api_key_validity() {
   
   log "  Checking API key validity..."
   
-  local config_file="$H/.openclaw/openclaw.json"
+  local config_file="$CONFIG_PATH"
   
   # In safe mode, read API key from actual config (recovery may have changed provider)
-  if [ -f /var/lib/init-status/safe-mode ] && [ -f "$config_file" ]; then
+  if [ -f "$SAFE_MODE_FILE" ] && [ -f "$config_file" ]; then
     log "  Safe mode active - checking API from config"
     
     # Try to get API key from config env section
@@ -185,8 +255,15 @@ check_api_key_validity() {
     
     if [ -n "$cfg_anthropic" ]; then
       local response
+      local auth_header
+      # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
+      if [[ "$cfg_anthropic" == sk-ant-oat* ]]; then
+        auth_header="Authorization: Bearer ${cfg_anthropic}"
+      else
+        auth_header="x-api-key: ${cfg_anthropic}"
+      fi
       response=$(curl -sf --max-time 5 \
-        -H "x-api-key: ${cfg_anthropic}" \
+        -H "$auth_header" \
         -H "anthropic-version: 2023-06-01" \
         "https://api.anthropic.com/v1/models" 2>&1)
       if [ $? -eq 0 ]; then
@@ -221,8 +298,19 @@ check_api_key_validity() {
   # Direct API validation from env vars
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     local response
+    local auth_header
+    
+    # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
+    # OAuth tokens use Authorization: Bearer, API keys use x-api-key
+    if [[ "${ANTHROPIC_API_KEY}" == sk-ant-oat* ]]; then
+      log "  Anthropic: detected OAuth token (oat), using Bearer auth"
+      auth_header="Authorization: Bearer ${ANTHROPIC_API_KEY}"
+    else
+      auth_header="x-api-key: ${ANTHROPIC_API_KEY}"
+    fi
+    
     response=$(curl -sf --max-time 5 \
-      -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+      -H "$auth_header" \
       -H "anthropic-version: 2023-06-01" \
       -H "content-type: application/json" \
       -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
@@ -256,20 +344,18 @@ check_api_key_validity() {
 }
 
 check_channel_connectivity() {
-  local service="$1"
-  
   log "  Checking channel connectivity..."
   
-  local config_file="$H/.openclaw/openclaw.json"
+  local config_file="$CONFIG_PATH"
   
   # In safe mode, just verify the safe mode config has a working token
   # Safe mode recovery already found a working token, we just need to confirm it
-  if [ -f /var/lib/init-status/safe-mode ] && [ -f "$config_file" ]; then
+  if [ -f "$SAFE_MODE_FILE" ] && [ -f "$config_file" ]; then
     log "  Safe mode active - validating safe mode config token"
     
     # Try Telegram token from config
     local tg_token
-    tg_token=$(jq -r '.channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
     if [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       log "  Safe mode Telegram token valid"
       log "  Channel connectivity verified (safe mode)"
@@ -278,7 +364,7 @@ check_channel_connectivity() {
     
     # Try Discord token from config
     local dc_token
-    dc_token=$(jq -r '.channels.discord.token // empty' "$config_file" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
     if [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       log "  Safe mode Discord token valid"
       log "  Channel connectivity verified (safe mode)"
@@ -355,6 +441,184 @@ check_channel_connectivity() {
   return 0
 }
 
+# =============================================================================
+# End-to-End Agent Health Check (NEW)
+# =============================================================================
+# Instead of checking tokens and API keys separately, ask each agent to respond.
+# This tests EVERYTHING: chat token, API credentials, model validity, OAuth.
+# The agent sends an introduction message to the chat channel.
+
+# Check safe-mode agent can actually respond (E2E test)
+# This runs a simple prompt through the safe-mode agent to verify:
+# 1. Gateway is receiving messages
+# 2. Agent can process them  
+# 3. LLM API credentials work
+check_safe_mode_e2e() {
+  log "========== SAFE MODE E2E CHECK =========="
+  log "  Testing safe-mode agent can actually respond"
+  
+  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  
+  local platform="${PLATFORM:-telegram}"
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform" "with_prefix")
+  
+  log "  Platform: $platform, Owner: $owner_id"
+  
+  if [ -z "$owner_id" ] || [ "$owner_id" = "user:" ]; then
+    log "  ERROR: No owner ID for platform"
+    return 1
+  fi
+  
+  local test_prompt="Reply with exactly: HEALTH_CHECK_OK"
+  
+  log "  Running: openclaw agent --agent safe-mode --message \"$test_prompt\""
+  
+  local env_prefix=""
+  [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=/home/bot/.openclaw-sessions/$GROUP"
+  
+  local output
+  output=$(timeout 60 sudo -u "$USERNAME" env $env_prefix openclaw agent \
+    --agent "safe-mode" \
+    --message "$test_prompt" \
+    --timeout 30 \
+    --json 2>&1)
+  local exit_code=$?
+  
+  if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+    log "  ✓ safe-mode agent responded successfully"
+    log "  Output preview: $(echo "$output" | head -c 300)"
+    log "========== SAFE MODE E2E PASSED =========="
+    return 0
+  else
+    log "  ✗ safe-mode agent FAILED (exit=$exit_code)"
+    log "  Full output:"
+    echo "$output" | while IFS= read -r line; do
+      log "    | $line"
+    done
+    log "========== SAFE MODE E2E FAILED =========="
+    return 1
+  fi
+}
+check_agents_e2e() {
+  log "========== E2E AGENT HEALTH CHECK =========="
+  log "  This test asks each agent to introduce itself via chat"
+  log "  Success = agent responds AND message delivered to owner"
+  
+  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  
+  local platform="${PLATFORM:-telegram}"
+  local all_healthy=true
+  local failed_agents=""
+  
+  # Determine which agents to check
+  # If GROUP is set (session isolation), derive agents from AGENT{N}_ISOLATION_GROUP
+  # Otherwise, check all agents
+  local agents_to_check=()
+  local count="${AGENT_COUNT:-1}"
+  
+  if [ -n "$GROUP" ]; then
+    # Derive agents for this group from habitat-parsed.env (single source of truth)
+    for i in $(seq 1 "$count"); do
+      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
+      local agent_group="${!agent_group_var:-}"
+      if [ "$agent_group" = "$GROUP" ]; then
+        agents_to_check+=("agent${i}")
+      fi
+    done
+    log "  Config: GROUP MODE - group=$GROUP, checking agents: ${agents_to_check[*]}"
+  else
+    for i in $(seq 1 "$count"); do
+      agents_to_check+=("agent${i}")
+    done
+    log "  Config: STANDARD MODE - checking ${#agents_to_check[@]} agents"
+  fi
+  
+  log "  Platform: $platform"
+  
+  # Determine delivery channel and owner (Discord needs "user:" prefix for DMs)
+  local channel="$platform"
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform" "with_prefix")
+  
+  log "  Delivery: channel=$channel, owner_id=$owner_id"
+  
+  if [ -z "$owner_id" ] || [ "$owner_id" = "user:" ]; then
+    log "  ERROR: No owner ID for platform '$platform'"
+    log "  Check habitat config: platforms.$platform.ownerId must be set"
+    return 1
+  fi
+  
+  # NOTE: The bot should REPLY directly - the --deliver flag handles sending.
+  # Don't say "send a message" which could make the bot try to use the message tool.
+  local intro_prompt="You just came online after a reboot. Reply with a brief introduction (2-3 sentences) - your name, model, and role. Be friendly but concise. Your reply will be automatically delivered."
+  
+  for agent_id in "${agents_to_check[@]}"; do
+    # Extract agent number from ID (e.g., "agent3" -> "3")
+    local agent_num="${agent_id#agent}"
+    local name_var="AGENT${agent_num}_NAME"
+    local model_var="AGENT${agent_num}_MODEL"
+    local agent_name="${!name_var:-$agent_id}"
+    local agent_model="${!model_var:-unknown}"
+    
+    log "  -------- Testing $agent_id --------"
+    log "  Agent: $agent_name ($agent_id)"
+    log "  Model: $agent_model"
+    log "  Command: openclaw agent --agent $agent_id --deliver --reply-channel $channel --reply-account $agent_id --reply-to $owner_id"
+    
+    local start_time
+    start_time=$(date +%s)
+    
+    # Use openclaw agent with --deliver to send response to chat
+    # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
+    # but openclaw must run as the bot user to create files with correct ownership.
+    # In session isolation mode, point to the session-specific config (correct gateway port).
+    local env_prefix=""
+    [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=/home/bot/.openclaw-sessions/$GROUP"
+    
+    local output
+    output=$(timeout 90 sudo -u "$USERNAME" env $env_prefix openclaw agent \
+      --agent "$agent_id" \
+      --message "$intro_prompt" \
+      --deliver \
+      --reply-channel "$channel" \
+      --reply-account "$agent_id" \
+      --reply-to "$owner_id" \
+      --timeout 60 \
+      --json 2>&1)
+    local exit_code=$?
+    
+    local end_time
+    end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+      log "  ✓ SUCCESS: $agent_name responded in ${duration}s"
+      log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
+    else
+      log "  ✗ FAILED: $agent_name (exit=$exit_code, duration=${duration}s)"
+      log "  Full output:"
+      echo "$output" | while IFS= read -r line; do
+        log "    | $line"
+      done
+      all_healthy=false
+      failed_agents="${failed_agents} ${agent_name}"
+    fi
+  done
+  
+  log "  -------- E2E Summary --------"
+  if [ "$all_healthy" = "false" ]; then
+    log "  RESULT: FAILED"
+    log "  Broken agents:${failed_agents}"
+    log "  Will trigger SAFE MODE"
+    return 1
+  fi
+  
+  log "  RESULT: SUCCESS - All $count agents responded"
+  log "========== E2E CHECK COMPLETE =========="
+  return 0
+}
+
 check_service_health() {
   local service="$1"
   local port="$2"
@@ -378,12 +642,31 @@ check_service_health() {
       log "  HTTP gateway responding"
       sleep 3
       
-      if check_channel_connectivity "$service" && check_api_key_validity "$service"; then
-        log "  HEALTHY"
-        return 0
+      # In safe mode, use simple token/API validation (safe mode config is minimal)
+      # In normal mode, use full end-to-end agent check
+      if [ -f "$SAFE_MODE_FILE" ]; then
+        log "  Safe mode: running E2E check on safe-mode agent"
+        if check_safe_mode_e2e; then
+          log "  HEALTHY (safe mode E2E passed)"
+          return 0
+        else
+          log "  HTTP OK but safe-mode E2E check failed"
+          return 1
+        fi
       else
-        log "  HTTP OK but channel/API check failed"
-        return 1
+        log "  Normal mode: validating chat tokens first"
+        if ! check_channel_connectivity; then
+          log "  Chat token validation FAILED — skipping E2E, marking unhealthy"
+          return 1
+        fi
+        log "  Chat tokens OK — running end-to-end agent check"
+        if check_agents_e2e; then
+          log "  HEALTHY"
+          return 0
+        else
+          log "  HTTP OK but agent e2e check failed"
+          return 1
+        fi
       fi
     fi
     log "  attempt $i/$max_attempts: HTTP not responding"
@@ -419,6 +702,11 @@ enter_safe_mode() {
       log "Recovery succeeded"
       log "Recovery output: $recovery_output"
       SMART_RECOVERY_SUCCESS=true
+      
+      # Send warning to user BEFORE restart (only on first entry, not retries)
+      if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
+        send_entering_safe_mode_warning
+      fi
     else
       log "Recovery FAILED (exit $recovery_exit)"
       log "Recovery output: $recovery_output"
@@ -434,6 +722,11 @@ enter_safe_mode() {
     if [ $recovery_exit -eq 0 ]; then
       log "Recovery succeeded"
       SMART_RECOVERY_SUCCESS=true
+      
+      # Send warning to user BEFORE restart (only on first entry, not retries)
+      if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
+        send_entering_safe_mode_warning
+      fi
     else
       log "Recovery FAILED (exit $recovery_exit): $recovery_output"
     fi
@@ -451,24 +744,28 @@ enter_safe_mode() {
     else
       log "  ERROR: emergency.json does not exist!"
     fi
-    cp "$H/.openclaw/openclaw.emergency.json" "$H/.openclaw/openclaw.json"
-    chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
-    chmod 600 "$H/.openclaw/openclaw.json"
+    cp "$H/.openclaw/openclaw.emergency.json" "$CONFIG_PATH"
+    if type ensure_bot_file &>/dev/null; then
+      ensure_bot_file "$CONFIG_PATH" 600
+    else
+      chown $USERNAME:$USERNAME "$CONFIG_PATH"
+      chmod 600 "$CONFIG_PATH"
+    fi
     log "Config after fallback:"
     local new_model
-    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    log "  openclaw.json: model=$new_model"
+    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$CONFIG_PATH" 2>/dev/null)
+    log "  $CONFIG_PATH: model=$new_model"
   else
     log "Smart recovery succeeded - using recovery-generated config"
     log "Config after recovery:"
     local new_model new_keys
-    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    new_keys=$(jq -r '.env | keys | join(",")' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    log "  openclaw.json: model=$new_model, env_keys=$new_keys"
+    new_model=$(jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' "$CONFIG_PATH" 2>/dev/null)
+    new_keys=$(jq -r '.env | keys | join(",")' "$CONFIG_PATH" 2>/dev/null)
+    log "  $CONFIG_PATH: model=$new_model, env_keys=$new_keys"
   fi
   
   # Mark safe mode
-  touch /var/lib/init-status/safe-mode
+  touch "$SAFE_MODE_FILE"
   
   # Create SAFE_MODE.md
   local status="minimal config"
@@ -482,17 +779,36 @@ Recovery: **${status}**
 
 Check logs: cat /var/log/gateway-health-check.log
 SAFEMD
-    chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
+    if type ensure_bot_file &>/dev/null; then
+      ensure_bot_file "$H/clawd/agents/agent${si}/SAFE_MODE.md" 644
+    else
+      chown $USERNAME:$USERNAME "$H/clawd/agents/agent${si}/SAFE_MODE.md"
+    fi
   done
   
-  # Stop isolation services if running
-  if [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
+  # Stop the gateway service for this group
+  # Universal: use GROUP if set, otherwise fall back to isolation-specific service
+  if [ -n "${GROUP:-}" ]; then
+    if [ "$ISOLATION" = "container" ]; then
+      # Inside container: kill the gateway process directly
+      log "Stopping gateway process in container (group: $GROUP)"
+      pkill -f "openclaw gateway" 2>/dev/null || true
+      # Also try docker stop from host context if available
+      docker stop "openclaw-${GROUP}" 2>/dev/null || true
+    else
+      # Session or standard with GROUP: stop the systemd service
+      log "Stopping service for group: $GROUP"
+      systemctl stop "openclaw-${GROUP}.service" 2>/dev/null || true
+    fi
+  elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
+    # Legacy all-groups mode (should not reach here)
     IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
     for group in "${GROUP_ARRAY[@]}"; do
       systemctl stop "openclaw-${group}.service" 2>/dev/null || true
     done
-  elif [ "$ISOLATION" = "container" ]; then
-    systemctl stop openclaw-containers.service 2>/dev/null || true
+  else
+    # Standard mode: stop openclaw
+    systemctl stop openclaw 2>/dev/null || true
   fi
   
   # Update stages
@@ -503,39 +819,101 @@ SAFEMD
 }
 
 restart_gateway() {
-  log "Restarting clawdbot with safe mode config..."
-  systemctl restart clawdbot
-  sleep 5
+  local target_service=""
+  local service_description=""
   
+  # Determine which service to restart
+  # Universal: use GROUP if set, otherwise fall back to isolation-specific service
+  if [ -n "${GROUP:-}" ]; then
+    if [ "$ISOLATION" = "container" ]; then
+      target_service="docker:openclaw-${GROUP}"
+      service_description="container ($GROUP)"
+    else
+      target_service="openclaw-${GROUP}.service"
+      service_description="service ($GROUP)"
+    fi
+  elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
+    # Legacy all-groups mode
+    target_service="all-session-services"
+    service_description="all session services"
+  else
+    target_service="openclaw"
+    service_description="openclaw"
+  fi
+  
+  log "Restarting $service_description with safe mode config..."
+  
+  # Restart the appropriate service(s)
+  if [ "$target_service" = "all-session-services" ]; then
+    IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+    for group in "${GROUP_ARRAY[@]}"; do
+      systemctl restart "openclaw-${group}.service" 2>/dev/null || true
+    done
+    sleep 5
+  elif [[ "$target_service" == docker:* ]]; then
+    # Container mode: restart via docker
+    local container_name="${target_service#docker:}"
+    docker restart "$container_name" 2>/dev/null || docker-compose restart "$container_name" 2>/dev/null || true
+    sleep 5
+  else
+    systemctl restart "$target_service"
+    sleep 5
+  fi
+  
+  # Verify service started
   for attempt in 1 2 3; do
-    if systemctl is-active --quiet clawdbot; then
-      log "Clawdbot started (attempt $attempt)"
+    local is_active=false
+    
+    if [ "$target_service" = "all-session-services" ]; then
+      is_active=true
+      IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+      for group in "${GROUP_ARRAY[@]}"; do
+        if ! systemctl is-active --quiet "openclaw-${group}.service"; then
+          is_active=false
+          break
+        fi
+      done
+    elif [[ "$target_service" == docker:* ]]; then
+      local container_name="${target_service#docker:}"
+      docker inspect --format='{{.State.Running}}' "$container_name" 2>/dev/null | grep -q 'true' && is_active=true
+    else
+      systemctl is-active --quiet "$target_service" && is_active=true
+    fi
+    
+    if [ "$is_active" = "true" ]; then
+      log "$service_description started (attempt $attempt)"
       
       # Rename bots
       /usr/local/bin/rename-bots.sh >> "$LOG" 2>&1 || true
       
-      # Wake SafeModeBot in background
-      (
-        sleep 30
-        GATEWAY_TOKEN=""
-        [ -f "$H/.openclaw/gateway-token.txt" ] && GATEWAY_TOKEN=$(cat "$H/.openclaw/gateway-token.txt")
-        if [ -n "$GATEWAY_TOKEN" ]; then
-          # shellcheck disable=SC2024  # Redirect is intentional - LOG is root-owned, script runs as root
-          sudo -u "$USERNAME" OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN" openclaw system event \
-            --text "Safe Mode active. Read BOOT_REPORT.md and diagnose what's broken." \
-            --mode now >> "$LOG" 2>&1 || true
-        fi
-      ) &
+      # NOTE: SafeModeBot wake is handled by send_boot_notification in Run 2
+      # after we verify the safe mode config is actually working.
+      # Don't wake here - it would race with the proper notification flow.
       
       return 0
     fi
-    log "Clawdbot not active, retry $attempt/3..."
-    systemctl restart clawdbot
+    
+    log "$service_description not active, retry $attempt/3..."
+    
+    if [ "$target_service" = "all-session-services" ]; then
+      IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
+      for group in "${GROUP_ARRAY[@]}"; do
+        systemctl restart "openclaw-${group}.service" 2>/dev/null || true
+      done
+    else
+      systemctl restart "$target_service"
+    fi
     sleep 5
   done
   
-  log "CRITICAL: Clawdbot failed to start"
-  touch /var/lib/init-status/gateway-failed
+  log "CRITICAL: $service_description failed to start"
+  
+  # Mark failure with group suffix if in per-group mode
+  if [ -n "${GROUP:-}" ]; then
+    touch "/var/lib/init-status/gateway-failed-${GROUP}"
+  else
+    touch /var/lib/init-status/gateway-failed
+  fi
   echo '13' > /var/lib/init-status/stage
   return 1
 }
@@ -550,13 +928,18 @@ sleep 30
 
 HEALTHY=false
 
-if [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
-  log "Session isolation mode"
+# Determine which mode we're running in
+if [ -n "$GROUP" ]; then
+  # Per-group health check (session isolation - each group checks itself)
+  log "Group mode: checking group '$GROUP' on port $GROUP_PORT"
+  check_service_health "$SERVICE_NAME" "$GROUP_PORT" 6 && HEALTHY=true
+
+elif [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
+  # Legacy: session isolation without per-group health check
+  # This path is kept for backwards compatibility but shouldn't be hit
+  # since each session service now runs its own health check
+  log "Session isolation mode (legacy - should not reach here)"
   IFS=',' read -ra GROUP_ARRAY <<< "$SESSION_GROUPS"
-  
-  # Health check semantics: ALL session groups must be healthy.
-  # Any group failure triggers safe mode so SafeModeBot can diagnose.
-  # Regular agents don't have diagnostic instructions - SafeModeBot does.
   BASE_PORT=18790
   idx=0
   ALL_HEALTHY=true
@@ -570,12 +953,13 @@ if [ "$ISOLATION" = "session" ] && [ -n "$SESSION_GROUPS" ]; then
   HEALTHY=$ALL_HEALTHY
 
 elif [ "$ISOLATION" = "container" ]; then
-  log "Container isolation mode"
+  # Container mode without GROUP should not happen — each container runs its own check
+  log "Container isolation mode (no GROUP — legacy fallback)"
   check_service_health "openclaw-containers.service" 18790 6 && HEALTHY=true
 
 else
   log "Standard mode"
-  check_service_health "clawdbot" 18789 6 && HEALTHY=true
+  check_service_health "openclaw" 18789 6 && HEALTHY=true
 fi
 
 # =============================================================================
@@ -590,15 +974,29 @@ if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
   log "DECISION: SAFE MODE STABLE - recovery config working, keeping safe mode flag"
   rm -f "$RECOVERY_COUNTER_FILE"
   rm -f "$RECENTLY_RECOVERED_FILE"
+  
+  # Mark as ready (in safe mode)
+  echo '11' > /var/lib/init-status/stage
+  touch /var/lib/init-status/setup-complete
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready-safe-mode" >> /var/log/init-stages.log
+  log "Status: stage=11 (ready in safe mode), setup-complete created"
+  
   EXIT_CODE=0  # Don't restart, safe mode is working
 
 elif [ "$HEALTHY" = "true" ]; then
   # Full config is healthy (not in safe mode) - truly ready
   log "DECISION: SUCCESS - gateway healthy, clearing safe mode state"
-  rm -f /var/lib/init-status/safe-mode
+  rm -f "$SAFE_MODE_FILE"
   rm -f "$RECOVERY_COUNTER_FILE"
   rm -f "$RECENTLY_RECOVERED_FILE"
   for si in $(seq 1 $AC); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
+  
+  # Mark as ready
+  echo '11' > /var/lib/init-status/stage
+  touch /var/lib/init-status/setup-complete
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready" >> /var/log/init-stages.log
+  log "Status: stage=11 (ready), setup-complete created"
+  
   EXIT_CODE=0
 
 elif [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECOVERY_ATTEMPTS" ]; then
@@ -659,6 +1057,9 @@ send_discord_notification() {
   local owner_id="$2"
   local message="$3"
   
+  # Strip "user:" prefix if present (OpenClaw format vs raw Discord ID)
+  owner_id="${owner_id#user:}"
+  
   # Convert HTML to Discord markdown
   local discord_msg
   discord_msg=$(echo "$message" | sed -e 's/<b>/\*\*/g' -e 's/<\/b>/\*\*/g' -e 's/<code>/`/g' -e 's/<\/code>/`/g')
@@ -684,6 +1085,71 @@ send_discord_notification() {
     -d "{\"content\": $(echo "$discord_msg" | jq -Rs .)}" >> "$LOG" 2>&1
 }
 
+# Send warning BEFORE entering safe mode (uses token from recovery config)
+# This notifies user that something failed and we're switching to safe mode
+send_entering_safe_mode_warning() {
+  log "========== SENDING SAFE MODE WARNING =========="
+  
+  local config_file="$CONFIG_PATH"
+  if [ ! -f "$config_file" ]; then
+    log "  No config file found - cannot send warning"
+    return 1
+  fi
+  
+  # Extract token from the config that recovery just wrote
+  local platform=""
+  local token=""
+  
+  # Try Discord first
+  token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
+  if [ -n "$token" ]; then
+    platform="discord"
+  else
+    # Try Telegram
+    token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    if [ -n "$token" ]; then
+      platform="telegram"
+    fi
+  fi
+  
+  if [ -z "$token" ]; then
+    log "  No working token found in config - cannot send warning"
+    return 1
+  fi
+  
+  log "  Using ${platform} token from recovery config"
+  
+  # Get owner ID for the platform
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform")
+  
+  if [ -z "$owner_id" ]; then
+    log "  No owner ID for platform '$platform' - cannot send warning"
+    return 1
+  fi
+  
+  # Get habitat name
+  local habitat_name="${HABITAT_NAME:-Droplet}"
+  
+  # Build warning message
+  local message="⚠️ <b>[${habitat_name}] Entering Safe Mode</b>
+
+Health check failed. Recovering with backup configuration.
+
+SafeModeBot will follow up shortly with diagnostics."
+  
+  log "  Sending warning via $platform to $owner_id"
+  
+  if [ "$platform" = "telegram" ]; then
+    send_telegram_notification "$token" "$owner_id" "$message"
+  elif [ "$platform" = "discord" ]; then
+    send_discord_notification "$token" "$owner_id" "$message"
+  fi
+  
+  log "  Warning sent"
+  log "========== SAFE MODE WARNING COMPLETE =========="
+}
+
 send_boot_notification() {
   local status="$1"  # healthy, safe-mode, critical
   
@@ -707,11 +1173,11 @@ send_boot_notification() {
   local send_token=""
   local owner_id=""
   
-  if [ -f /var/lib/init-status/safe-mode ] && [ -f "$H/.openclaw/openclaw.json" ]; then
+  if [ -f "$SAFE_MODE_FILE" ] && [ -f "$CONFIG_PATH" ]; then
     # Check which channels are configured in safe mode config
     local tg_token dc_token
-    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts.default.botToken // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
-    dc_token=$(jq -r '.channels.discord.token // empty' "$H/.openclaw/openclaw.json" 2>/dev/null)
+    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.accounts.default.botToken // empty' "$CONFIG_PATH" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // empty' "$CONFIG_PATH" 2>/dev/null)
     
     # Prefer platform matching PLATFORM env, fall back to whatever is configured
     local preferred="${PLATFORM:-telegram}"
@@ -719,22 +1185,22 @@ send_boot_notification() {
     if [ "$preferred" = "telegram" ] && [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       send_platform="telegram"
       send_token="$tg_token"
-      owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      owner_id=$(get_owner_id_for_platform "telegram")
       log "  Using Telegram from safe mode config"
     elif [ "$preferred" = "discord" ] && [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       send_platform="discord"
       send_token="$dc_token"
-      owner_id="${DISCORD_OWNER_ID:-}"
+      owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
       log "  Using Discord from safe mode config"
     elif [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
       send_platform="telegram"
       send_token="$tg_token"
-      owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      owner_id=$(get_owner_id_for_platform "telegram")
       log "  Falling back to Telegram from safe mode config"
     elif [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
       send_platform="discord"
       send_token="$dc_token"
-      owner_id="${DISCORD_OWNER_ID:-}"
+      owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
       log "  Falling back to Discord from safe mode config"
     fi
   fi
@@ -752,7 +1218,7 @@ send_boot_notification() {
         if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
           send_platform="telegram"
           send_token="$token"
-          owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+          owner_id=$(get_owner_id_for_platform "telegram")
           break
         fi
       elif [ "$platform" = "discord" ]; then
@@ -762,7 +1228,7 @@ send_boot_notification() {
         if [ -n "$token" ] && validate_discord_token_direct "$token"; then
           send_platform="discord"
           send_token="$token"
-          owner_id="${DISCORD_OWNER_ID:-}"
+          owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
           break
         fi
       fi
@@ -782,7 +1248,7 @@ send_boot_notification() {
           if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
             send_platform="telegram"
             send_token="$token"
-            owner_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+            owner_id=$(get_owner_id_for_platform "telegram")
             log "  Cross-platform fallback to Telegram"
             break
           fi
@@ -793,7 +1259,7 @@ send_boot_notification() {
           if [ -n "$token" ] && validate_discord_token_direct "$token"; then
             send_platform="discord"
             send_token="$token"
-            owner_id="${DISCORD_OWNER_ID:-}"
+            owner_id=$(get_owner_id_for_platform "discord" "with_prefix")
             log "  Cross-platform fallback to Discord"
             break
           fi
@@ -812,33 +1278,130 @@ send_boot_notification() {
   local message=""
   case "$status" in
     healthy)
-      local count="${AGENT_COUNT:-1}"
-      if [ "$count" -gt 1 ]; then
-        local agents_list=""
-        for i in $(seq 1 "$count"); do
-          local name_var="AGENT${i}_NAME"
-          local name="${!name_var:-Agent${i}}"
-          agents_list="${agents_list}• ${name} ✓
-"
-        done
-        message="✅ <b>[${habitat_name}]</b> Ready!
-
-<b>All ${count} agents online:</b>
-${agents_list}"
-      else
-        local name="${AGENT1_NAME:-Agent1}"
-        message="✅ <b>[${habitat_name}]</b> Ready!
-
-${name} is online."
-      fi
+      # In normal mode, agents already introduced themselves via check_agents_e2e
+      # So we don't need to send a separate "Ready!" notification
+      log "  Agents already introduced themselves - skipping separate Ready notification"
+      touch "$notification_file"
+      return 0
       ;;
       
     safe-mode)
-      message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
+      # Send the safe mode notification via raw Telegram/Discord API first
+      local habitat_name="${HABITAT_NAME:-Droplet}"
+      local sm_message="⚠️ <b>[${habitat_name}] SAFE MODE</b>
 
 Health check failed. SafeModeBot is online to diagnose.
 
 See BOOT_REPORT.md for details."
+
+      log "  Sending safe mode notification via $send_platform"
+      if [ "$send_platform" = "telegram" ] && [ -n "$send_token" ]; then
+        send_telegram_notification "$send_token" "$owner_id" "$sm_message" && log "  Script notification sent" || log "  Script notification failed"
+      elif [ "$send_platform" = "discord" ] && [ -n "$send_token" ]; then
+        send_discord_notification "$send_token" "$owner_id" "$sm_message" && log "  Script notification sent" || log "  Script notification failed"
+      fi
+
+      # Now trigger SafeModeBot intro for detailed diagnostics
+      
+      # Generate boot report for SafeModeBot to read
+      log "  Generating BOOT_REPORT.md for SafeModeBot to read..."
+      generate_boot_report_md
+      log "  BOOT_REPORT.md created at $H/clawd/agents/safe-mode/BOOT_REPORT.md"
+      
+      # Trigger SafeModeBot intro via openclaw agent
+      # In session isolation + safe mode, the recovery-generated config DOES have a safe-mode agent.
+      # Only skip if safe-mode agent is not present in the config.
+      local config_to_check="${CONFIG_PATH:-}"
+      if [ -z "$config_to_check" ] && [ -n "${GROUP:-}" ]; then
+        config_to_check="/etc/systemd/system/${GROUP}/openclaw.session.json"
+      fi
+      
+      local has_safe_mode_agent=""
+      if [ -f "$config_to_check" ]; then
+        has_safe_mode_agent=$(jq -r '.agents.list[]? | select(.id == "safe-mode") | .id' "$config_to_check" 2>/dev/null)
+      fi
+      
+      if [ -z "$has_safe_mode_agent" ]; then
+        log "========== SAFE MODE BOT INTRO (SKIPPED) =========="
+        log "  No safe-mode agent found in config: $config_to_check"
+        log "  User has been notified via direct Telegram/Discord API"
+        return 0
+      fi
+      
+      log "========== SAFE MODE BOT INTRO =========="
+      log "  SafeModeBot will introduce itself and provide diagnostics"
+      log "  Delivery: channel=$send_platform, owner=$owner_id"
+      
+      # IMPORTANT: The prompt must be clear that the bot should REPLY directly,
+      # not try to use the message tool. The --deliver flag handles delivery.
+      local safemode_prompt="You just came online in SAFE MODE after a boot failure.
+
+IMPORTANT: Just reply directly here - your response will be automatically delivered to the user. Do NOT use the message tool.
+
+Read your BOOT_REPORT.md file and reply with:
+1. Brief intro (you're SafeModeBot, running in emergency mode)
+2. What went wrong (summarize from BOOT_REPORT.md)
+3. Offer to help investigate
+
+Keep it to 3-5 sentences. Be helpful, not verbose."
+      
+      # In session isolation mode, openclaw agent can't connect to openclaw (port 18789)
+      # because session services use different ports. Set gateway URL to the correct port.
+      local gateway_url=""
+      local config_path=""
+      if [ "$ISOLATION" = "session" ] && [ -n "${GROUP:-}" ] && [ -n "${GROUP_PORT:-}" ]; then
+        gateway_url="ws://127.0.0.1:${GROUP_PORT}"
+        # Use OPENCLAW_CONFIG_PATH from systemd env if available, otherwise construct it
+        config_path="${CONFIG_PATH:-/etc/systemd/system/${GROUP}/openclaw.session.json}"
+        log "  Session isolation mode: using gateway at $gateway_url, config at $config_path"
+      fi
+      
+      log "  Command: sudo -u $USERNAME openclaw agent --agent safe-mode --deliver --reply-channel $send_platform --reply-account safe-mode --reply-to $owner_id"
+      
+      local start_time
+      start_time=$(date +%s)
+      
+      # IMPORTANT: Run as $USERNAME, not root. Health check runs as root (ExecStartPost +)
+      # but openclaw must run as the bot user to create files with correct ownership.
+      local output
+      
+      # Build environment variables for session isolation
+      local env_prefix=""
+      if [ -n "$gateway_url" ]; then
+        env_prefix="OPENCLAW_GATEWAY_URL=$gateway_url OPENCLAW_CONFIG_PATH=$config_path"
+      fi
+      
+      output=$(timeout 120 sudo -u "$USERNAME" env $env_prefix openclaw agent \
+        --agent "safe-mode" \
+        --message "$safemode_prompt" \
+        --deliver \
+        --reply-channel "$send_platform" \
+        --reply-account "safe-mode" \
+        --reply-to "$owner_id" \
+        --timeout 90 \
+        --json 2>&1)
+      local exit_code=$?
+      
+      local end_time
+      end_time=$(date +%s)
+      local duration=$((end_time - start_time))
+      
+      if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+        touch "$notification_file"
+        log "  ✓ SUCCESS: SafeModeBot intro sent in ${duration}s"
+        log "  Output (first 500 chars): $(echo "$output" | head -c 500)"
+        log "========== SAFE MODE INTRO COMPLETE =========="
+      else
+        log "  ✗ FAILED: SafeModeBot intro (exit=$exit_code, duration=${duration}s)"
+        log "  Full output:"
+        echo "$output" | while IFS= read -r line; do
+          log "    | $line"
+        done
+        log "  Direct notification already sent - SafeModeBot intro failed but user was notified"
+      fi
+      
+      # Already sent direct notification, so we're done regardless of bot intro result
+      return 0
       ;;
       
     critical)
@@ -847,7 +1410,7 @@ See BOOT_REPORT.md for details."
 Gateway failed to start after multiple attempts.
 Bot is OFFLINE - no connectivity available.
 
-Check logs: <code>journalctl -u clawdbot -n 50</code>
+Check logs: <code>journalctl -u openclaw -n 50</code>
 See CRITICAL_FAILURE.md for recovery steps."
       ;;
   esac
@@ -901,7 +1464,11 @@ $(cat /var/log/safe-mode-diagnostics.txt 2>/dev/null || echo "No diagnostics ava
 4. Upload new config via API or recreate droplet
 REPORT
   
-  chown $USERNAME:$USERNAME "$report_path" 2>/dev/null
+  if type ensure_bot_file &>/dev/null; then
+    ensure_bot_file "$report_path" 644
+  else
+    chown $USERNAME:$USERNAME "$report_path" 2>/dev/null
+  fi
   log "Generated BOOT_REPORT.md"
 }
 
@@ -924,5 +1491,8 @@ else
   generate_boot_report_md  # Still generate report for SafeModeBot to read
 fi
 
-log "========== GATEWAY HEALTH CHECK COMPLETE (exit=$EXIT_CODE) =========="
+log "============================================================"
+log "========== GATEWAY HEALTH CHECK COMPLETE =========="
+log "============================================================"
+log "RUN_ID=$RUN_ID | EXIT=$EXIT_CODE | HEALTHY=$HEALTHY | SAFE_MODE=$ALREADY_IN_SAFE_MODE"
 exit $EXIT_CODE

@@ -1,0 +1,112 @@
+{
+  "name": "TestHabitat-DockerIsolation",
+  "platform": "both",
+  "domain": "bot1.frysinger.org",
+  "destructMinutes": 120,
+  "bgColor": "1A365D",
+  "remoteApi": true,
+  "isolation": "container",
+  "sharedPaths": [
+    "/home/bot/clawd/shared",
+    "/home/bot/clawd/shared/reports"
+  ],
+  "globalIdentity": "You are a bot in a Docker-isolated habitat.",
+  "globalSoul": "Be helpful and concise.",
+  "globalUser": "- Name: Test User\n- Location: Salt Lake City, UT",
+  "globalTools": "Chrome, ffmpeg, gh CLI available.",
+  "council": {
+    "judge": "Opus",
+    "groupName": "Council",
+    "telegram": {
+      "groupId": "-1001234567890"
+    }
+  },
+  "platforms": {
+    "telegram": {
+      "ownerId": "5874850284"
+    },
+    "discord": {
+      "ownerId": "795380005466800159",
+      "serverId": "1468992121901027582"
+    }
+  },
+  "agents": [
+    {
+      "agent": "Opus",
+      "model": "anthropic/claude-opus-4-6",
+      "isolationGroup": "council",
+      "network": "host",
+      "resources": {
+        "memory": "2g",
+        "cpu": "1.5"
+      },
+      "tokens": {
+        "telegram": "8513046756:AAGA45Bl4MhJ0d9cJQzhP6ZEQVLKLilD_O0",
+        "discord": "TEST_DISCORD_TOKEN_OPUS"
+      }
+    },
+    {
+      "agent": "Claude",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "council",
+      "resources": {
+        "memory": "2g",
+        "cpu": "1.5"
+      },
+      "tokens": {
+        "telegram": "8484612152:AAFkgERGjnpqbZ9C_WYwsNHSbj8VYg0FXfs",
+        "discord": "TEST_DISCORD_TOKEN_CLAUDE"
+      }
+    },
+    {
+      "agent": "ChatGPT",
+      "model": "openai-codex/gpt-5.3-codex",
+      "isolationGroup": "council",
+      "tokens": {
+        "telegram": "TEST_TG_TOKEN_CHATGPT",
+        "discord": "TEST_DISCORD_TOKEN_CHATGPT"
+      }
+    },
+    {
+      "agent": "code-executor",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "sandbox",
+      "network": "none",
+      "capabilities": ["exec", "read", "write"],
+      "resources": {
+        "memory": "512m",
+        "cpu": "0.5"
+      },
+      "tokens": {
+        "telegram": "TEST_TG_TOKEN_EXECUTOR"
+      }
+    },
+    {
+      "agent": "researcher",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "research",
+      "network": "host",
+      "capabilities": ["web_search", "web_fetch", "read", "write"],
+      "resources": {
+        "memory": "1g",
+        "cpu": "1.0"
+      },
+      "tokens": {
+        "discord": "TEST_DISCORD_TOKEN_RESEARCHER"
+      }
+    },
+    {
+      "agent": "internal-worker",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "workers",
+      "network": "internal",
+      "resources": {
+        "memory": "1g",
+        "cpu": "0.75"
+      },
+      "tokens": {
+        "telegram": "TEST_TG_TOKEN_WORKER"
+      }
+    }
+  ]
+}

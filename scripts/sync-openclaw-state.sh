@@ -9,7 +9,7 @@
 # Inputs:   /etc/droplet.env -- DROPBOX_TOKEN_B64
 #           /etc/habitat-parsed.env -- HABITAT_NAME, AGENT_COUNT, USERNAME
 #
-# Outputs:  Files uploaded to dropbox:clawdbot-memory/${HABITAT_NAME}/
+# Outputs:  Files uploaded to dropbox:openclaw-memory/${HABITAT_NAME}/
 #
 # Dependencies: rclone, rclone-validate.sh
 #
@@ -33,7 +33,7 @@ fi
 
 HN="${HABITAT_NAME:-default}"
 H="/home/$USERNAME"
-R="dropbox:clawdbot-memory/${HN}"
+R="dropbox:openclaw-memory/${HN}"
 AC=${AGENT_COUNT:-1}
 
 # Workspace files to sync per-agent

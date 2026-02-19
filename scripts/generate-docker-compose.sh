@@ -29,8 +29,8 @@
 set -euo pipefail
 
 # --- Source environment files (may be called standalone or from another script) ---
-[ -f /etc/droplet.env ] && source /etc/droplet.env
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+[ -f /etc/droplet.env ] && [ -r /etc/droplet.env ] && source /etc/droplet.env
+[ -f /etc/habitat-parsed.env ] && [ -r /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 
 # --- Validate required inputs ---
 if [ -z "${AGENT_COUNT:-}" ]; then
@@ -219,9 +219,18 @@ NET
         echo "    cpus: ${cpu}" >> "$COMPOSE_FILE"
     fi
 
-    # Volumes
+    # Volumes — include config, scripts, and env files needed by health check
     echo "    volumes:" >> "$COMPOSE_FILE"
     echo "      - ./config/${group}:${HOME_DIR}/.openclaw" >> "$COMPOSE_FILE"
+    echo "      - /usr/local/bin/gateway-health-check.sh:/usr/local/bin/gateway-health-check.sh:ro" >> "$COMPOSE_FILE"
+    echo "      - /usr/local/bin/safe-mode-recovery.sh:/usr/local/bin/safe-mode-recovery.sh:ro" >> "$COMPOSE_FILE"
+    echo "      - /usr/local/bin/setup-safe-mode-workspace.sh:/usr/local/bin/setup-safe-mode-workspace.sh:ro" >> "$COMPOSE_FILE"
+    echo "      - /usr/local/sbin/lib-permissions.sh:/usr/local/sbin/lib-permissions.sh:ro" >> "$COMPOSE_FILE"
+    echo "      - /etc/droplet.env:/etc/droplet.env:ro" >> "$COMPOSE_FILE"
+    echo "      - /etc/habitat-parsed.env:/etc/habitat-parsed.env:ro" >> "$COMPOSE_FILE"
+    echo "      - /var/lib/init-status:/var/lib/init-status" >> "$COMPOSE_FILE"
+    echo "      - /var/log:/var/log" >> "$COMPOSE_FILE"
+    echo "      - ${HOME_DIR}/clawd:${HOME_DIR}/clawd" >> "$COMPOSE_FILE"
     if [ -n "$SHARED" ]; then
         IFS=',' read -ra PATHS <<< "$SHARED"
         for sp in "${PATHS[@]}"; do
@@ -229,13 +238,47 @@ NET
         done
     fi
 
-    # Environment
+    # Port for this group (base 18789, offset by group index)
+    group_idx=0
+    for g in "${CONTAINER_GROUPS[@]}"; do
+        [ "$g" = "$group" ] && break
+        group_idx=$((group_idx + 1))
+    done
+    group_port=$((18789 + group_idx))
+
+    # Environment — pass GROUP and GROUP_PORT so health check is universal
     cat >> "$COMPOSE_FILE" <<ENV
     environment:
       - AGENT_NAMES=${agent_names}
+      - GROUP=${group}
+      - GROUP_PORT=${group_port}
+      - ISOLATION=container
+      - RUN_MODE=execstartpost
+    container_name: openclaw-${group}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:${group_port}/"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 ENV
 
-    echo "  [${group}] network=${net} agents=${agent_names} → docker-compose.yaml"
+    # Entrypoint: start gateway, then run health check (like ExecStart + ExecStartPost)
+    cat >> "$COMPOSE_FILE" <<'ENTRY'
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        # Start gateway in background
+        openclaw gateway --bind loopback --port $${GROUP_PORT} &
+        GW_PID=$$!
+        # Wait for gateway to be ready, then run health check
+        sleep 30
+        /usr/local/bin/gateway-health-check.sh
+        # Keep gateway running
+        wait $$GW_PID
+ENTRY
+
+    echo "  [${group}] network=${net} port=${group_port} agents=${agent_names} → docker-compose.yaml"
 done
 
 # Add internal network definition if needed

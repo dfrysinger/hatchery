@@ -91,8 +91,8 @@ def get_status():
     # Container isolation: check containers service
     bot_online=check_service('openclaw-containers')
   else:
-    # No isolation: check main clawdbot
-    bot_online=check_service('clawdbot')
+    # No isolation: check main openclaw
+    bot_online=check_service('openclaw')
   
   svc={}
   if p2_done or setup_done:
@@ -104,7 +104,7 @@ def get_status():
     elif isolation_mode=="container":
       svc['openclaw-containers']=check_service('openclaw-containers')
     else:
-      svc['clawdbot']=check_service('clawdbot')
+      svc['openclaw']=check_service('openclaw')
     for sv in base_services:
       svc[sv]=check_service(sv)
   desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
@@ -498,7 +498,7 @@ class H(http.server.BaseHTTPRequestHandler):
         self.wfile.write(f"ERROR: {e}\n".encode())
       
       self.wfile.write(b"\n=== SESSION SERVICE STATUS ===\n")
-      for svc in ['clawdbot','openclaw-browser','openclaw-documents','openclaw-containers']:
+      for svc in ['openclaw','openclaw-browser','openclaw-documents','openclaw-containers']:
         try:
           r=subprocess.run(['systemctl','status',svc,'--no-pager'],capture_output=True,timeout=5)
           self.wfile.write(f"\n--- {svc} ---\n".encode())
@@ -515,7 +515,7 @@ class H(http.server.BaseHTTPRequestHandler):
       
       self.wfile.write(b"\n=== CLAWDBOT LOGS ===\n")
       try:
-        r=subprocess.run(['journalctl','-u','clawdbot','--since','30 min ago','-n','50','--no-pager'],capture_output=True,timeout=10)
+        r=subprocess.run(['journalctl','-u','openclaw','--since','30 min ago','-n','50','--no-pager'],capture_output=True,timeout=10)
         self.wfile.write(r.stdout[-4096:])
       except Exception as e:
         self.wfile.write(f"ERROR: {e}\n".encode())
@@ -566,7 +566,7 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_json(403,{"ok":False,"error":err or "Forbidden"});return
       
       self.send_response(200);self.send_header('Content-type','application/json');self.end_headers()
-      try:subprocess.run(["/usr/local/bin/sync-openclaw-state.sh"],timeout=60);subprocess.run(["systemctl","stop","clawdbot"],timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
+      try:subprocess.run(["/usr/local/bin/sync-openclaw-state.sh"],timeout=60);subprocess.run(["systemctl","stop","openclaw"],timeout=30);self.wfile.write(json.dumps({"ok":True,"ready_for_shutdown":True}).encode())
       except Exception as x:self.wfile.write(json.dumps({"ok":False,"error":str(x)}).encode())
     
     elif self.path=='/keepalive':

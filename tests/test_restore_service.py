@@ -2,7 +2,7 @@
 """
 Tests for the openclaw-restore.service systemd unit.
 
-This service must run restore-openclaw-state.sh BEFORE clawdbot.service starts,
+This service must run restore-openclaw-state.sh BEFORE openclaw.service starts,
 ensuring memory and transcripts are available on first bot message.
 
 With the slim YAML approach, services are now in:
@@ -76,33 +76,33 @@ class TestRestoreServiceDefinition:
         assert 'RemainAfterExit=yes' in content, \
             "openclaw-restore.service must have RemainAfterExit=yes"
 
-    def test_restore_service_before_clawdbot(self):
-        """Service must specify Before=clawdbot.service."""
+    def test_restore_service_before_openclaw(self):
+        """Service must specify Before=openclaw.service."""
         content = read_service_file("openclaw-restore.service")
-        assert 'Before=clawdbot.service' in content, \
-            "openclaw-restore.service must have Before=clawdbot.service"
+        assert 'Before=openclaw.service' in content, \
+            "openclaw-restore.service must have Before=openclaw.service"
 
 
 class TestClawdbotServiceDependencies:
-    """Tests for clawdbot.service depending on restore service.
+    """Tests for openclaw.service depending on restore service.
     
-    Note: clawdbot.service is created dynamically in phase1-critical.sh,
+    Note: openclaw.service is created dynamically in phase1-critical.sh,
     so we check the script source for the dependency configuration.
     """
 
-    def test_clawdbot_after_restore_service(self):
-        """clawdbot.service must start After=openclaw-restore.service."""
+    def test_openclaw_after_restore_service(self):
+        """openclaw.service must start After=openclaw-restore.service."""
         content = read_phase1_script()
-        # Look for the clawdbot.service heredoc with After= dependency
+        # Look for the openclaw.service heredoc with After= dependency
         assert re.search(r'After=.*openclaw-restore\.service', content), \
-            "clawdbot.service (in phase1-critical.sh) must have After=openclaw-restore.service"
+            "openclaw.service (in phase1-critical.sh) must have After=openclaw-restore.service"
 
-    def test_clawdbot_wants_restore_service(self):
-        """clawdbot.service should Want the restore service."""
+    def test_openclaw_wants_restore_service(self):
+        """openclaw.service should Want the restore service."""
         content = read_phase1_script()
         # Wants= is preferred over Requires= for graceful degradation
         assert re.search(r'Wants=.*openclaw-restore\.service', content), \
-            "clawdbot.service (in phase1-critical.sh) should have Wants=openclaw-restore.service"
+            "openclaw.service (in phase1-critical.sh) should have Wants=openclaw-restore.service"
 
 
 class TestPhase1RestoreHandling:
@@ -136,7 +136,7 @@ class TestPhase2NoDoubleRestore:
         content = read_phase2_script()
         
         # The restore script should NOT be called as a standalone command
-        # It's now handled by the systemd service before clawdbot starts
+        # It's now handled by the systemd service before openclaw starts
         lines = content.split('\n')
         for line in lines:
             # Skip comments
@@ -178,33 +178,33 @@ class TestRestoreServiceOrdering:
         """Read the phase1-critical.sh script content."""
         return read_phase1_script()
 
-    def test_restore_enabled_before_clawdbot_enabled(self, phase1_script_content):
-        """openclaw-restore must be enabled BEFORE clawdbot is enabled.
+    def test_restore_enabled_before_openclaw_enabled(self, phase1_script_content):
+        """openclaw-restore must be enabled BEFORE openclaw is enabled.
         
         This ensures the Wants= dependency works correctly when the system reboots.
-        Note: In the new architecture, phase1 only enables clawdbot (doesn't start it).
+        Note: In the new architecture, phase1 only enables openclaw (doesn't start it).
         The service starts on reboot when the full config is ready.
         """
         content = phase1_script_content
         
         # Find the position of both commands
         enable_restore = re.search(r'systemctl\s+enable\s+openclaw-restore', content)
-        enable_clawdbot = re.search(r'systemctl\s+enable\s+clawdbot', content)
+        enable_openclaw = re.search(r'systemctl\s+enable\s+openclaw\b(?!-)', content)
         
         assert enable_restore, \
             "phase1-critical.sh must have 'systemctl enable openclaw-restore'"
-        assert enable_clawdbot, \
-            "phase1-critical.sh must have 'systemctl enable clawdbot'"
+        assert enable_openclaw, \
+            "phase1-critical.sh must have 'systemctl enable openclaw'"
         
-        # Verify ordering: enable restore must come BEFORE enable clawdbot
-        assert enable_restore.start() < enable_clawdbot.start(), \
-            "systemctl enable openclaw-restore must appear BEFORE systemctl enable clawdbot " \
+        # Verify ordering: enable restore must come BEFORE enable openclaw
+        assert enable_restore.start() < enable_openclaw.start(), \
+            "systemctl enable openclaw-restore must appear BEFORE systemctl enable openclaw " \
             "so the Wants= dependency works correctly on reboot"
 
     def test_restore_enabled_in_phase1_not_phase2(self, phase1_script_content):
         """Restore service should be enabled in phase1 (for immediate availability)."""
         # This test documents that restore is enabled in phase1, not phase2
-        # The enable must happen before clawdbot starts to make Wants= work
+        # The enable must happen before openclaw starts to make Wants= work
         assert re.search(r'systemctl\s+enable\s+openclaw-restore', phase1_script_content), \
             "openclaw-restore.service must be enabled in phase1-critical.sh"
 

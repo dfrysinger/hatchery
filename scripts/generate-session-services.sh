@@ -2,6 +2,9 @@
 # =============================================================================
 # generate-session-services.sh — Generate per-group systemd services
 # =============================================================================
+
+# Source permission utilities
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  For session isolation mode, generates one systemd service per
 #           isolation group, each running its own OpenClaw gateway instance
 #           on a unique port with only that group's agents.
@@ -107,19 +110,30 @@ echo "Generating session services for ${#SESSION_GROUPS[@]} group(s)..."
 # --- Generate per-group service and config ---
 # Ensure parent state directory exists and is owned by service user
 STATE_BASE="${HOME_DIR}/.openclaw-sessions"
-mkdir -p "$STATE_BASE"
-[ -z "${DRY_RUN:-}" ] && chown "${SVC_USER}:${SVC_USER}" "$STATE_BASE" && chmod 755 "$STATE_BASE"
+if type ensure_bot_dir &>/dev/null; then
+  ensure_bot_dir "$STATE_BASE" 700
+else
+  mkdir -p "$STATE_BASE"
+  [ -z "${DRY_RUN:-}" ] && chown "${SVC_USER}:${SVC_USER}" "$STATE_BASE" && chmod 700 "$STATE_BASE"
+fi
 
 group_index=0
 for group in "${SESSION_GROUPS[@]}"; do
     port=$((BASE_PORT + group_index))
     group_dir="${OUTPUT_DIR}/${group}"
     state_dir="${STATE_BASE}/${group}"
-    mkdir -p "$group_dir"
-    mkdir -p "$state_dir"
-    [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 755 "$state_dir"
-    # Config dir needs to be readable by service user
-    chmod 755 "$group_dir"
+    
+    # Create directories with proper ownership
+    if type ensure_bot_dir &>/dev/null; then
+      ensure_bot_dir "$state_dir" 700
+      # Config dir needs 755 for systemd to read
+      mkdir -p "$group_dir" && chmod 755 "$group_dir"
+    else
+      mkdir -p "$group_dir"
+      mkdir -p "$state_dir"
+      [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 700 "$state_dir"
+      chmod 755 "$group_dir"
+    fi
 
     # Collect agents for this group
     agent_list_json="["
@@ -150,7 +164,11 @@ for group in "${SESSION_GROUPS[@]}"; do
             agent_list_json="${agent_list_json}{\"id\":\"agent${i}\",\"default\":${is_default},\"name\":\"${agent_name}\",\"model\":\"${agent_model}\",\"workspace\":\"${HOME_DIR}/clawd/agents/agent${i}\"}"
             
             # Create agent directory structure (OpenClaw will create sessions/ inside)
-            mkdir -p "${state_dir}/agents/agent${i}/agent"
+            if type ensure_bot_dir &>/dev/null; then
+              ensure_bot_dir "${state_dir}/agents/agent${i}/agent" 700
+            else
+              mkdir -p "${state_dir}/agents/agent${i}/agent"
+            fi
             
             # Copy auth-profiles.json from main agent directory if it exists
             main_auth="${HOME_DIR}/.openclaw/agents/agent${i}/agent/auth-profiles.json"
@@ -162,7 +180,13 @@ for group in "${SESSION_GROUPS[@]}"; do
                 echo "  [agent${i}] WARNING: No auth-profiles.json found at $main_auth"
             fi
             
-            [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}"
+            # Fix ownership
+            if type fix_session_state &>/dev/null && [ -z "${DRY_RUN:-}" ]; then
+              chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}" 2>/dev/null || true
+              [ -f "$session_auth" ] && chmod 600 "$session_auth"
+            elif [ -z "${DRY_RUN:-}" ]; then
+              chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}/agents/agent${i}"
+            fi
             
             # Build Telegram account for this agent
             if [ -n "$agent_bot_token" ]; then
@@ -199,7 +223,7 @@ for group in "${SESSION_GROUPS[@]}"; do
   "gateway": {
     "mode": "local",
     "port": ${port},
-    "bind": "lan",
+    "bind": "loopback",
     "controlUi": {"enabled": true, "allowInsecureAuth": true},
     "auth": {"mode": "token", "token": "$(openssl rand -hex 16)"}
   },
@@ -236,18 +260,28 @@ for group in "${SESSION_GROUPS[@]}"; do
 SESSIONCFG
     # Make config AND directory writable by service user (OpenClaw needs to persist config changes)
     # SECURITY: Use restrictive permissions - only owner (bot user) should have write access
-    chown -R "${SVC_USER}:${SVC_USER}" "$group_dir" 2>/dev/null || true
-    chmod 750 "$group_dir"
-    chmod 600 "${group_dir}/openclaw.session.json"
+    if type fix_session_config_dir &>/dev/null; then
+      fix_session_config_dir "$group_dir"
+    else
+      chown -R "${SVC_USER}:${SVC_USER}" "$group_dir" 2>/dev/null || true
+      chmod 750 "$group_dir"
+      chmod 600 "${group_dir}/openclaw.session.json"
+    fi
+    
     # Final ownership fix for entire state tree (ensure all subdirs are accessible)
     if [ -z "${DRY_RUN:-}" ]; then
-        chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}"
-        chmod -R u+rwX "${state_dir}"
+        if type fix_session_state &>/dev/null; then
+          fix_session_state "${state_dir}"
+        else
+          chown -R "${SVC_USER}:${SVC_USER}" "${state_dir}"
+          chmod -R u+rwX "${state_dir}"
+        fi
         echo "  [${group}] state_dir permissions:"
         ls -la "${state_dir}" 2>&1 | head -5
     fi
 
     # Generate systemd service
+    # Note: Health check derives agents from habitat-parsed.env using GROUP name
     cat > "${OUTPUT_DIR}/openclaw-${group}.service" <<SVCFILE
 [Unit]
 Description=OpenClaw Session - ${group} (${HABITAT})
@@ -258,9 +292,14 @@ Wants=desktop.service
 Type=simple
 User=${SVC_USER}
 WorkingDirectory=${HOME_DIR}
-ExecStart=/usr/local/bin/openclaw gateway --bind lan --port ${port}
-Restart=always
-RestartSec=3
+ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port ${port}
+ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
+# on-failure (not always): clean exit 0 means intentional shutdown (e.g., config reload),
+# exit 2 is excluded via RestartPreventExitStatus to allow permanent stop on fatal errors.
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+TimeoutStartSec=120
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
@@ -290,16 +329,35 @@ if [ -z "${DRY_RUN:-}" ]; then
     fi
     systemctl daemon-reload
     
-    # Stop main clawdbot service - session isolation replaces it
-    echo "Stopping main clawdbot service (replaced by session services)..."
-    systemctl stop clawdbot 2>/dev/null || true
-    systemctl disable clawdbot 2>/dev/null || true
+    # Stop main openclaw service - session isolation replaces it
+    echo "Stopping main openclaw service (replaced by session services)..."
+    systemctl stop openclaw 2>/dev/null || true
+    systemctl disable openclaw 2>/dev/null || true
+    
+    # Check if boot is complete - only START services after boot finishes
+    # During initial boot, just ENABLE them; they'll auto-start after reboot
+    boot_complete=false
+    [ -f /var/lib/init-status/boot-complete ] && boot_complete=true
     
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
-        systemctl start "openclaw-${group}.service"
+        
+        if [ "$boot_complete" = "true" ]; then
+            # Boot complete - this is a config update, start services now
+            systemctl start "openclaw-${group}.service" || {
+                echo "  [${group}] Service start returned non-zero (health check may have triggered safe mode)"
+                echo "  [${group}] Service will restart automatically via systemd"
+            }
+        else
+            echo "  [${group}] Boot not complete - service enabled but not started (will start after reboot)"
+        fi
     done
-    echo "Session services started."
+    
+    if [ "$boot_complete" = "true" ]; then
+        echo "Session services started (or pending health check restart)."
+    else
+        echo "Session services enabled (will start automatically after reboot)."
+    fi
 else
     echo "DRY_RUN mode — services written to ${OUTPUT_DIR}"
 fi

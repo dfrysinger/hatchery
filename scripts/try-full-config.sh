@@ -24,11 +24,11 @@ echo "Attempting full config at $(date)"
 cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
 chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
 chmod 600 "$H/.openclaw/openclaw.json"
-systemctl restart clawdbot
+systemctl restart openclaw
 HEALTHY=false
 for _ in $(seq 1 12); do
   sleep 5
-  if systemctl is-active --quiet clawdbot; then
+  if systemctl is-active --quiet openclaw; then
     if curl -sf http://127.0.0.1:18789/ >/dev/null 2>&1; then
       HEALTHY=true
       break
@@ -44,7 +44,7 @@ else
   cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
   chown $USERNAME:$USERNAME "$H/.openclaw/openclaw.json"
   chmod 600 "$H/.openclaw/openclaw.json"
-  systemctl restart clawdbot
-  echo "FAILED: Restored minimal config. Check logs: journalctl -u clawdbot"
+  systemctl restart openclaw
+  echo "FAILED: Restored minimal config. Check logs: journalctl -u openclaw"
   exit 1
 fi

@@ -204,8 +204,8 @@ class TestPlatformTelegram:
 
     def test_telegram_accounts(self):
         config = run_build_config(platform="telegram")
-        assert "default" in config["channels"]["telegram"]["accounts"]
-        assert config["channels"]["telegram"]["accounts"]["default"]["botToken"] == "tg-token-1"
+        assert "agent1" in config["channels"]["telegram"]["accounts"]
+        assert config["channels"]["telegram"]["accounts"]["agent1"]["botToken"] == "tg-token-1"
 
     def test_telegram_dm_policy(self):
         config = run_build_config(platform="telegram")
@@ -240,8 +240,8 @@ class TestPlatformDiscord:
 
     def test_discord_accounts(self):
         config = run_build_config(platform="discord")
-        assert "default" in config["channels"]["discord"]["accounts"]
-        assert config["channels"]["discord"]["accounts"]["default"]["token"] == "dc-token-1"
+        assert "agent1" in config["channels"]["discord"]["accounts"]
+        assert config["channels"]["discord"]["accounts"]["agent1"]["token"] == "dc-token-1"
 
     def test_discord_dm_config(self):
         config = run_build_config(platform="discord")
@@ -289,8 +289,8 @@ class TestPlatformBoth:
 
     def test_both_have_accounts(self):
         config = run_build_config(platform="both")
-        assert "default" in config["channels"]["telegram"]["accounts"]
-        assert "default" in config["channels"]["discord"]["accounts"]
+        assert "agent1" in config["channels"]["telegram"]["accounts"]
+        assert "agent1" in config["channels"]["discord"]["accounts"]
 
 
 class TestBindings:
@@ -331,14 +331,14 @@ class TestBindings:
     def test_multi_agent_telegram_accounts(self):
         config = run_build_config(platform="telegram", agent_count=3, agents=self.MULTI_AGENTS)
         ta = config["channels"]["telegram"]["accounts"]
-        assert ta["default"]["botToken"] == "tg-1"
+        assert ta["agent1"]["botToken"] == "tg-1"
         assert ta["agent2"]["botToken"] == "tg-2"
         assert ta["agent3"]["botToken"] == "tg-3"
 
     def test_multi_agent_discord_accounts(self):
         config = run_build_config(platform="discord", agent_count=3, agents=self.MULTI_AGENTS)
         da = config["channels"]["discord"]["accounts"]
-        assert da["default"]["token"] == "dc-1"
+        assert da["agent1"]["token"] == "dc-1"
         assert da["agent2"]["token"] == "dc-2"
         assert da["agent3"]["token"] == "dc-3"
 

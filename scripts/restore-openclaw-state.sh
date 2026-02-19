@@ -45,9 +45,18 @@ fi
 
 HN="${HABITAT_NAME:-default}"
 H="/home/$USERNAME"
-R="dropbox:clawdbot-memory/${HN}"
+R="dropbox:openclaw-memory/${HN}"
 AC=${AGENT_COUNT:-1}
 FAIL=0
+
+# One-time migration from old Dropbox path (clawdbot-memory → openclaw-memory)
+OLD_R="dropbox:clawdbot-memory/${HN}"
+if ! rclone lsf "$R" --max-depth 1 2>/dev/null | grep -q "."; then
+  if rclone lsf "$OLD_R" --max-depth 1 2>/dev/null | grep -q "."; then
+    echo "Migrating from clawdbot-memory to openclaw-memory..."
+    rclone copy "$OLD_R" "$R" 2>/dev/null || echo "WARN: migration copy failed"
+  fi
+fi
 
 # Workspace files to restore per-agent
 WORKSPACE_FILES="AGENTS.md BOOT.md BOOTSTRAP.md IDENTITY.md SOUL.md USER.md"

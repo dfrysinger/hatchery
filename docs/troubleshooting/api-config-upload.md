@@ -26,7 +26,7 @@ This guide helps diagnose issues with the **two-phase config** workflow (minimal
    ```
 
 4. **Did apply/restart run?**
-   - `clawdbot` service status
+   - `openclaw` service status
    - `/var/log/apply-config.log` (if present)
 
 ## Understanding the marker file

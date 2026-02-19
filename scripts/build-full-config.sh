@@ -2,6 +2,9 @@
 # =============================================================================
 # build-full-config.sh -- Generate full openclaw.json with all features
 # =============================================================================
+
+# Source permission utilities (creates dirs with correct ownership)
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 # Purpose:  Builds the complete openclaw configuration with multi-agent
 #           support, browser config, auth profiles, skills, council setup,
 #           desktop integration, and all per-agent workspace files
@@ -14,7 +17,7 @@
 # Outputs:  $HOME/.openclaw/openclaw.full.json -- full config
 #           $HOME/.openclaw/agents/*/agent/auth-profiles.json -- auth creds
 #           $HOME/clawd/agents/*/IDENTITY.md, SOUL.md, AGENTS.md, etc.
-#           /etc/systemd/system/clawdbot.service -- updated systemd unit
+#           /etc/systemd/system/openclaw.service -- updated systemd unit
 #
 # Dependencies: /etc/droplet.env, /etc/habitat-parsed.env, bc (for bg color), jq
 #
@@ -68,10 +71,18 @@ OA_ESC=$(json_escape "$OA")
 OR_ESC=$(json_escape "$OR")
 # shellcheck disable=SC2034
 OI_ESC=$(json_escape "$OI")
-mkdir -p $H/.openclaw/credentials
-for i in $(seq 1 $AC); do
-  mkdir -p "$H/clawd/agents/agent${i}/memory"
-done
+# Use helper if available, fallback to mkdir+chmod
+if type ensure_bot_dir &>/dev/null; then
+  ensure_bot_dir "$H/.openclaw/credentials" 700
+  for i in $(seq 1 $AC); do
+    ensure_bot_dir "$H/clawd/agents/agent${i}/memory" 755
+  done
+else
+  mkdir -p $H/.openclaw/credentials && chmod 700 $H/.openclaw/credentials
+  for i in $(seq 1 $AC); do
+    mkdir -p "$H/clawd/agents/agent${i}/memory"
+  done
+fi
 AL="["
 for i in $(seq 1 $AC); do
   NV="AGENT${i}_NAME"; NAME="${!NV}"
@@ -101,7 +112,7 @@ if [ "$DC_ENABLED" = "true" ]; then
 fi
 BD="$BD]"
 A1_TG_TOK_ESC=$(json_escape "$AGENT1_BOT_TOKEN")
-TA="\"default\":{\"botToken\":\"${A1_TG_TOK_ESC}\"}"
+TA="\"agent1\":{\"botToken\":\"${A1_TG_TOK_ESC}\"}"
 if [ "$AC" -gt 1 ]; then
   for i in $(seq 2 $AC); do
     TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"; TOK_ESC=$(json_escape "$TOK")
@@ -110,7 +121,7 @@ if [ "$AC" -gt 1 ]; then
 fi
 TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI_ESC}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
 A1_DC_TOK_ESC=$(json_escape "$AGENT1_DISCORD_BOT_TOKEN")
-DA="\"default\":{\"token\":\"${A1_DC_TOK_ESC}\"}"
+DA="\"agent1\":{\"token\":\"${A1_DC_TOK_ESC}\"}"
 if [ "$AC" -gt 1 ]; then
   for i in $(seq 2 $AC); do
     DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"; DTOK_ESC=$(json_escape "$DTOK")
@@ -161,7 +172,7 @@ CONFIG_JSON=$(cat <<CFG
   "gateway": {
     "mode": "local",
     "port": 18789,
-    "bind": "lan",
+    "bind": "loopback",
     "controlUi": {"enabled": true, "allowInsecureAuth": true},
     "auth": {"mode": "token", "token": "${GT_ESC}"}
   },
@@ -242,7 +253,7 @@ This is a Cloud Browser system - ephemeral DigitalOcean droplets provisioned via
 - Habitat: ${HN}$([ -n "$HABITAT_DOMAIN" ] && echo " (${HABITAT_DOMAIN})")
 - YAML configs: dropbox:Droplets/yaml/ (current: cloud-browser-v3.20.yaml)
 - Project docs: dropbox:Droplets/yaml/CONTEXT.md
-- Memory sync: dropbox:clawdbot-memory/${HN}/ (every 2 min)
+- Memory sync: dropbox:openclaw-memory/${HN}/ (every 2 min)
 - Habitat configs: dropbox:Droplets/habitats/
 - Previous transcripts restored from Dropbox on boot
 IDMD
@@ -307,7 +318,7 @@ If you see a file called BOOTSTRAP.md in your workspace, execute it once and del
 If asked about boot status or system health, check for BOOT_REPORT.md in your workspace - it contains the full boot report with coordinator designation and component status.
 
 Check these services silently. Only alert user if something is broken after 2 fix attempts:
-- systemctl is-active clawdbot
+- systemctl is-active openclaw
 - systemctl is-active xrdp (if desktop phase complete)
 - systemctl is-active desktop (if desktop phase complete)
 
@@ -354,26 +365,50 @@ BOOTMD
   [ -n "$CGI" ] && ln -sf "$H/clawd/shared" "$AD/shared" 2>/dev/null || true
 done
 if [ -n "$CGI" ]; then
-  mkdir -p "$H/clawd/shared"
+  if type ensure_bot_dir &>/dev/null; then
+    ensure_bot_dir "$H/clawd/shared" 755
+  else
+    mkdir -p "$H/clawd/shared"
+  fi
   for sf in KNOWLEDGE.md DECISIONS.md CONTEXT.md; do
     [ ! -f "$H/clawd/shared/$sf" ] && cat > "$H/clawd/shared/$sf" <<SHMD
 # ${sf%.md}
 *Maintained by the Judge. Updated after council deliberations.*
 SHMD
   done
-  chown -R $USERNAME:$USERNAME "$H/clawd/shared"
+  chown -R $USERNAME:$USERNAME "$H/clawd/shared" 2>/dev/null || true
 fi
 # Create global TOOLS.md if provided
 if [ -n "$GTO" ]; then
   printf '%s\n' "$GTO" > "$H/clawd/TOOLS.md"
-  chown $USERNAME:$USERNAME "$H/clawd/TOOLS.md"
+  if type ensure_bot_file &>/dev/null; then
+    ensure_bot_file "$H/clawd/TOOLS.md" 644
+  else
+    chown $USERNAME:$USERNAME "$H/clawd/TOOLS.md" 2>/dev/null || true
+  fi
 fi
-mkdir -p $H/.openclaw/agents/main/agent
+# Create auth-profiles directory structure
+if type ensure_bot_dir &>/dev/null; then
+  ensure_bot_dir "$H/.openclaw/agents/main/agent" 700
+else
+  mkdir -p "$H/.openclaw/agents/main/agent"
+fi
 cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
 {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
 APJ
+# SECURITY: auth-profiles.json contains credentials - restrict permissions
+if type ensure_bot_file &>/dev/null; then
+  ensure_bot_file "$H/.openclaw/agents/main/agent/auth-profiles.json" 600
+else
+  chmod 600 $H/.openclaw/agents/main/agent/auth-profiles.json
+  chown $USERNAME:$USERNAME $H/.openclaw/agents/main/agent/auth-profiles.json
+fi
 for i in $(seq 1 $AC); do
-  mkdir -p "$H/.openclaw/agents/agent${i}/agent"
+  if type ensure_bot_dir &>/dev/null; then
+    ensure_bot_dir "$H/.openclaw/agents/agent${i}/agent" 700
+  else
+    mkdir -p "$H/.openclaw/agents/agent${i}/agent"
+  fi
   ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/agent${i}/agent/auth-profiles.json"
 done
 
@@ -406,10 +441,24 @@ SMSO
   chown -R "$USERNAME:$USERNAME" "$H/clawd/agents/safe-mode" 2>/dev/null || true
 }
 # Link auth-profiles for safe-mode agent too
-mkdir -p "$H/.openclaw/agents/safe-mode/agent"
+# Also create sessions dir and ensure proper ownership (prevents EACCES errors)
+if type ensure_bot_dir &>/dev/null; then
+  ensure_bot_dir "$H/.openclaw/agents/safe-mode/agent" 700
+  ensure_bot_dir "$H/.openclaw/agents/safe-mode/sessions" 700
+  ensure_bot_dir "$H/clawd/agents/safe-mode/.openclaw" 700
+else
+  mkdir -p "$H/.openclaw/agents/safe-mode/agent"
+  mkdir -p "$H/.openclaw/agents/safe-mode/sessions"
+  mkdir -p "$H/clawd/agents/safe-mode/.openclaw"
+fi
 ln -sf "$H/.openclaw/agents/main/agent/auth-profiles.json" "$H/.openclaw/agents/safe-mode/agent/auth-profiles.json"
+# Fix ownership for safe-mode directories
+if type fix_agent_workspace &>/dev/null; then
+  fix_agent_workspace "$H/clawd/agents/safe-mode"
+fi
+chown -R "$USERNAME:$USERNAME" "$H/.openclaw/agents/safe-mode" 2>/dev/null || true
 
-cat > /etc/systemd/system/clawdbot.service <<SVC
+cat > /etc/systemd/system/openclaw.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
 After=network.target desktop.service openclaw-restore.service
@@ -419,7 +468,7 @@ Type=simple
 User=$USERNAME
 WorkingDirectory=$H
 ExecStartPre=/bin/sleep 2
-ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port 18789
 ExecStartPost=+/bin/bash -c 'RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 ExecStop=+/usr/local/bin/sync-openclaw-state.sh
 TimeoutStopSec=30
@@ -439,6 +488,20 @@ $([ -n "$BK" ] && echo "Environment=BRAVE_API_KEY=${BK}")
 WantedBy=multi-user.target
 SVC
 systemctl daemon-reload
+
+# --- Fix permissions BEFORE starting services ---
+# This must happen before generate-session-services.sh starts the gateways,
+# otherwise the health check will fail with permission errors when agents
+# try to create .openclaw directories in their workspaces.
+if type fix_bot_permissions &>/dev/null; then
+  fix_bot_permissions "$H"
+else
+  # Fallback if lib-permissions.sh not available
+  chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+  chmod 700 $H/.openclaw
+  chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
+fi
+
 # --- Agent Isolation: wire isolation scripts into pipeline ---
 if [ "$ISOLATION_DEFAULT" = "session" ]; then
   # Export API keys for session services
@@ -463,6 +526,4 @@ BGXML
     DISPLAY=:10 su - $USERNAME -c "xfdesktop --reload" 2>/dev/null || true
   fi
 fi
-chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
-chmod 700 $H/.openclaw
-chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
+# Note: chown/chmod already done before starting services (prevents health check permission errors)

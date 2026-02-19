@@ -11,13 +11,16 @@
 #           /etc/habitat-parsed.env -- parsed habitat config (generated here)
 #
 # Outputs:  /home/$USERNAME/.openclaw/openclaw.json -- minimal bot config
-#           /etc/systemd/system/clawdbot.service -- systemd unit
+#           /etc/systemd/system/openclaw.service -- systemd unit
 #           /var/lib/init-status/phase1-complete -- completion marker
 #
 # Dependencies: parse-habitat.py, tg-notify.sh, set-stage.sh, npm, curl
 #
 # Original: /usr/local/sbin/phase1-critical.sh (in hatch.yaml write_files)
 # =============================================================================
+
+# Source permission utilities (may not exist during early boot)
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 set -e
 set -a; source /etc/droplet.env; set +a
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
@@ -160,7 +163,7 @@ cat > $H/.openclaw/openclaw.json <<CFG
   "gateway": {
     "mode": "local",
     "port": 18789,
-    "bind": "lan",
+    "bind": "loopback",
     "auth": {
       "mode": "token",
       "token": "${GT}"
@@ -223,7 +226,7 @@ cat > $H/.openclaw/openclaw.emergency.json <<EMCFG
   "gateway": {
     "mode": "local",
     "port": 18789,
-    "bind": "lan",
+    "bind": "loopback",
     "auth": {"mode": "token", "token": "${EMERGENCY_GT}"}
   },
   "channels": {
@@ -247,10 +250,15 @@ cat > $H/clawd/agents/agent1/BOOT.md <<'BOOTMD'
 Desktop setup in progress. RDP will be ready soon.
 If nothing needs attention, reply with ONLY: NO_REPLY.
 BOOTMD
-chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
-chmod 700 $H/.openclaw
-chmod 600 $H/.openclaw/openclaw.json
-cat > /etc/systemd/system/clawdbot.service <<SVC
+# Fix permissions (use helper if available, fallback otherwise)
+if type fix_bot_permissions &>/dev/null; then
+  fix_bot_permissions "$H"
+else
+  chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
+  chmod 700 $H/.openclaw
+  chmod 600 $H/.openclaw/openclaw.json
+fi
+cat > /etc/systemd/system/openclaw.service <<SVC
 [Unit]
 Description=Clawdbot Gateway
 After=network.target openclaw-restore.service
@@ -259,7 +267,7 @@ Wants=openclaw-restore.service
 Type=simple
 User=$USERNAME
 WorkingDirectory=$H
-ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port 18789
 ExecStartPost=+/usr/local/bin/gateway-health-check.sh
 Restart=on-failure
 RestartSec=5
@@ -316,15 +324,15 @@ systemctl enable api-server
 systemctl start api-server || true
 ufw allow 8080/tcp
 
-# Enable and START restore service BEFORE clawdbot (if service file exists)
-# clawdbot has After=openclaw-restore.service, so it waits for restore to complete
+# Enable and START restore service BEFORE openclaw (if service file exists)
+# openclaw has After=openclaw-restore.service, so it waits for restore to complete
 if [ -f /etc/systemd/system/openclaw-restore.service ]; then
     systemctl enable openclaw-restore.service
     systemctl start openclaw-restore.service || true  # Don't fail if restore has issues
 fi
-# Enable clawdbot but DON'T start - reboot will start it with full config
+# Enable openclaw but DON'T start - reboot will start it with full config
 # ExecStartPost health check will validate and send notifications
-systemctl enable clawdbot
+systemctl enable openclaw
 ufw allow 18789/tcp
 $S 3 "phase1-complete"
 touch /var/lib/init-status/phase1-complete

@@ -4,7 +4,7 @@
 # =============================================================================
 # This script is no longer needed in the simplified architecture.
 # Config is applied directly by build-full-config.sh during phase 2.
-# Health check runs via ExecStartPost in clawdbot.service.
+# Health check runs via ExecStartPost in openclaw.service.
 #
 # Kept for backwards compatibility - does nothing.
 # =============================================================================

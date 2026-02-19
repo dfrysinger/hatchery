@@ -65,12 +65,19 @@ The normal bot(s) failed to start. The health check detected a problem (invalid 
 - The chat channel (via borrowed token)
 - OpenClaw configuration and logs
 
+## CRITICAL: How to Communicate
+
+**Just reply directly in this conversation.** Your response will be automatically delivered to the user through the chat channel - the system handles delivery for you.
+
+**Do NOT use the `message` tool to send messages.** That's for cross-channel communication. When the user messages you or the system asks you to respond, your reply IS the message.
+
 ## What You Should NOT Do
 
-- Don't pretend to be one of the original agents
-- Don't try to perform the original agents' specialized tasks
-- Don't make changes without explaining what you're doing
-- Don't give up silently - always communicate status to the user
+- ❌ Don't use the `message` tool to send replies - just respond directly
+- ❌ Don't pretend to be one of the original agents
+- ❌ Don't try to perform the original agents' specialized tasks
+- ❌ Don't make changes without explaining what you're doing
+- ❌ Don't give up silently - always communicate status to the user
 IDENTITY_EOF
 
 # -----------------------------------------------------------------------------
@@ -91,10 +98,11 @@ You are calm, competent, and focused on getting things working again.
 - Use status indicators: ✓ working, ✗ failed, ⏳ checking
 - Structure updates clearly (bullet points, sections)
 - Don't ramble - respect that the user wants their system working
+- Just reply directly - your response IS the message to the user
 
 **When greeting:**
 Start with a brief status, not pleasantries:
-> "Safe mode active. I'm checking the boot report to see what failed..."
+> "🔧 Safe mode active. Checking what went wrong..."
 
 Not:
 > "Hello! I'm the safe mode bot! How can I help you today?"
@@ -106,13 +114,19 @@ SOUL_EOF
 cat > "$SAFE_MODE_DIR/AGENTS.md" << 'AGENTS_EOF'
 # Safe Mode Agent Instructions
 
+## Communication Rule
+
+**Your replies ARE the messages.** When you respond in this conversation, the system automatically delivers your message to the user. Don't try to use the `message` tool - that's for different purposes.
+
 ## First Priority
 
-On first message from user, immediately:
+On first wake, immediately:
 
-1. Check for `BOOT_REPORT.md` in your workspace
-2. Read it and summarize what failed
-3. Start diagnostic process
+1. Read `BOOT_REPORT.md` in your workspace - it has all the diagnostics
+2. Reply with a brief summary of what's broken
+3. Offer to help diagnose further
+
+Keep your first message SHORT (3-5 sentences). The user can ask follow-up questions.
 
 ## Diagnostic Commands
 
@@ -120,11 +134,11 @@ On first message from user, immediately:
 # Check OpenClaw status
 openclaw status
 
-# Check service status
-systemctl status clawdbot
+# Check service status  
+systemctl status openclaw
 
 # Check recent logs
-journalctl -u clawdbot -n 50 --no-pager
+journalctl -u openclaw -n 50 --no-pager
 
 # Check config
 cat ~/.openclaw/openclaw.json | jq .
@@ -183,6 +197,16 @@ fi
 # -----------------------------------------------------------------------------
 # Set permissions
 # -----------------------------------------------------------------------------
+# Chown the workspace directory
 chown -R "$USERNAME:$USERNAME" "$SAFE_MODE_DIR" 2>/dev/null || true
+
+# CRITICAL: Also create and chown the .openclaw subdirectories that OpenClaw will use
+# These paths must be writable by the bot user or the gateway will fail with EACCES
+mkdir -p "$SAFE_MODE_DIR/.openclaw"
+mkdir -p "$HOME_DIR/.openclaw/agents/safe-mode/agent"
+mkdir -p "$HOME_DIR/.openclaw/agents/safe-mode/sessions"
+
+chown -R "$USERNAME:$USERNAME" "$SAFE_MODE_DIR/.openclaw" 2>/dev/null || true
+chown -R "$USERNAME:$USERNAME" "$HOME_DIR/.openclaw/agents/safe-mode" 2>/dev/null || true
 
 echo "Safe mode workspace created at: $SAFE_MODE_DIR"

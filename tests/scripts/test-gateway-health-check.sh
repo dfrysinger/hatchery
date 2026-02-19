@@ -71,7 +71,7 @@ run_check() {
     source "$TEST_TMPDIR/mock-validators.sh"
     source "$TEST_TMPDIR/env.sh"
     eval "$(extract_function)"
-    check_channel_connectivity "clawdbot"
+    check_channel_connectivity "openclaw"
   )
   echo $?
 }

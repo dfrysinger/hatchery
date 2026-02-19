@@ -146,7 +146,7 @@ The YAML retains only what **must** be inline for cloud-init to function before 
 | `bootstrap.sh` | ~80 lines. Fetches release tarball from GitHub, verifies SHA256, extracts, runs phase1. |
 | `set-stage.sh` / `set-phase.sh` | Tiny (5 lines each). Logging helpers used by bootstrap before scripts are fetched. |
 | `tg-notify.sh` | ~20 lines. Sends Telegram alerts. Needed before bot is online. |
-| Systemd unit files | `api-server.service`, `clawdbot.service` (minimal), `clawdbot-sync.timer` — declarative, small. |
+| Systemd unit files | `api-server.service`, `openclaw.service` (minimal), `openclaw-sync.timer` — declarative, small. |
 | `api-server.py` | Status API. Needed before scripts are fetched to report bootstrap progress. |
 
 **Estimated YAML size: 10-15KB** (down from 57KB).
@@ -394,7 +394,7 @@ hatchery/
 - R6.2.2: Sync MUST NOT run until restore-ok guard file exists.
 - R6.2.3: Shutdown sync (ExecStop) MUST have a 30s timeout to prevent hung shutdowns.
 - R6.2.4: Sync failures MUST be counted. After 3 consecutive failures, notify via Telegram.
-- R6.2.5: Sync MUST include a generation counter to prevent older droplets from overwriting newer state. Implementation: Phase 1 writes a file `dropbox:clawdbot-memory/<habitat>/.generation` containing the droplet creation timestamp (from DO metadata API: `curl -s http://169.254.169.254/metadata/v1/created`). Before syncing, check remote `.generation` — only sync if local timestamp ≥ remote. The newest generation always wins.
+- R6.2.5: Sync MUST include a generation counter to prevent older droplets from overwriting newer state. Implementation: Phase 1 writes a file `dropbox:openclaw-memory/<habitat>/.generation` containing the droplet creation timestamp (from DO metadata API: `curl -s http://169.254.169.254/metadata/v1/created`). Before syncing, check remote `.generation` — only sync if local timestamp ≥ remote. The newest generation always wins.
 
 ---
 
@@ -781,19 +781,19 @@ Add systemd-level crash detection that automatically triggers a safe mode when r
 
 | # | Requirement | Priority |
 |---|------------|----------|
-| R12.1 | **Crash detection:** The `clawdbot.service` systemd unit MUST be configured with `StartLimitBurst=3` and `StartLimitIntervalSec=60`. An `OnFailure=clawdbot-safe-mode.service` handler MUST be defined that runs a safe-mode script when the start limit is hit. | MUST |
+| R12.1 | **Crash detection:** The `openclaw.service` systemd unit MUST be configured with `StartLimitBurst=3` and `StartLimitIntervalSec=60`. An `OnFailure=openclaw-safe-mode.service` handler MUST be defined that runs a safe-mode script when the start limit is hit. | MUST |
 | R12.2 | **Notification:** The safe-mode script MUST send a notification to the user via the last working channel (Discord, Telegram, or /status API) with: what happened, what was rolled back, and what to do next. The notification MUST follow the user-friendly messaging requirements in R9.2.1–R9.2.2. | MUST |
 | R12.3 | **Config backup/restore:** `build-config.py` MUST snapshot the current working config to `/var/lib/openclaw/last-known-good/` after every successful gateway health check (healthy for ≥30 seconds after config apply). The safe-mode script MUST restore from this snapshot when triggered. If no snapshot exists, fall back to minimal safe-mode config (R4.6.5–R4.6.6). | MUST |
-| R12.4 | **Agent self-heal:** `SAFE_MODE.md` MUST contain actionable diagnostic information: the last 50 lines of `journalctl -u clawdbot`, the last config change (diff between current and last-known-good), and step-by-step rollback instructions the agent can execute. The agent SHOULD be able to recover by following these instructions without user intervention. | SHOULD |
+| R12.4 | **Agent self-heal:** `SAFE_MODE.md` MUST contain actionable diagnostic information: the last 50 lines of `journalctl -u openclaw`, the last config change (diff between current and last-known-good), and step-by-step rollback instructions the agent can execute. The agent SHOULD be able to recover by following these instructions without user intervention. | SHOULD |
 | R12.5 | **Manual recovery:** The safe-mode script MUST write a `/var/lib/init-status/safe-mode-triggered` marker file. Documentation (in SAFE_MODE.md and repo README) MUST describe manual recovery steps for cases where the agent cannot self-heal: SSH in, check logs, restore config, restart service. The `try-full-config.sh` script (R4.6.3) MUST check for and clear this marker on successful recovery. | MUST |
 
 ### 12.4 Implementation Notes
 
-- The `OnFailure=` handler runs as a separate oneshot service (`clawdbot-safe-mode.service`) so it has full systemd context.
+- The `OnFailure=` handler runs as a separate oneshot service (`openclaw-safe-mode.service`) so it has full systemd context.
 - The safe-mode script lives at `/opt/hatchery/scripts/safe-mode.sh` and is included in the release tarball (§3.5).
 - `SAFE_MODE.md` is generated dynamically (not from a static template) because it must include live diagnostic data.
 - The last-known-good snapshot includes `openclaw.json`, all agent workspace files, and the `.env` file.
-- After restoring the last-known-good config, the safe-mode script restarts `clawdbot.service` with `systemctl reset-failed clawdbot && systemctl start openclaw`.
+- After restoring the last-known-good config, the safe-mode script restarts `openclaw.service` with `systemctl reset-failed openclaw && systemctl start openclaw`.
 - User outreach retries follow R4.6.9 (3 attempts at 30-minute intervals).
 
 ---

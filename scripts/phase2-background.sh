@@ -252,13 +252,13 @@ systemctl restart xrdp
 ufw allow 3389/tcp
 #ufw allow 5900/tcp  # REMOVED: VNC accessible via RDP tunnel only (security)
 $S 10 "finalizing"
-# Enable and run the restore service (runs before clawdbot restarts)
+# Enable and run the restore service (runs before openclaw restarts)
 systemctl enable openclaw-restore.service 2>/dev/null || true
 systemctl start openclaw-restore.service 2>/dev/null || true
 /usr/local/sbin/build-full-config.sh
 systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
-systemctl enable clawdbot-sync.timer 2>/dev/null || true
-systemctl start clawdbot-sync.timer 2>/dev/null || true
+systemctl enable openclaw-sync.timer 2>/dev/null || true
+systemctl start openclaw-sync.timer 2>/dev/null || true
 # Start desktop services now that everything is installed
 systemctl start xvfb
 # Wait for Xvfb PID file and verify process is actually Xvfb (avoids cross-shell $! race + PID reuse)
