@@ -619,6 +619,200 @@ check_agents_e2e() {
   return 0
 }
 
+
+# =============================================================================
+# Send Notification
+# =============================================================================
+
+# Send via Telegram
+send_telegram_notification() {
+  local token="$1"
+  local chat_id="$2"
+  local message="$3"
+  
+  curl -sf --max-time 10 \
+    "https://api.telegram.org/bot${token}/sendMessage" \
+    -d "chat_id=${chat_id}" \
+    -d "text=${message}" \
+    -d "parse_mode=HTML" >> "$LOG" 2>&1
+}
+
+# Send via Discord (DM to owner)
+send_discord_notification() {
+  local token="$1"
+  local owner_id="$2"
+  local message="$3"
+  
+  # Strip "user:" prefix if present (OpenClaw format vs raw Discord ID)
+  owner_id="${owner_id#user:}"
+  
+  # Convert HTML to Discord markdown
+  local discord_msg
+  discord_msg=$(echo "$message" | sed -e 's/<b>/\*\*/g' -e 's/<\/b>/\*\*/g' -e 's/<code>/`/g' -e 's/<\/code>/`/g')
+  
+  # First, create a DM channel with the user
+  local dm_channel
+  dm_channel=$(curl -sf --max-time 10 \
+    -H "Authorization: Bot ${token}" \
+    -H "Content-Type: application/json" \
+    -X POST "https://discord.com/api/v10/users/@me/channels" \
+    -d "{\"recipient_id\": \"${owner_id}\"}" 2>/dev/null | jq -r '.id // empty')
+  
+  if [ -z "$dm_channel" ]; then
+    log "  Failed to create Discord DM channel"
+    return 1
+  fi
+  
+  # Send message to DM channel
+  curl -sf --max-time 10 \
+    -H "Authorization: Bot ${token}" \
+    -H "Content-Type: application/json" \
+    -X POST "https://discord.com/api/v10/channels/${dm_channel}/messages" \
+    -d "{\"content\": $(echo "$discord_msg" | jq -Rs .)}" >> "$LOG" 2>&1
+}
+
+# Send "still waiting" notification when gateway is slow but process is alive
+# Lets user know something is happening (not silent failure)
+send_still_waiting_notification() {
+  local elapsed="${1:-unknown}"
+  local habitat_name="${HABITAT_NAME:-Droplet}"
+  local message="⏳ <b>[${habitat_name}] Gateway slow to start</b>
+
+Health check has been waiting ${elapsed}s. The gateway process is still alive — continuing to wait.
+
+This is usually caused by config migration or slow provider initialization. No action needed yet."
+
+  log "  Sending still-waiting notification"
+
+  # Try env-var tokens (config may not be readable yet during startup)
+  local platform="" token=""
+  for i in $(seq 1 "${AGENT_COUNT:-4}"); do
+    local tg_var="AGENT${i}_TELEGRAM_TOKEN"
+    if [ -n "${!tg_var:-}" ]; then
+      token="${!tg_var}"; platform="telegram"; break
+    fi
+  done
+  if [ -z "$token" ]; then
+    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
+      local dc_var="AGENT${i}_DISCORD_TOKEN"
+      if [ -n "${!dc_var:-}" ]; then
+        token="${!dc_var}"; platform="discord"; break
+      fi
+    done
+  fi
+
+  if [ -z "$token" ]; then
+    log "  No token available for still-waiting notification"
+    return 0  # Non-fatal
+  fi
+
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform")
+  if [ -z "$owner_id" ]; then
+    log "  No owner ID for $platform — skipping still-waiting notification"
+    return 0
+  fi
+
+  if [ "$platform" = "telegram" ]; then
+    send_telegram_notification "$token" "$owner_id" "$message"
+  elif [ "$platform" = "discord" ]; then
+    send_discord_notification "$token" "$owner_id" "$message"
+  fi
+}
+
+# Send warning BEFORE entering safe mode (uses token from recovery config)
+# This notifies user that something failed and we're switching to safe mode
+send_entering_safe_mode_warning() {
+  log "========== SENDING SAFE MODE WARNING =========="
+  
+  local config_file="$CONFIG_PATH"
+  if [ ! -f "$config_file" ]; then
+    log "  No config file found - cannot send warning"
+    return 1
+  fi
+  
+  # Extract token from the config that recovery just wrote
+  local platform=""
+  local token=""
+  
+  # Try Discord first
+  token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
+  if [ -n "$token" ]; then
+    platform="discord"
+  else
+    # Try Telegram
+    token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    if [ -n "$token" ]; then
+      platform="telegram"
+    fi
+  fi
+  
+  # Fallback: try env vars from habitat-parsed.env (emergency.json may lack chat tokens)
+  if [ -z "$token" ]; then
+    log "  No token in config - trying env vars"
+    # Try Telegram tokens from any agent
+    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
+      local tg_var="AGENT${i}_TELEGRAM_TOKEN"
+      if [ -n "${!tg_var:-}" ]; then
+        token="${!tg_var}"
+        platform="telegram"
+        log "  Found Telegram token from $tg_var"
+        break
+      fi
+    done
+  fi
+  
+  if [ -z "$token" ]; then
+    # Try Discord tokens
+    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
+      local dc_var="AGENT${i}_DISCORD_TOKEN"
+      if [ -n "${!dc_var:-}" ]; then
+        token="${!dc_var}"
+        platform="discord"
+        log "  Found Discord token from $dc_var"
+        break
+      fi
+    done
+  fi
+  
+  if [ -z "$token" ]; then
+    log "  No working token found in config or env - cannot send warning"
+    return 1
+  fi
+  
+  log "  Using ${platform} token from recovery config"
+  
+  # Get owner ID for the platform
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$platform")
+  
+  if [ -z "$owner_id" ]; then
+    log "  No owner ID for platform '$platform' - cannot send warning"
+    return 1
+  fi
+  
+  # Get habitat name
+  local habitat_name="${HABITAT_NAME:-Droplet}"
+  
+  # Build warning message
+  local message="⚠️ <b>[${habitat_name}] Entering Safe Mode</b>
+
+Health check failed. Recovering with backup configuration.
+
+SafeModeBot will follow up shortly with diagnostics."
+  
+  log "  Sending warning via $platform to $owner_id"
+  
+  if [ "$platform" = "telegram" ]; then
+    send_telegram_notification "$token" "$owner_id" "$message"
+  elif [ "$platform" = "discord" ]; then
+    send_discord_notification "$token" "$owner_id" "$message"
+  fi
+  
+  log "  Warning sent"
+  log "========== SAFE MODE WARNING COMPLETE =========="
+}
+
 check_service_health() {
   local service="$1"
   local port="$2"
@@ -628,6 +822,7 @@ check_service_health() {
   local start_time
   start_time=$(date +%s)
   local warned=false
+  local process_seen=false
 
   log "Health check: $service on port $port (max_attempts=$max_attempts, hard_max=${hard_max_seconds}s)"
 
@@ -654,11 +849,21 @@ check_service_health() {
     # Check if gateway process is alive (in execstartpost mode, the service
     # is "activating" not "active", so check the actual process instead)
     if [ "$RUN_MODE" = "execstartpost" ]; then
-      # Check if the openclaw process on our port is still running
-      if ! pgrep -f "openclaw gateway.*--port ${port}" >/dev/null 2>&1 && \
-         ! pgrep -f "openclaw gateway" >/dev/null 2>&1; then
+      if pgrep -f "openclaw.gateway.*--port ${port}" >/dev/null 2>&1 || \
+         pgrep -f "openclaw.gateway" >/dev/null 2>&1; then
+        process_seen=true
+      elif [ "$process_seen" = "true" ]; then
+        # Process was running but disappeared — it crashed
         log "  FAILED: gateway process died (attempt $attempt, ${elapsed}s elapsed)"
         return 1
+      else
+        # Process not seen yet — still spawning, give it time
+        log "  attempt $attempt: gateway process not yet visible (${elapsed}s)"
+        if [ "$elapsed" -ge 60 ]; then
+          log "  FAILED: gateway process never appeared after ${elapsed}s"
+          return 1
+        fi
+        continue
       fi
     else
       if ! systemctl is-active --quiet "$service"; then
@@ -1073,198 +1278,6 @@ else
   fi
 fi
 
-# =============================================================================
-# Send Notification
-# =============================================================================
-
-# Send via Telegram
-send_telegram_notification() {
-  local token="$1"
-  local chat_id="$2"
-  local message="$3"
-  
-  curl -sf --max-time 10 \
-    "https://api.telegram.org/bot${token}/sendMessage" \
-    -d "chat_id=${chat_id}" \
-    -d "text=${message}" \
-    -d "parse_mode=HTML" >> "$LOG" 2>&1
-}
-
-# Send via Discord (DM to owner)
-send_discord_notification() {
-  local token="$1"
-  local owner_id="$2"
-  local message="$3"
-  
-  # Strip "user:" prefix if present (OpenClaw format vs raw Discord ID)
-  owner_id="${owner_id#user:}"
-  
-  # Convert HTML to Discord markdown
-  local discord_msg
-  discord_msg=$(echo "$message" | sed -e 's/<b>/\*\*/g' -e 's/<\/b>/\*\*/g' -e 's/<code>/`/g' -e 's/<\/code>/`/g')
-  
-  # First, create a DM channel with the user
-  local dm_channel
-  dm_channel=$(curl -sf --max-time 10 \
-    -H "Authorization: Bot ${token}" \
-    -H "Content-Type: application/json" \
-    -X POST "https://discord.com/api/v10/users/@me/channels" \
-    -d "{\"recipient_id\": \"${owner_id}\"}" 2>/dev/null | jq -r '.id // empty')
-  
-  if [ -z "$dm_channel" ]; then
-    log "  Failed to create Discord DM channel"
-    return 1
-  fi
-  
-  # Send message to DM channel
-  curl -sf --max-time 10 \
-    -H "Authorization: Bot ${token}" \
-    -H "Content-Type: application/json" \
-    -X POST "https://discord.com/api/v10/channels/${dm_channel}/messages" \
-    -d "{\"content\": $(echo "$discord_msg" | jq -Rs .)}" >> "$LOG" 2>&1
-}
-
-# Send "still waiting" notification when gateway is slow but process is alive
-# Lets user know something is happening (not silent failure)
-send_still_waiting_notification() {
-  local elapsed="${1:-unknown}"
-  local habitat_name="${HABITAT_NAME:-Droplet}"
-  local message="⏳ <b>[${habitat_name}] Gateway slow to start</b>
-
-Health check has been waiting ${elapsed}s. The gateway process is still alive — continuing to wait.
-
-This is usually caused by config migration or slow provider initialization. No action needed yet."
-
-  log "  Sending still-waiting notification"
-
-  # Try env-var tokens (config may not be readable yet during startup)
-  local platform="" token=""
-  for i in $(seq 1 "${AGENT_COUNT:-4}"); do
-    local tg_var="AGENT${i}_TELEGRAM_TOKEN"
-    if [ -n "${!tg_var:-}" ]; then
-      token="${!tg_var}"; platform="telegram"; break
-    fi
-  done
-  if [ -z "$token" ]; then
-    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
-      local dc_var="AGENT${i}_DISCORD_TOKEN"
-      if [ -n "${!dc_var:-}" ]; then
-        token="${!dc_var}"; platform="discord"; break
-      fi
-    done
-  fi
-
-  if [ -z "$token" ]; then
-    log "  No token available for still-waiting notification"
-    return 0  # Non-fatal
-  fi
-
-  local owner_id
-  owner_id=$(get_owner_id_for_platform "$platform")
-  if [ -z "$owner_id" ]; then
-    log "  No owner ID for $platform — skipping still-waiting notification"
-    return 0
-  fi
-
-  if [ "$platform" = "telegram" ]; then
-    send_telegram_notification "$token" "$owner_id" "$message"
-  elif [ "$platform" = "discord" ]; then
-    send_discord_notification "$token" "$owner_id" "$message"
-  fi
-}
-
-# Send warning BEFORE entering safe mode (uses token from recovery config)
-# This notifies user that something failed and we're switching to safe mode
-send_entering_safe_mode_warning() {
-  log "========== SENDING SAFE MODE WARNING =========="
-  
-  local config_file="$CONFIG_PATH"
-  if [ ! -f "$config_file" ]; then
-    log "  No config file found - cannot send warning"
-    return 1
-  fi
-  
-  # Extract token from the config that recovery just wrote
-  local platform=""
-  local token=""
-  
-  # Try Discord first
-  token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
-  if [ -n "$token" ]; then
-    platform="discord"
-  else
-    # Try Telegram
-    token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
-    if [ -n "$token" ]; then
-      platform="telegram"
-    fi
-  fi
-  
-  # Fallback: try env vars from habitat-parsed.env (emergency.json may lack chat tokens)
-  if [ -z "$token" ]; then
-    log "  No token in config - trying env vars"
-    # Try Telegram tokens from any agent
-    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
-      local tg_var="AGENT${i}_TELEGRAM_TOKEN"
-      if [ -n "${!tg_var:-}" ]; then
-        token="${!tg_var}"
-        platform="telegram"
-        log "  Found Telegram token from $tg_var"
-        break
-      fi
-    done
-  fi
-  
-  if [ -z "$token" ]; then
-    # Try Discord tokens
-    for i in $(seq 1 "${AGENT_COUNT:-4}"); do
-      local dc_var="AGENT${i}_DISCORD_TOKEN"
-      if [ -n "${!dc_var:-}" ]; then
-        token="${!dc_var}"
-        platform="discord"
-        log "  Found Discord token from $dc_var"
-        break
-      fi
-    done
-  fi
-  
-  if [ -z "$token" ]; then
-    log "  No working token found in config or env - cannot send warning"
-    return 1
-  fi
-  
-  log "  Using ${platform} token from recovery config"
-  
-  # Get owner ID for the platform
-  local owner_id
-  owner_id=$(get_owner_id_for_platform "$platform")
-  
-  if [ -z "$owner_id" ]; then
-    log "  No owner ID for platform '$platform' - cannot send warning"
-    return 1
-  fi
-  
-  # Get habitat name
-  local habitat_name="${HABITAT_NAME:-Droplet}"
-  
-  # Build warning message
-  local message="⚠️ <b>[${habitat_name}] Entering Safe Mode</b>
-
-Health check failed. Recovering with backup configuration.
-
-SafeModeBot will follow up shortly with diagnostics."
-  
-  log "  Sending warning via $platform to $owner_id"
-  
-  if [ "$platform" = "telegram" ]; then
-    send_telegram_notification "$token" "$owner_id" "$message"
-  elif [ "$platform" = "discord" ]; then
-    send_discord_notification "$token" "$owner_id" "$message"
-  fi
-  
-  log "  Warning sent"
-  log "========== SAFE MODE WARNING COMPLETE =========="
-}
 
 send_boot_notification() {
   local status="$1"  # healthy, safe-mode, critical
