@@ -468,7 +468,7 @@ Type=simple
 User=$USERNAME
 WorkingDirectory=$H
 ExecStartPre=/bin/sleep 2
-ExecStart=/usr/local/bin/openclaw gateway --bind lan --port 18789
+ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port 18789
 ExecStartPost=+/bin/bash -c 'RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 ExecStop=+/usr/local/bin/sync-openclaw-state.sh
 TimeoutStopSec=30
