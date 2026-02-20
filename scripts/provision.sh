@@ -2,22 +2,25 @@
 # =============================================================================
 # provision.sh — Single-phase droplet provisioning
 # =============================================================================
-# Replaces the phase1-critical.sh → phase2-background.sh → reboot dance.
-# One script, sequential stages, no reboot, no background fork.
+# Replaces the phase1-critical.sh → phase2-background.sh background fork.
+# One script, sequential stages, no background fork. Ends with REBOOT.
 #
 # Called by: bootstrap.sh (which is called by cloud-init runcmd)
 #
-# Stages:
+# Stages (roughly 60s each for progress bar updates):
 #   1. Parse config + install Node/jq
 #   2. Install OpenClaw + create user
-#   3. Install system packages (desktop + tools, parallelized)
-#   4. Configure desktop services
-#   5. Configure apps (skills, email, calendar, etc.)
-#   6. Build OpenClaw configs + generate services
-#   7. Start everything
+#   3. Install desktop environment
+#   4. Install developer tools
+#   5. Install browser + pip packages
+#   6. Configure desktop & remote access
+#   7. Install skills & apps
+#   8. Build OpenClaw configs + generate services (enable only)
+#   9. Fix permissions + REBOOT
 #
-# The key difference from the old approach: services are started directly
-# at the end. No reboot, no boot-complete marker, no phase markers.
+# After reboot: systemd starts enabled services → health check → E2E
+# Reboot is REQUIRED: packages need kernel modules, systemd needs
+# daemon-reload, avoids weird state from halfway-installed packages.
 # =============================================================================
 
 set -o pipefail
@@ -123,14 +126,13 @@ log "Stage 3: Installing system packages..."
 CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
 [ -n "$CHROME_PID" ] && wait "$CHROME_PID" 2>/dev/null || true
 
-# Kill any competing apt processes
+# Stop apt timers that might hold the lock (no killall needed — no background fork)
 systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-killall -9 apt apt-get dpkg 2>/dev/null || true
 sleep 2
 rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
 dpkg --configure -a 2>/dev/null || true
 
-apt-get update -qq >> "$LOG" 2>&1
+# Package list already fresh from Stage 1 — no second apt refresh needed
 
 # Single combined apt install (instead of two separate calls in phase1+phase2)
 DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
@@ -390,9 +392,8 @@ fi
 systemctl daemon-reload
 systemctl enable --now api-server || true
 
-# Restore service (runs before openclaw)
+# Restore service — enable only, will run after reboot before openclaw
 systemctl enable openclaw-restore.service 2>/dev/null || true
-systemctl start openclaw-restore.service 2>/dev/null || true
 
 # Build the full config (creates services, safeguard units, etc.)
 /usr/local/sbin/build-full-config.sh || {
@@ -414,48 +415,32 @@ ufw allow 3389/tcp   # RDP
 # Unattended upgrades
 systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 
-# Memory sync
+# Memory sync — enable only, starts after reboot
 systemctl enable openclaw-sync.timer 2>/dev/null || true
-systemctl start openclaw-sync.timer 2>/dev/null || true
+# =============================================================================
+# Stage 9: Fix permissions + REBOOT
+# =============================================================================
+$S 9 "rebooting"
+log "Stage 9: Final permissions + reboot..."
 
-# Desktop
-systemctl start xvfb
-for _ in {1..30}; do
-  if [ -f /tmp/xvfb.pid ]; then
-    XVFB_PID=$(cat /tmp/xvfb.pid 2>/dev/null)
-    [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null && \
-      grep -q "Xvfb" /proc/"$XVFB_PID"/cmdline 2>/dev/null && break
-  fi
-  sleep 0.5
-done
-systemctl start desktop
-sleep 3
-systemctl start x11vnc
-systemctl restart xrdp
+# Mark provisioning complete (before reboot)
+touch /var/lib/init-status/provision-complete
 
-# OpenClaw services — start directly (no reboot needed)
-if [ ! -f /var/lib/init-status/build-failed ]; then
-  # In session mode, generate-session-services.sh already enabled per-group services.
-  # In single mode, openclaw.service was enabled by build-full-config.sh.
-  # Either way, just start them.
-  if [ "${ISOLATION_DEFAULT:-none}" = "session" ]; then
-    IFS=',' read -ra GROUPS <<< "${ISOLATION_GROUPS:-}"
-    for group in "${GROUPS[@]}"; do
-      systemctl start "openclaw-${group}.service" || log "WARN: openclaw-${group} start failed"
-      systemctl start "openclaw-safeguard-${group}.path" 2>/dev/null || true
-    done
-  elif [ "${ISOLATION_DEFAULT:-none}" = "container" ]; then
-    systemctl start openclaw-containers.service || log "WARN: container service start failed"
-  else
-    systemctl start openclaw.service || log "WARN: openclaw start failed"
-    systemctl start openclaw-safeguard.path 2>/dev/null || true
-  fi
-fi
-
-# Mark complete
-touch /var/lib/init-status/setup-complete
-echo '11' > /var/lib/init-status/stage
+# Fix ownership — everything under bot's home should be bot-owned
+chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
 
 ELAPSED=$(( $(date +%s) - START ))
-log "Provisioning complete in ${ELAPSED}s"
-log "Stage 7 complete — services started, health checks running"
+log "Provisioning complete in ${ELAPSED}s — rebooting"
+
+# Reboot is REQUIRED:
+# - Packages need kernel modules loaded (xrdp, chrome sandbox)
+# - systemd needs clean daemon-reload after new unit files
+# - Avoids weird state from halfway-installed packages
+# - All services are enabled and will start automatically on boot
+
+if [ -f /var/lib/init-status/build-failed ]; then
+  log "!!! BUILD FAILED — rebooting anyway but services will not start correctly !!!"
+fi
+
+sleep 2
+reboot
