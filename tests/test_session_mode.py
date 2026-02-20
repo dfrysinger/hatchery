@@ -148,6 +148,18 @@ class TestSessionServiceGeneration(unittest.TestCase):
         # Service runs safe-mode-handler
         self.assertIn('safe-mode-handler', files['openclaw-safeguard-council.service'])
 
+    def test_generates_e2e_service_per_group(self):
+        """Each group gets an E2E check service."""
+        env = make_session_env()
+        files, _, _ = run_generator(env)
+        self.assertIn('openclaw-e2e-council.service', files)
+        self.assertIn('openclaw-e2e-workers.service', files)
+        # E2E service runs gateway-e2e-check
+        e2e_svc = files['openclaw-e2e-council.service']
+        self.assertIn('gateway-e2e-check', e2e_svc)
+        self.assertIn('BindsTo=openclaw-council.service', e2e_svc)
+        self.assertIn('GROUP=council', e2e_svc)
+
     def test_service_contains_exec_start(self):
         """Service file has ExecStart running openclaw gateway."""
         env = make_session_env()
@@ -246,7 +258,7 @@ class TestSessionConfig(unittest.TestCase):
         )
         files, _, _ = run_generator(env)
         # Filter to main service files only (exclude safeguard helper units)
-        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f]
+        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f and 'e2e' not in f]
         self.assertEqual(len(service_files), 1)
         self.assertIn('openclaw-council.service', files)
 
@@ -275,7 +287,7 @@ class TestSessionAgentGrouping(unittest.TestCase):
             agent_groups=['alpha', 'alpha', 'beta', 'beta', 'gamma', 'gamma'],
         )
         files, _, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f]
+        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f and 'e2e' not in f]
         self.assertEqual(len(service_files), 3)
 
     def test_mixed_isolation_only_session_groups(self):

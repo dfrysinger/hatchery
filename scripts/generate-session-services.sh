@@ -341,6 +341,27 @@ Environment=GROUP_PORT=${port}
 Environment=RUN_MODE=path-triggered
 SGFILE
 
+    # Generate E2E check service (runs after main service becomes active)
+    cat > "${OUTPUT_DIR}/openclaw-e2e-${group}.service" <<E2EFILE
+[Unit]
+Description=E2E agent health check - ${group}
+After=openclaw-${group}.service
+BindsTo=openclaw-${group}.service
+# Only run when main service is active
+Requisite=openclaw-${group}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gateway-e2e-check.sh
+Environment=GROUP=${group}
+Environment=GROUP_PORT=${port}
+# E2E can take a while (agent intros), don't let systemd kill it
+TimeoutStartSec=600
+
+[Install]
+WantedBy=openclaw-${group}.service
+E2EFILE
+
     echo "  [${group}] port=${port} agents=${agent_count_in_group} → openclaw-${group}.service"
     group_index=$((group_index + 1))
 done
@@ -369,6 +390,7 @@ if [ -z "${DRY_RUN:-}" ]; then
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
         systemctl enable "openclaw-safeguard-${group}.path" 2>/dev/null || true
+        systemctl enable "openclaw-e2e-${group}.service" 2>/dev/null || true
         
         if [ "$boot_complete" = "true" ]; then
             # Boot complete - this is a config update, start services now

@@ -513,7 +513,24 @@ ExecStart=/usr/local/bin/safe-mode-handler.sh
 Environment=RUN_MODE=path-triggered
 SGFILE
 
+  cat > /etc/systemd/system/openclaw-e2e.service <<E2EFILE
+[Unit]
+Description=E2E agent health check
+After=openclaw.service
+BindsTo=openclaw.service
+Requisite=openclaw.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gateway-e2e-check.sh
+TimeoutStartSec=600
+
+[Install]
+WantedBy=openclaw.service
+E2EFILE
+
   systemctl enable openclaw-safeguard.path 2>/dev/null || true
+  systemctl enable openclaw-e2e.service 2>/dev/null || true
 fi
 systemctl daemon-reload
 

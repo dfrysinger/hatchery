@@ -25,6 +25,8 @@ SBIN_SCRIPTS = {
     "generate-session-services.sh",
     "generate-docker-compose.sh",
     "lib-permissions.sh",
+    "lib-health-check.sh",
+    "lib-notify.sh",
 }
 
 # Scripts that go to /usr/local/bin/ (everything else)
