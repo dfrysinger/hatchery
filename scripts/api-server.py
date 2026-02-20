@@ -42,6 +42,7 @@ def get_status():
   # Check completion markers first to determine smart defaults
   p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
   p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
+  prov_done=os.path.exists('/var/lib/init-status/provision-complete')
   setup_done=os.path.exists('/var/lib/init-status/setup-complete')
   needs_check=os.path.exists('/var/lib/init-status/needs-post-boot-check')
   
@@ -51,14 +52,20 @@ def get_status():
     s,p=11,2  # Ready state (fully booted)
   elif setup_done and needs_check:
     s,p=10,2  # Rebooting (setup done but post-boot-check pending)
-  elif p2_done:
-    s,p=10,2  # Phase 2 done, finalizing
+  elif prov_done or p2_done:
+    s,p=10,2  # Provisioning/phase2 done, rebooting for health checks
   elif p1_done:
     s,p=4,2   # Phase 1 done, starting phase 2
   else:
     s,p=0,1   # Initial state
   
-  # Try to read actual values (overrides defaults if successful)
+  # Minimum stage implied by marker files (monotonic — stage must never go backward)
+  min_stage=0
+  if p1_done:min_stage=4
+  if prov_done or p2_done:min_stage=10
+  if setup_done:min_stage=11
+  
+  # Try to read actual values (overrides defaults if file read succeeds)
   try:
     with open('/var/lib/init-status/stage','r') as f:
       val=f.read().strip()
@@ -67,6 +74,10 @@ def get_status():
       val=f.read().strip()
       if val:p=int(val)
   except:pass
+  
+  # Enforce monotonic stage: never report lower than what markers prove
+  # (handles bootcmd resetting stage file to 0 during reboot)
+  if s<min_stage:s=min_stage
   
   # Check bot status based on isolation mode
   # Read isolation config from habitat-parsed.env

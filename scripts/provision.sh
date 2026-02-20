@@ -16,7 +16,8 @@
 #   6. Configure desktop & remote access
 #   7. Install skills & apps
 #   8. Build OpenClaw configs + generate services (enable only)
-#   9. Fix permissions + REBOOT
+#   9. Fix permissions
+#  10. REBOOT
 #
 # After reboot: systemd starts enabled services → health check → E2E
 # Reboot is REQUIRED: packages need kernel modules, systemd needs
@@ -420,11 +421,12 @@ systemctl enable openclaw-sync.timer 2>/dev/null || true
 # =============================================================================
 # Stage 9: Fix permissions + REBOOT
 # =============================================================================
-$S 9 "rebooting"
-log "Stage 9: Final permissions + reboot..."
+$S 9 "permissions"
+log "Stage 9: Final permissions..."
 
 # Mark provisioning complete (before reboot)
 touch /var/lib/init-status/provision-complete
+touch /var/lib/init-status/needs-post-boot-check
 
 # Fix ownership — everything under bot's home should be bot-owned
 chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
@@ -442,5 +444,6 @@ if [ -f /var/lib/init-status/build-failed ]; then
   log "!!! BUILD FAILED — rebooting anyway but services will not start correctly !!!"
 fi
 
+$S 10 "rebooting"
 sleep 2
 reboot
