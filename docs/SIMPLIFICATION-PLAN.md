@@ -36,16 +36,26 @@ The iOS Shortcut already provides excellent progress notifications during provis
 
 | # | Change | Effort | Impact | Phase |
 |---|--------|--------|--------|-------|
-| 1 | Single-phase provisioning (eliminate background fork) | Medium | 🔴 High | 1 |
-| 2 | Unified config generator (`generate-config.sh`) | Medium | 🔴 High | 2 |
-| 3 | Extract shared auth to `lib-auth.sh`, slim recovery | Medium | 🟠 High | 3 |
-| 4 | Reduce health check settle time (45s → 10s) | Trivial | 🟢 Medium | 4 |
-| 5 | Separate E2E test prompt from agent intro | Low | 🟡 Medium | 4 |
-| 6 | Split `build-full-config.sh` responsibilities | Low-Med | 🟡 Medium | 2 |
-| 7 | Unify E2E normal/safe-mode paths | Low | 🟡 Low | 4 |
-| 8 | Create `lib-env.sh` (shared env loading) | Low | 🟢 Low | 5 |
+| 1 | Reduce health check settle time (45s → 10s) | Trivial | 🟢 Medium | — (ship now) |
+| 2 | Create `lib-env.sh` (shared env loading) | Low | 🟢 Low | 5 |
+| 3 | Unified config generator (`generate-config.sh`) | Medium | 🔴 High | 2 |
+| 4 | Split `build-full-config.sh` responsibilities | Low-Med | 🟡 Medium | 2 |
+| 5 | Extract shared auth to `lib-auth.sh` (incl. OAuth headers), slim recovery | Medium | 🟠 High | 3 |
+| 6 | Single-phase provisioning (eliminate background fork) | Medium | 🔴 High | 1 |
+| 7 | Separate E2E test prompt from agent intro | Low | 🟡 Medium | 4 |
+| 8 | Unify E2E normal/safe-mode paths | Low | 🟡 Low | 4 |
+| 9 | Reduce `TimeoutStartSec` (420s → 180s for HTTP check) | Trivial | 🟢 Low | — (ship with #1) |
+| 10 | Add fatal guards for missing library sources | Low | 🟢 Medium | 5 |
+| 11 | Fix `local_*` naming in `safe-mode-handler.sh` | Low | 🟢 Low | 3 |
 
-**Dropped:** Server-side progress notifications (#10 from review) — iOS Shortcut already provides a full progress bar with per-stage updates. Adding server-side notifications would just create noise.
+**Priority order:** 1 → 2 → 3 → 5 → 6 → 7 (per ChatGPT review — config DRY problem causes real bugs *now*; provisioning fork is ugly but functional)
+
+**Dropped:**
+- Server-side progress notifications — iOS Shortcut already provides a full progress bar with per-stage updates
+- Emergency config — **consider dropping after Phase 2** lands. Smart recovery already tries every credential. Emergency config only helps if the full config has *structural* corruption (bad JSON), but `generate-config.sh` with jq should make that impossible. Keep for now as a safety net, revisit later.
+
+**Deferred:**
+- `run-integration-tests.sh` — referenced as the E2E test runner but needs its own task/PR. Minimum viable: bash script that provisions a test droplet, runs health check scenarios, reports pass/fail.
 
 ---
 
@@ -124,12 +134,12 @@ Post-reboot:
 
 ### Implementation Steps
 
-1. **Create `provision.sh`** — merge phase1 + phase2 into sequential stages (already prototyped in commit `2d549c6`, needs reboot added back)
+1. **Fix `provision.sh`** — the prototype (commit `2d549c6`) ends with `systemctl start` instead of `reboot`. **Must restore the reboot.** Remove `killall apt` — it's no longer needed since there's no concurrent apt (the `systemctl stop apt-daily.timer` before the install is sufficient).
 2. **Update `bootstrap.sh`** — detect `provision.sh` and use it; fall back to legacy `phase1-critical.sh` for backwards compat
 3. **Update `generate-session-services.sh`** — replace `boot-complete` check with `START_SERVICES` env var (already done in prototype)
 4. **Keep legacy scripts** — `phase1-critical.sh` and `phase2-background.sh` remain for older hatchery versions; `bootstrap.sh` auto-detects
 5. **Update `hatch.yaml`** — add `provision.sh` to the scripts fetched during cloud-init
-6. **Update stage numbers** — map new stages to API responses the Shortcut expects
+6. **Update stage numbers** — align with new 10-stage plan, update Shortcut dictionary
 
 ### Stage Mapping (iOS Shortcut)
 
@@ -302,6 +312,14 @@ validate_telegram_token()     # Merged from recovery + lib-notify versions
 validate_discord_token()      # Merged from recovery + lib-notify versions
 validate_api_key()            # Provider-aware validation (anthropic/openai/google)
 
+# Auth header construction
+get_auth_header()             # Returns correct header for provider+token
+                              # sk-ant-oat* → "Authorization: Bearer $token"
+                              # anthropic   → "x-api-key: $token"
+                              # openai      → "Authorization: Bearer $token"
+                              # google      → (query param, not header)
+                              # Currently duplicated in 3+ places
+
 # Token discovery
 find_working_telegram_token() # Search all agents for working token (group-aware)
 find_working_discord_token()  # Same for Discord
@@ -326,6 +344,12 @@ Just the recovery orchestration:
 
 Config generation moves to `generate-config.sh`. Validation moves to `lib-auth.sh`. Notification moves to `lib-notify.sh`.
 
+### Code Quality: Fix `local_*` Naming in `safe-mode-handler.sh`
+
+`safe-mode-handler.sh` uses variables named `local_output`, `local_exit`, `local_status`, `local_owner_id` at the **top-level script scope** — not inside functions. The `local` keyword only works inside bash functions, so these are actually globals with misleading names.
+
+Fix: Either wrap the recovery/restart/intro logic in proper functions (preferred — improves testability) or rename to `handler_output`, `sm_exit`, etc. This should be done as part of the Phase 3 refactor since we're already touching this file.
+
 ### Estimated Reduction
 
 | Component | Before | After |
@@ -342,7 +366,7 @@ Net: ~1,600 lines → ~750 lines. More importantly, **one implementation of each
 
 ## Phase 4: Health Check Refinements
 
-### 4a: Reduce Settle Time (45s → 10s)
+### 4a: Reduce Settle Time (45s → 10s) + TimeoutStartSec (420s → 180s)
 
 **Current:** `HEALTH_CHECK_SETTLE_SECS=45` — pure sleep before first HTTP probe.
 
@@ -357,7 +381,15 @@ SETTLE="${HEALTH_CHECK_SETTLE_SECS:-10}"   # was 45
 
 One line change. Saves 35 seconds on every clean boot.
 
+Also reduce `TimeoutStartSec` from 420s to 180s. The 420s value was sized for the old monolith that did E2E+recovery inline in ExecStartPost. With the decomposed three-unit design, the HTTP-only ExecStartPost should complete in ~105s worst case (10s settle + 60s no-process timeout + buffer). The E2E service already has its own `TimeoutStartSec=600` which is correctly sized for agent intros.
+
+```bash
+TimeoutStartSec=180   # was 420, sized for old monolith
+```
+
 ### 4b: Separate E2E Test from Agent Intro
+
+> **Status:** Plan only — code not yet implemented. The `gateway-e2e-check.sh` on this branch still sends `"introduce yourself"` with `--deliver`. This will be implemented in PR 6.
 
 **Current:** The E2E check sends `"introduce yourself"` as the test prompt with `--deliver`, so the health check IS the boot greeting. Problems:
 - Re-running health checks (e.g., after config update) re-sends intros
@@ -464,6 +496,26 @@ lib-auth.sh       → sources lib-env.sh (for d(), env_load)
 lib-health-check  → sources lib-env.sh (for env loading)
 ```
 
+### Library Sourcing: Fatal Guards
+
+The current code uses a search loop to find libraries but continues silently if none is found, causing cryptic undefined function errors later. All library sourcing must have a fatal guard:
+
+```bash
+# Current (fragile):
+for lib_path in /usr/local/sbin /usr/local/bin ...; do
+  [ -f "$lib_path/lib-health-check.sh" ] && { source "$lib_path/lib-health-check.sh"; break; }
+done
+# If none found, execution continues with undefined functions...
+
+# Fixed:
+for lib_path in /usr/local/sbin /usr/local/bin ...; do
+  [ -f "$lib_path/lib-health-check.sh" ] && { source "$lib_path/lib-health-check.sh"; break; }
+done
+type hc_init_logging &>/dev/null || { echo "FATAL: lib-health-check.sh not found" >&2; exit 1; }
+```
+
+Apply this pattern to all library sourcing in all scripts.
+
 ---
 
 ## Testing Plan
@@ -568,6 +620,8 @@ These integration tests require a live droplet. They should be runnable via:
 ssh bot@<droplet> 'sudo /usr/local/bin/run-integration-tests.sh'
 ```
 
+> **TODO:** `run-integration-tests.sh` does not exist yet. Needs its own task/PR. Minimum viable: a bash script that iterates the E2E test cases above, reports pass/fail per case, and outputs a summary. Could provision test droplets via the DO API using test habitat configs from `Droplets/habitats/`, or run against an already-provisioned droplet. Should be runnable both from CI and manually via SSH.
+
 ---
 
 ## Migration & Backwards Compatibility
@@ -658,33 +712,20 @@ This lets us test single-phase on specific habitats before making it the default
 ## Implementation Order
 
 ```
-Phase 1 ──→ Phase 2 ──→ Phase 3 ──→ Phase 4 ──→ Phase 5
-(provision)  (config)    (recovery)   (health)    (libs)
-   │            │            │           │           │
-   │            │            │           ├─ 4a: settle time (trivial)
-   │            │            │           ├─ 4b: separate intro
-   │            │            │           └─ 4c: unify paths
-   │            │            │
-   │            │            └─ lib-auth.sh + slim recovery
-   │            │
-   │            ├─ generate-config.sh
-   │            ├─ setup-workspaces.sh  
-   │            └─ slim build-full-config.sh
-   │
-   ├─ provision.sh (reboot restored)
-   └─ bootstrap.sh auto-detect
-
-Each phase is independently mergeable.
-Phase 4a (settle time) can ship immediately — it's a one-line change.
+PR 1 ──→ PR 2 ──→ PR 3 ──────→ PR 4 ──────→ PR 5 ──→ PR 6
+(settle)  (libs)   (config DRY)  (auth+slim)  (prov)   (e2e)
+trivial   low      HIGHEST VALUE  high value   medium   nice-to-have
 ```
 
-### PRs
+Each PR is independently mergeable. Ship PR 1 immediately — it's zero risk.
 
-| PR | Phase | Description | Dependencies |
-|----|-------|-------------|-------------|
-| 1 | 4a | Reduce settle time 45s→10s | None |
-| 2 | 5 | Create `lib-env.sh`, update scripts to source it | None |
-| 3 | 1 | `provision.sh` with reboot, `bootstrap.sh` auto-detect | None |
-| 4 | 2 | `generate-config.sh` + `setup-workspaces.sh` + slim `build-full-config.sh` | PR 3 (or standalone) |
-| 5 | 3 | `lib-auth.sh` + slim `safe-mode-recovery.sh` | PR 2 (lib-env), PR 4 (generate-config) |
-| 6 | 4b,4c | Separate E2E test from intro, unify paths | PR 5 (lib-auth) |
+### PRs (priority order)
+
+| PR | Phase | Description | Dependencies | Rationale |
+|----|-------|-------------|-------------|-----------|
+| 1 | 4a | Settle 45s→10s + TimeoutStartSec 420s→180s | None | Zero risk, 35s faster every boot |
+| 2 | 5 | `lib-env.sh` + fatal library guards | None | Foundation for everything else |
+| 3 | 2 | `generate-config.sh` + `setup-workspaces.sh` + slim `build-full-config.sh` | None | **Highest value** — kills the #1 bug source (5 config heredocs) |
+| 4 | 3 | `lib-auth.sh` (incl. OAuth headers) + slim `safe-mode-recovery.sh` + fix `local_*` naming | PR 2, PR 3 | Second highest — 1,461→~400 lines |
+| 5 | 1 | `provision.sh` with reboot + `bootstrap.sh` auto-detect | PR 3 | Lower urgency — current flow works, fork is ugly but functional |
+| 6 | 4b,4c | Separate E2E test from intro, unify normal/safe-mode paths | PR 4 | Nice-to-have, not blocking |
