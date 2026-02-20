@@ -155,15 +155,14 @@ fix_session_state() {
 }
 
 # Fix systemd config directory for session isolation
-# Usage: fix_session_config_dir /etc/systemd/system/documents
+# Usage: fix_session_config_dir ~/.openclaw/configs/documents
 fix_session_config_dir() {
   local config_dir="$1"
   [ -d "$config_dir" ] || return 0
   
-  # Config dir needs bot ownership so OpenClaw can write temp files for atomic saves
-  # (auto-enable plugin persistence requires creating .tmp files in this directory)
+  # Config dir and files should be owned by bot with restricted access
   chown "$BOT_USER:$BOT_USER" "$config_dir" 2>/dev/null || true
-  chmod 755 "$config_dir" 2>/dev/null || true
+  chmod 700 "$config_dir" 2>/dev/null || true
   
   # Config file contains tokens - restrict access
   if [ -f "$config_dir/openclaw.session.json" ]; then

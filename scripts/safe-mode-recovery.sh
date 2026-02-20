@@ -1282,7 +1282,7 @@ run_smart_recovery() {
   # Step 4: Write emergency config
   # Use OPENCLAW_CONFIG_PATH if set (from systemd environment) - this is the ACTUAL
   # config path the gateway uses. For session isolation, systemd sets this to
-  # /etc/systemd/system/${GROUP}/openclaw.session.json
+  # ~/.openclaw/configs/${GROUP}/openclaw.session.json
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
   local config_dir config_path
   
@@ -1292,7 +1292,7 @@ run_smart_recovery() {
     config_dir="$(dirname "$config_path")"
     log_recovery "  Using OPENCLAW_CONFIG_PATH: ${config_path}"
   elif [ -n "${GROUP:-}" ]; then
-    config_dir="${home}/.openclaw-sessions/${GROUP}"
+    config_dir="${home}/.openclaw/configs/${GROUP}"
     config_path="${config_dir}/openclaw.session.json"
     log_recovery "  Session isolation mode (fallback): writing to ${config_path}"
   else

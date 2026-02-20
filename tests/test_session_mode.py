@@ -191,8 +191,8 @@ class TestSessionConfig(unittest.TestCase):
         """Each group gets its own openclaw config JSON."""
         env = make_session_env()
         files, _, _ = run_generator(env)
-        self.assertIn('council/openclaw.session.json', files)
-        self.assertIn('workers/openclaw.session.json', files)
+        self.assertIn('home/testuser/.openclaw/configs/council/openclaw.session.json', files)
+        self.assertIn('home/testuser/.openclaw/configs/workers/openclaw.session.json', files)
 
     def test_config_contains_only_group_agents(self):
         """Each config only includes agents belonging to that group."""
@@ -201,8 +201,8 @@ class TestSessionConfig(unittest.TestCase):
             agent_groups=['council', 'council', 'workers', 'workers'],
         )
         files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['council/openclaw.session.json'])
-        workers_cfg = json.loads(files['workers/openclaw.session.json'])
+        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
+        workers_cfg = json.loads(files['home/testuser/.openclaw/configs/workers/openclaw.session.json'])
 
         council_names = [a['name'] for a in council_cfg['agents']['list']]
         workers_names = [a['name'] for a in workers_cfg['agents']['list']]
@@ -214,14 +214,14 @@ class TestSessionConfig(unittest.TestCase):
         """Config gateway port matches the service port."""
         env = make_session_env()
         files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['council/openclaw.session.json'])
+        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
         self.assertEqual(council_cfg['gateway']['port'], 18790)
 
     def test_config_has_gateway_section(self):
         """Config includes gateway with local mode."""
         env = make_session_env()
         files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['council/openclaw.session.json'])
+        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
         self.assertEqual(council_cfg['gateway']['mode'], 'local')
 
     def test_single_group_single_service(self):

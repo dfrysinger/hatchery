@@ -22,7 +22,7 @@
 #
 # Outputs:  Per-group systemd service files and OpenClaw configs
 #             openclaw-{group}.service
-#             {group}/openclaw.session.json
+#             ~/.openclaw/configs/{group}/openclaw.session.json
 #
 # Env:      SESSION_OUTPUT_DIR  — output directory (default: /etc/systemd/system)
 #           DRY_RUN             — if set, write to SESSION_OUTPUT_DIR only
@@ -50,6 +50,9 @@ HABITAT="${HABITAT_NAME:-default}"
 SHARED="${ISOLATION_SHARED_PATHS:-}"
 PLATFORM="${PLATFORM:-telegram}"
 OUTPUT_DIR="${SESSION_OUTPUT_DIR:-/etc/systemd/system}"
+# Config files go in bot-owned space (not /etc/systemd/system/) so OpenClaw
+# can persist changes (atomic writes, auto-enable plugins) without root.
+CONFIG_BASE="${HOME_DIR}/.openclaw/configs"
 BASE_PORT=18790
 
 # --- Skip if not session mode or no groups ---
@@ -120,20 +123,20 @@ fi
 group_index=0
 for group in "${SESSION_GROUPS[@]}"; do
     port=$((BASE_PORT + group_index))
-    group_dir="${OUTPUT_DIR}/${group}"
+    config_dir="${CONFIG_BASE}/${group}"
     state_dir="${STATE_BASE}/${group}"
     
     # Create directories with proper ownership
+    # Config dir is under ~/.openclaw/ so bot owns it naturally
     if type ensure_bot_dir &>/dev/null; then
       ensure_bot_dir "$state_dir" 700
-      # Config dir needs bot ownership so OpenClaw can write temp files for atomic saves
-      mkdir -p "$group_dir" && chown "${SVC_USER}:${SVC_USER}" "$group_dir" && chmod 755 "$group_dir"
+      ensure_bot_dir "$config_dir" 700
     else
-      mkdir -p "$group_dir"
-      mkdir -p "$state_dir"
-      [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 700 "$state_dir"
-      [ -z "${DRY_RUN:-}" ] && chown "${SVC_USER}:${SVC_USER}" "$group_dir"
-      chmod 755 "$group_dir"
+      mkdir -p "$config_dir" "$state_dir"
+      if [ -z "${DRY_RUN:-}" ]; then
+        chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 700 "$state_dir"
+        chown "${SVC_USER}:${SVC_USER}" "$config_dir" && chmod 700 "$config_dir"
+      fi
     fi
 
     # Collect agents for this group
@@ -219,7 +222,7 @@ for group in "${SESSION_GROUPS[@]}"; do
     discord_owner_id="${DISCORD_OWNER_ID:-}"
 
     # Generate OpenClaw session config
-    cat > "${group_dir}/openclaw.session.json" <<SESSIONCFG
+    cat > "${config_dir}/openclaw.session.json" <<SESSIONCFG
 {
   "gateway": {
     "mode": "local",
@@ -259,15 +262,9 @@ for group in "${SESSION_GROUPS[@]}"; do
   }
 }
 SESSIONCFG
-    # Make config AND directory writable by service user (OpenClaw needs to persist config changes)
-    # SECURITY: Use restrictive permissions - only owner (bot user) should have write access
-    if type fix_session_config_dir &>/dev/null; then
-      fix_session_config_dir "$group_dir"
-    else
-      chown -R "${SVC_USER}:${SVC_USER}" "$group_dir" 2>/dev/null || true
-      chmod 750 "$group_dir"
-      chmod 600 "${group_dir}/openclaw.session.json"
-    fi
+    # Secure config file — bot-owned, read/write only by owner
+    chown "${SVC_USER}:${SVC_USER}" "${config_dir}/openclaw.session.json" 2>/dev/null || true
+    chmod 600 "${config_dir}/openclaw.session.json" 2>/dev/null || true
     
     # Final ownership fix for entire state tree (ensure all subdirs are accessible)
     if [ -z "${DRY_RUN:-}" ]; then
@@ -305,7 +302,7 @@ Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
 Environment=DISPLAY=:10
-Environment=OPENCLAW_CONFIG_PATH=${group_dir}/openclaw.session.json
+Environment=OPENCLAW_CONFIG_PATH=${config_dir}/openclaw.session.json
 Environment=OPENCLAW_STATE_DIR=${state_dir}
 Environment=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 Environment=GOOGLE_API_KEY=${GOOGLE_API_KEY:-}

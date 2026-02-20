@@ -125,9 +125,8 @@ if [ -n "$GROUP" ]; then
   RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts-${GROUP}"
   SAFE_MODE_FILE="/var/lib/init-status/safe-mode-${GROUP}"
   # Use OPENCLAW_CONFIG_PATH from systemd environment if set, otherwise construct it
-  # The systemd service sets this to /etc/systemd/system/${GROUP}/openclaw.session.json
-  # which is the ACTUAL config path the gateway uses
-  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$H/.openclaw-sessions/${GROUP}/openclaw.session.json}"
+  # Config lives in bot-owned space: ~/.openclaw/configs/${GROUP}/openclaw.session.json
+  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$H/.openclaw/configs/${GROUP}/openclaw.session.json}"
 else
   RECOVERY_COUNTER_FILE="/var/lib/init-status/recovery-attempts"
   SAFE_MODE_FILE="/var/lib/init-status/safe-mode"
@@ -1439,7 +1438,7 @@ See BOOT_REPORT.md for details."
       # Only skip if safe-mode agent is not present in the config.
       local config_to_check="${CONFIG_PATH:-}"
       if [ -z "$config_to_check" ] && [ -n "${GROUP:-}" ]; then
-        config_to_check="/etc/systemd/system/${GROUP}/openclaw.session.json"
+        config_to_check="${H}/.openclaw/configs/${GROUP}/openclaw.session.json"
       fi
       
       local has_safe_mode_agent=""
@@ -1478,7 +1477,7 @@ Keep it to 3-5 sentences. Be helpful, not verbose."
       if [ "$ISOLATION" = "session" ] && [ -n "${GROUP:-}" ] && [ -n "${GROUP_PORT:-}" ]; then
         gateway_url="ws://127.0.0.1:${GROUP_PORT}"
         # Use OPENCLAW_CONFIG_PATH from systemd env if available, otherwise construct it
-        config_path="${CONFIG_PATH:-/etc/systemd/system/${GROUP}/openclaw.session.json}"
+        config_path="${CONFIG_PATH:-${H}/.openclaw/configs/${GROUP}/openclaw.session.json}"
         log "  Session isolation mode: using gateway at $gateway_url, config at $config_path"
       fi
       
