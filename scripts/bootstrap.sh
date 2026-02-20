@@ -86,7 +86,7 @@ for f in "$INSTALL_DIR"/scripts/*.sh; do
   case "$bn" in
     bootstrap.sh)
       ;; # skip -- do not overwrite ourselves mid-execution
-    phase1-critical.sh|phase2-background.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh|lib-permissions.sh|lib-health-check.sh|lib-notify.sh)
+    phase1-critical.sh|phase2-background.sh|provision.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh|lib-permissions.sh|lib-health-check.sh|lib-notify.sh)
       cp "$f" /usr/local/sbin/
       ;;
     *)
@@ -119,5 +119,11 @@ fi
 
 chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null || true
 
-log "Handing off to phase1-critical.sh"
-/usr/local/sbin/phase1-critical.sh
+# Use single-phase provisioning if available, fall back to legacy phase1→phase2
+if [ -f /usr/local/sbin/provision.sh ]; then
+  log "Handing off to provision.sh (single-phase)"
+  /usr/local/sbin/provision.sh
+else
+  log "Handing off to phase1-critical.sh (legacy)"
+  /usr/local/sbin/phase1-critical.sh
+fi

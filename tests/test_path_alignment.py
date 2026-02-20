@@ -21,6 +21,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 SBIN_SCRIPTS = {
     "phase1-critical.sh",
     "phase2-background.sh",
+    "provision.sh",
     "build-full-config.sh",
     "generate-session-services.sh",
     "generate-docker-compose.sh",

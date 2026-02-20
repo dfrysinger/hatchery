@@ -382,33 +382,24 @@ if [ -z "${DRY_RUN:-}" ]; then
     systemctl stop openclaw 2>/dev/null || true
     systemctl disable openclaw 2>/dev/null || true
     
-    # Check if boot is complete - only START services after boot finishes
-    # During initial boot, just ENABLE them; they'll auto-start after reboot
-    boot_complete=false
-    [ -f /var/lib/init-status/boot-complete ] && boot_complete=true
-    
+    # Enable all services. Starting is handled by the caller (provision.sh or manual).
+    # Use START_SERVICES=true env var to also start them (e.g., config update while running).
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
         systemctl enable "openclaw-safeguard-${group}.path" 2>/dev/null || true
         systemctl enable "openclaw-e2e-${group}.service" 2>/dev/null || true
         
-        if [ "$boot_complete" = "true" ]; then
-            # Boot complete - this is a config update, start services now
+        if [ "${START_SERVICES:-false}" = "true" ]; then
             systemctl start "openclaw-${group}.service" || {
                 echo "  [${group}] Service start returned non-zero (health check may have triggered safe mode)"
-                echo "  [${group}] Service will restart automatically via systemd"
             }
             systemctl start "openclaw-safeguard-${group}.path" 2>/dev/null || true
         else
-            echo "  [${group}] Boot not complete - service enabled but not started (will start after reboot)"
+            echo "  [${group}] Service enabled (caller will start)"
         fi
     done
     
-    if [ "$boot_complete" = "true" ]; then
-        echo "Session services started (or pending health check restart)."
-    else
-        echo "Session services enabled (will start automatically after reboot)."
-    fi
+    echo "Session services enabled${START_SERVICES:+ and started}."
 else
     echo "DRY_RUN mode — services written to ${OUTPUT_DIR}"
 fi
