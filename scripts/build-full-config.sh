@@ -487,6 +487,34 @@ $([ -n "$BK" ] && echo "Environment=BRAVE_API_KEY=${BK}")
 [Install]
 WantedBy=multi-user.target
 SVC
+
+# Generate safeguard units for single mode (non-session)
+if [ "${ISOLATION_DEFAULT:-none}" = "none" ]; then
+  cat > /etc/systemd/system/openclaw-safeguard.path <<'PATHFILE'
+[Unit]
+Description=Watch for unhealthy marker
+
+[Path]
+PathExists=/var/lib/init-status/unhealthy
+MakeDirectory=no
+
+[Install]
+WantedBy=multi-user.target
+PATHFILE
+
+  cat > /etc/systemd/system/openclaw-safeguard.service <<'SGFILE'
+[Unit]
+Description=Safe mode handler
+After=openclaw.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/safe-mode-handler.sh
+Environment=RUN_MODE=path-triggered
+SGFILE
+
+  systemctl enable openclaw-safeguard.path 2>/dev/null || true
+fi
 systemctl daemon-reload
 
 # --- Fix permissions BEFORE starting services ---

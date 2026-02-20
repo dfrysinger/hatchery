@@ -313,6 +313,34 @@ Environment=BRAVE_API_KEY=${BRAVE_API_KEY:-}
 WantedBy=multi-user.target
 SVCFILE
 
+    # Generate safeguard .path unit (watches for unhealthy marker)
+    cat > "${OUTPUT_DIR}/openclaw-safeguard-${group}.path" <<PATHFILE
+[Unit]
+Description=Watch for unhealthy marker - ${group}
+
+[Path]
+PathExists=/var/lib/init-status/unhealthy-${group}
+# Only trigger once per marker creation
+MakeDirectory=no
+
+[Install]
+WantedBy=multi-user.target
+PATHFILE
+
+    # Generate safeguard .service unit (runs recovery)
+    cat > "${OUTPUT_DIR}/openclaw-safeguard-${group}.service" <<SGFILE
+[Unit]
+Description=Safe mode handler - ${group}
+After=openclaw-${group}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/safe-mode-handler.sh
+Environment=GROUP=${group}
+Environment=GROUP_PORT=${port}
+Environment=RUN_MODE=path-triggered
+SGFILE
+
     echo "  [${group}] port=${port} agents=${agent_count_in_group} → openclaw-${group}.service"
     group_index=$((group_index + 1))
 done
@@ -340,6 +368,7 @@ if [ -z "${DRY_RUN:-}" ]; then
     
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
+        systemctl enable "openclaw-safeguard-${group}.path" 2>/dev/null || true
         
         if [ "$boot_complete" = "true" ]; then
             # Boot complete - this is a config update, start services now
@@ -347,6 +376,7 @@ if [ -z "${DRY_RUN:-}" ]; then
                 echo "  [${group}] Service start returned non-zero (health check may have triggered safe mode)"
                 echo "  [${group}] Service will restart automatically via systemd"
             }
+            systemctl start "openclaw-safeguard-${group}.path" 2>/dev/null || true
         else
             echo "  [${group}] Boot not complete - service enabled but not started (will start after reboot)"
         fi

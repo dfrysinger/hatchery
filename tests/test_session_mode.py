@@ -135,6 +135,19 @@ class TestSessionServiceGeneration(unittest.TestCase):
         self.assertIn('openclaw-council.service', files)
         self.assertIn('openclaw-workers.service', files)
 
+    def test_generates_safeguard_units_per_group(self):
+        """Each group gets a safeguard .path and .service unit."""
+        env = make_session_env()
+        files, _, _ = run_generator(env)
+        self.assertIn('openclaw-safeguard-council.path', files)
+        self.assertIn('openclaw-safeguard-council.service', files)
+        self.assertIn('openclaw-safeguard-workers.path', files)
+        self.assertIn('openclaw-safeguard-workers.service', files)
+        # Path unit watches for unhealthy marker
+        self.assertIn('unhealthy-council', files['openclaw-safeguard-council.path'])
+        # Service runs safe-mode-handler
+        self.assertIn('safe-mode-handler', files['openclaw-safeguard-council.service'])
+
     def test_service_contains_exec_start(self):
         """Service file has ExecStart running openclaw gateway."""
         env = make_session_env()
@@ -232,7 +245,8 @@ class TestSessionConfig(unittest.TestCase):
             agent_groups=['council', 'council', 'council'],
         )
         files, _, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service')]
+        # Filter to main service files only (exclude safeguard helper units)
+        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f]
         self.assertEqual(len(service_files), 1)
         self.assertIn('openclaw-council.service', files)
 
@@ -261,7 +275,7 @@ class TestSessionAgentGrouping(unittest.TestCase):
             agent_groups=['alpha', 'alpha', 'beta', 'beta', 'gamma', 'gamma'],
         )
         files, _, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service')]
+        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f]
         self.assertEqual(len(service_files), 3)
 
     def test_mixed_isolation_only_session_groups(self):
