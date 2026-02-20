@@ -29,6 +29,10 @@ for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0
 done
 type notify_send_message &>/dev/null || { echo "FATAL: lib-notify.sh not found" >&2; exit 1; }
 
+for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$lib_path/lib-auth.sh" ] && { source "$lib_path/lib-auth.sh"; break; }
+done
+
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 
 hc_init_logging "${GROUP:-}"

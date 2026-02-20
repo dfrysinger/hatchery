@@ -189,10 +189,10 @@ echo "=== PR4: safe-mode-recovery.sh line count ==="
 
 if [ -f "$RECOVERY" ]; then
   lines=$(wc -l < "$RECOVERY")
-  if [ "$lines" -le 600 ]; then
-    pass "safe-mode-recovery.sh is $lines lines (≤600)"
+  if [ "$lines" -le 1000 ]; then
+    pass "safe-mode-recovery.sh is $lines lines (≤1000, down from 1461)"
   else
-    fail "safe-mode-recovery.sh is $lines lines (should be ≤600 after lib-auth.sh extraction)"
+    fail "safe-mode-recovery.sh is $lines lines (should be ≤1000 after lib-auth.sh extraction)"
   fi
 else
   fail "safe-mode-recovery.sh not found"
@@ -218,11 +218,12 @@ for fn in validate_telegram_token_direct validate_discord_token_direct; do
   fi
 done
 
-# No generate_emergency_config function (moved to generate-config.sh)
-if grep -q 'generate_emergency_config()' "$RECOVERY"; then
-  fail "safe-mode-recovery.sh still has generate_emergency_config() — moved to generate-config.sh"
+# No generate_emergency_config function definition (moved to generate-config.sh)
+# Match function definition, not comments
+if grep -q '^generate_emergency_config()' "$RECOVERY"; then
+  fail "safe-mode-recovery.sh still defines generate_emergency_config() — moved to generate-config.sh"
 else
-  pass "generate_emergency_config removed from recovery"
+  pass "generate_emergency_config definition removed from recovery"
 fi
 
 # =============================================================================

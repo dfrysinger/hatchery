@@ -78,34 +78,45 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log "Entering SAFE MODE with smart recovery"
 SMART_RECOVERY_SUCCESS=false
 
-if type run_full_recovery_escalation &>/dev/null; then
-  log "Attempting full recovery escalation..."
+# Run recovery in a function to allow proper local variable scoping
+run_recovery_attempt() {
   export HOME_DIR="$H" USERNAME="$HC_USERNAME" RECOVERY_LOG="$HC_LOG"
 
-  local_output=$(run_full_recovery_escalation 2>&1)
-  local_exit=$?
+  if type run_full_recovery_escalation &>/dev/null; then
+    log "Attempting full recovery escalation..."
+    local output exit_code
+    output=$(run_full_recovery_escalation 2>&1)
+    exit_code=$?
 
-  if [ $local_exit -eq 0 ]; then
-    log "Recovery succeeded"
-    log "Recovery output: $local_output"
-    SMART_RECOVERY_SUCCESS=true
-  else
-    log "Recovery FAILED (exit $local_exit)"
-    log "Recovery output: $local_output"
+    if [ $exit_code -eq 0 ]; then
+      log "Recovery succeeded"
+      log "Recovery output: $output"
+      return 0
+    else
+      log "Recovery FAILED (exit $exit_code)"
+      log "Recovery output: $output"
+    fi
   fi
-elif type run_smart_recovery &>/dev/null; then
-  log "Attempting smart recovery..."
-  export HOME_DIR="$H" USERNAME="$HC_USERNAME" RECOVERY_LOG="$HC_LOG"
 
-  local_output=$(run_smart_recovery 2>&1)
-  local_exit=$?
+  if type run_smart_recovery &>/dev/null; then
+    log "Attempting smart recovery..."
+    local output exit_code
+    output=$(run_smart_recovery 2>&1)
+    exit_code=$?
 
-  if [ $local_exit -eq 0 ]; then
-    log "Recovery succeeded"
-    SMART_RECOVERY_SUCCESS=true
-  else
-    log "Recovery FAILED (exit $local_exit): $local_output"
+    if [ $exit_code -eq 0 ]; then
+      log "Recovery succeeded"
+      return 0
+    else
+      log "Recovery FAILED (exit $exit_code): $output"
+    fi
   fi
+
+  return 1
+}
+
+if run_recovery_attempt; then
+  SMART_RECOVERY_SUCCESS=true
 fi
 
 # Fall back to emergency config
@@ -129,14 +140,14 @@ fi
 touch "$SAFE_MODE_FILE"
 
 # Write SAFE_MODE.md for agents
-local_status="minimal config"
-[ "$SMART_RECOVERY_SUCCESS" = "true" ] && local_status="smart recovery"
+recovery_status="minimal config"
+[ "$SMART_RECOVERY_SUCCESS" = "true" ] && recovery_status="smart recovery"
 
 for si in $(seq 1 "$AC"); do
   cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<SAFEMD
 # SAFE MODE - Config failed health checks
 
-Recovery: **${local_status}**
+Recovery: **${recovery_status}**
 
 Check logs: cat /var/log/gateway-health-check${GROUP:+-$GROUP}.log
 SAFEMD
