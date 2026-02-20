@@ -174,79 +174,111 @@ check_channel_connectivity() {
   log "  All $AC agents have valid tokens"; return 0
 }
 
-check_safe_mode_e2e() {
-  log "  Testing safe-mode agent E2E..."
-
-  local env_prefix=""
-  [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
-
-  local output
-  output=$(timeout 60 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
-    --agent "safe-mode" --message "Reply with exactly: HEALTH_CHECK_OK" --timeout 30 --json 2>&1)
-  local rc=$?
-
-  if [ $rc -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
-    log "  ✓ safe-mode agent responded"; return 0
-  fi
-  log "  ✗ safe-mode agent FAILED (exit=$rc)"
-  echo "$output" | while IFS= read -r line; do log "    | $line"; done
-  return 1
-}
-
+# Unified E2E check — works for both normal agents and safe-mode agent.
+# Args: agent IDs to check (optional; defaults to group agents or all agents)
+# Uses deterministic test prompt, no --deliver (fast, re-runnable).
 check_agents_e2e() {
   log "========== E2E AGENT CHECK =========="
 
   [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 
   local all_healthy=true failed_agents=""
-  local agents_to_check=()
+  local agents_to_check=("$@")
 
-  if [ -n "$GROUP" ]; then
-    for i in $(seq 1 "$AC"); do
-      local gvar="AGENT${i}_ISOLATION_GROUP"; [ "${!gvar:-}" = "$GROUP" ] && agents_to_check+=("agent${i}")
-    done
-    log "  GROUP=$GROUP agents: ${agents_to_check[*]}"
+  # If no args, auto-discover agents
+  if [ ${#agents_to_check[@]} -eq 0 ]; then
+    if [ -n "$GROUP" ]; then
+      for i in $(seq 1 "$AC"); do
+        local gvar="AGENT${i}_ISOLATION_GROUP"; [ "${!gvar:-}" = "$GROUP" ] && agents_to_check+=("agent${i}")
+      done
+      log "  GROUP=$GROUP agents: ${agents_to_check[*]}"
+    else
+      for i in $(seq 1 "$AC"); do agents_to_check+=("agent${i}"); done
+      log "  STANDARD: ${#agents_to_check[@]} agents"
+    fi
   else
-    for i in $(seq 1 "$AC"); do agents_to_check+=("agent${i}"); done
-    log "  STANDARD: ${#agents_to_check[@]} agents"
+    log "  EXPLICIT agents: ${agents_to_check[*]}"
   fi
 
-  local owner_id
-  owner_id=$(get_owner_id_for_platform "$HC_PLATFORM" "with_prefix")
-  [ -z "$owner_id" ] || [ "$owner_id" = "user:" ] && { log "  No owner ID"; return 1; }
-
-  local intro_prompt="You just came online after a reboot. Reply with a brief introduction (2-3 sentences) - your name, model, and role. Be friendly but concise. Your reply will be automatically delivered."
+  # Deterministic test prompt — fast, no delivery, verifiable
+  local test_prompt="Reply with exactly: HEALTH_CHECK_OK"
 
   for agent_id in "${agents_to_check[@]}"; do
-    local num="${agent_id#agent}"
-    local name_var="AGENT${num}_NAME"; local agent_name="${!name_var:-$agent_id}"
-    local model_var="AGENT${num}_MODEL"; local agent_model="${!model_var:-unknown}"
-    log "  -------- $agent_id ($agent_name, $agent_model) --------"
+    log "  -------- $agent_id --------"
 
     local start_time; start_time=$(date +%s)
     local env_prefix=""
     [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
 
     local output
-    output=$(timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
-      --agent "$agent_id" --message "$intro_prompt" --deliver \
-      --reply-channel "$HC_PLATFORM" --reply-account "$agent_id" --reply-to "$owner_id" \
-      --timeout 60 --json 2>&1)
+    output=$(timeout 60 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+      --agent "$agent_id" --message "$test_prompt" --timeout 30 --json 2>&1)
     local rc=$?
     local dur=$(( $(date +%s) - start_time ))
 
     if [ $rc -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
-      log "  ✓ $agent_name in ${dur}s"
+      log "  ✓ $agent_id responded in ${dur}s"
     else
-      log "  ✗ $agent_name FAILED (exit=$rc, ${dur}s)"
+      log "  ✗ $agent_id FAILED (exit=$rc, ${dur}s)"
       echo "$output" | while IFS= read -r line; do log "    | $line"; done
-      all_healthy=false; failed_agents="${failed_agents} ${agent_name}"
+      all_healthy=false; failed_agents="${failed_agents} ${agent_id}"
     fi
   done
 
   [ "$all_healthy" = "false" ] && { log "  RESULT: FAILED —${failed_agents}"; return 1; }
   log "  RESULT: All agents passed"
   log "========== E2E CHECK COMPLETE ==========="; return 0
+}
+
+# =============================================================================
+# Agent Intros — separate from health check, only on fresh boot
+# =============================================================================
+
+INTRO_SENT_MARKER="/var/lib/init-status/intro-sent${GROUP:+-$GROUP}"
+
+send_agent_intros() {
+  log "========== SENDING AGENT INTROS =========="
+
+  # Only send intros on fresh boot (not re-checks or restarts)
+  if [ -f "$INTRO_SENT_MARKER" ]; then
+    log "  Intros already sent (marker exists) — skipping"
+    return 0
+  fi
+
+  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$HC_PLATFORM" "with_prefix")
+  [ -z "$owner_id" ] || [ "$owner_id" = "user:" ] && { log "  No owner ID — skipping intros"; return 0; }
+
+  local agents_to_intro=()
+
+  if [ -n "$GROUP" ]; then
+    for i in $(seq 1 "$AC"); do
+      local gvar="AGENT${i}_ISOLATION_GROUP"; [ "${!gvar:-}" = "$GROUP" ] && agents_to_intro+=("agent${i}")
+    done
+  else
+    for i in $(seq 1 "$AC"); do agents_to_intro+=("agent${i}"); done
+  fi
+
+  local intro_prompt="You just came online after a reboot. Reply with a brief introduction (2-3 sentences) - your name, model, and role. Be friendly but concise. Your reply will be automatically delivered."
+
+  for agent_id in "${agents_to_intro[@]}"; do
+    local num="${agent_id#agent}"
+    local name_var="AGENT${num}_NAME"; local agent_name="${!name_var:-$agent_id}"
+    log "  Sending intro for $agent_id ($agent_name)..."
+
+    local env_prefix=""
+    [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
+
+    timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+      --agent "$agent_id" --message "$intro_prompt" --deliver \
+      --reply-channel "$HC_PLATFORM" --reply-account "$agent_id" --reply-to "$owner_id" \
+      --timeout 60 --json >> "$HC_LOG" 2>&1 && log "  ✓ $agent_name intro sent" || log "  ✗ $agent_name intro failed"
+  done
+
+  touch "$INTRO_SENT_MARKER"
+  log "========== INTROS COMPLETE =========="
 }
 
 # =============================================================================
@@ -310,13 +342,13 @@ Read BOOT_REPORT.md and reply with: 1) Brief intro 2) What went wrong 3) Offer t
 HEALTHY=false
 
 if hc_is_in_safe_mode; then
-  # Safe mode (Run 2): verify safe-mode agent works
+  # Safe mode: verify safe-mode agent works (unified path)
   log "Safe mode: testing safe-mode agent E2E"
-  if check_safe_mode_e2e; then
+  if check_agents_e2e "safe-mode"; then
     HEALTHY=true
   fi
 else
-  # Normal mode: validate channels, then run full E2E
+  # Normal mode: validate channels, then run E2E (unified path)
   log "Normal mode: channel check + E2E"
   if check_channel_connectivity && check_agents_e2e; then
     HEALTHY=true
@@ -343,6 +375,9 @@ elif [ "$HEALTHY" = "true" ]; then
   for si in $(seq 1 "$AC"); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
   echo '11' > /var/lib/init-status/stage
   touch /var/lib/init-status/setup-complete
+
+  # Send agent intros (only on fresh boot, skipped on re-checks)
+  send_agent_intros
 
 else
   log "DECISION: UNHEALTHY — writing marker"
