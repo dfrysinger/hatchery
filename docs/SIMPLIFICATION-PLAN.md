@@ -131,20 +131,56 @@ Post-reboot:
 5. **Update `hatch.yaml`** — add `provision.sh` to the scripts fetched during cloud-init
 6. **Update stage numbers** — map new stages to API responses the Shortcut expects
 
-### Stage Mapping
+### Stage Mapping (iOS Shortcut Contract)
 
-| New Stage | Description | Old Equivalent |
-|-----------|-------------|----------------|
-| 1 | Parsing config | Phase 1, Stage 1 |
-| 2 | Installing OpenClaw | Phase 1, Stage 2 |
-| 3 | Installing packages | Phase 2, Stages 4-6 |
-| 4 | Configuring desktop | Phase 2, Stage 7 |
-| 5 | Configuring apps | Phase 2, Stage 8 |
-| 6 | Building configs | Phase 2, Stage 10 |
-| 7 | Rebooting | Phase 2, reboot |
-| 8+ | Post-reboot (health check) | Same as current |
+The iOS Shortcut polls the stage API and maps server stage numbers to progress bar positions and display labels. This mapping is **hardcoded in the Shortcut** and cannot be changed without updating the Shortcut itself.
 
-**Important:** The iOS Shortcut polls the stage API to update its progress bar. The stage numbers and descriptions need to match what the Shortcut expects, OR the Shortcut needs to be updated to handle the new stage names. This needs to be coordinated.
+**Shortcut formula:** `progress_position = stage + 7`
+
+**Current stage → label mapping:**
+
+| Server Stage | Shortcut Position | Label | Current Script |
+|-------------|-------------------|-------|----------------|
+| 0 | 7 | ✨ Initializing... | cloud-init bootcmd |
+| 1 | 8 | 🖼️ Downloading software... | phase1 (parse config) |
+| 2 | 9 | 🤖 Installing bots... | phase1 (install OpenClaw) |
+| 3 | 10 | ✅ First bot online! | phase1 complete |
+| 4 | 11 | 🖼️ Installing desktop... | phase2 (desktop env) |
+| 5 | 12 | 🛠️ Installing tools... | phase2 (dev tools) |
+| 6 | 13 | 🌐 Installing browser... | phase2 (Chrome) |
+| 7 | 14 | 🖥️ Installing remote desktop... | phase2 (xrdp) |
+| 8 | 15 | 🐙 Installing skills... | phase2 (skills/apps) |
+| 9 | 16 | 🖼️ Enabling remote desktop... | phase2 (remote access) |
+| 10 | 17 | ♻️ Restarting... | phase2 (finalizing + reboot) |
+| 11 | 18 | ✅ Software installation complete! | post-reboot (health check pass) |
+| 12 | 19 | ⚠️ Safe mode triggered! | health check → safe mode |
+| 13 | 20 | ❌ Could not launch OpenClaw... | critical failure |
+
+Post-install checks (not stage-based):
+- Position 21: 🔬 Testing remote desktop...
+- Position 22: 🖥️ Testing domain name...
+
+**Constraint:** `provision.sh` MUST emit stages 0-13 in the same order and meaning. The labels are in the Shortcut, not the server — so the stage numbers are the contract. The descriptions passed to `set-stage.sh` are for server logs only.
+
+**`provision.sh` stage plan:**
+
+| provision.sh Stage | Maps To | What Happens |
+|-------------------|---------|-------------|
+| 1 | 8 (Downloading software) | Parse config, install Node/jq |
+| 2 | 9 (Installing bots) | Install OpenClaw, create user |
+| 3 | 10 (First bot online!) | OpenClaw installed (no service start) |
+| 4 | 11 (Installing desktop) | Desktop environment packages |
+| 5 | 12 (Installing tools) | Developer tools |
+| 6 | 13 (Installing browser) | Chrome + pip packages |
+| 7 | 14 (Installing remote desktop) | xrdp/xvfb/vnc config |
+| 8 | 15 (Installing skills) | Skills, apps, credentials |
+| 9 | 16 (Enabling remote desktop) | Desktop services, remote access |
+| 10 | 17 (Restarting) | Build configs, fix permissions, REBOOT |
+| 11 | 18 (Complete!) | Post-reboot, health check passed |
+| 12 | 19 (Safe mode!) | Safe mode recovery |
+| 13 | 20 (Critical failure) | All recovery failed |
+
+This preserves the exact stage→label mapping. Stage 3 ("First bot online!") is a slight misnomer in the new flow since we don't start the bot until after reboot, but it signals "OpenClaw is installed and configured" which is the meaningful milestone. Alternatively, we could skip stage 3 (go 2→4) but that would leave a gap in the progress bar.
 
 ---
 
