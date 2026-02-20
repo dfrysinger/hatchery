@@ -218,51 +218,33 @@ for group in "${SESSION_GROUPS[@]}"; do
     done
     agent_list_json="${agent_list_json}]"
 
-    # Get owner IDs (from habitat-parsed.env)
-    telegram_owner_id="${TELEGRAM_OWNER_ID:-}"
-    discord_owner_id="${DISCORD_OWNER_ID:-}"
+    # --- Generate session config via generate-config.sh ---
+    # Collect agent IDs in this group as comma-separated list
+    local group_agent_ids=""
+    for i in $(seq 1 "$AGENT_COUNT"); do
+      local _ag_var="AGENT${i}_ISOLATION_GROUP"
+      local _ag="${!_ag_var:-}"
+      if [ "$_ag" = "$group_name" ]; then
+        [ -n "$group_agent_ids" ] && group_agent_ids="${group_agent_ids},"
+        group_agent_ids="${group_agent_ids}agent${i}"
+      fi
+    done
 
-    # Generate OpenClaw session config
-    cat > "${config_dir}/openclaw.session.json" <<SESSIONCFG
-{
-  "gateway": {
-    "mode": "local",
-    "port": ${port},
-    "bind": "loopback",
-    "controlUi": {"enabled": true, "allowInsecureAuth": true},
-    "auth": {"mode": "token", "token": "$(openssl rand -hex 16)"}
-  },
-  "agents": {
-    "defaults": {
-      "model": {"primary": "anthropic/claude-opus-4-5"},
-      "maxConcurrent": 4,
-      "workspace": "${HOME_DIR}/clawd"
-    },
-    "list": ${agent_list_json}
-  },
-  "channels": {
-    "telegram": {
-      "enabled": $([ "$PLATFORM" = "telegram" ] || [ "$PLATFORM" = "both" ] && echo true || echo false),
-      "dmPolicy": "allowlist",
-      "allowFrom": ["${telegram_owner_id}"],
-      "accounts": {${telegram_accounts_json}}
-    },
-    "discord": {
-      "enabled": $([ "$PLATFORM" = "discord" ] || [ "$PLATFORM" = "both" ] && echo true || echo false),
-      "groupPolicy": "allowlist",
-      "dm": {"enabled": true, "policy": "allowlist", "allowFrom": ["${discord_owner_id}"]},
-      "accounts": {${discord_accounts_json}}
-    }
-  },
-  "bindings": [${bindings_json}],
-  "plugins": {
-    "entries": {
-      "telegram": {"enabled": $([ "$PLATFORM" = "telegram" ] || [ "$PLATFORM" = "both" ] && echo true || echo false)},
-      "discord": {"enabled": $([ "$PLATFORM" = "discord" ] || [ "$PLATFORM" = "both" ] && echo true || echo false)}
-    }
-  }
-}
-SESSIONCFG
+    local session_gw_token
+    session_gw_token=$(openssl rand -hex 16 2>/dev/null || echo "session-token-$(date +%s)")
+
+    local GEN_CONFIG_SCRIPT=""
+    for _gc_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+      [ -f "$_gc_path/generate-config.sh" ] && { GEN_CONFIG_SCRIPT="$_gc_path/generate-config.sh"; break; }
+    done
+    [ -z "$GEN_CONFIG_SCRIPT" ] && { echo "FATAL: generate-config.sh not found" >&2; return 1; }
+
+    "$GEN_CONFIG_SCRIPT" --mode session \
+      --group "$group_name" \
+      --agents "$group_agent_ids" \
+      --port "$port" \
+      --gateway-token "$session_gw_token" \
+      > "${config_dir}/openclaw.session.json"
     # Secure config file — bot-owned, read/write only by owner
     chown "${SVC_USER}:${SVC_USER}" "${config_dir}/openclaw.session.json" 2>/dev/null || true
     chmod 600 "${config_dir}/openclaw.session.json" 2>/dev/null || true
