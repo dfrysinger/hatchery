@@ -131,56 +131,51 @@ Post-reboot:
 5. **Update `hatch.yaml`** — add `provision.sh` to the scripts fetched during cloud-init
 6. **Update stage numbers** — map new stages to API responses the Shortcut expects
 
-### Stage Mapping (iOS Shortcut Contract)
+### Stage Mapping (iOS Shortcut)
 
-The iOS Shortcut polls the stage API and maps server stage numbers to progress bar positions and display labels. This mapping is **hardcoded in the Shortcut** and cannot be changed without updating the Shortcut itself.
+The iOS Shortcut polls the stage API and displays progress. The stage→label dictionary in the Shortcut is **easy to update**, so stage numbers and labels are NOT a hard contract. The only real constraint:
 
-**Shortcut formula:** `progress_position = stage + 7`
+> **The user should see a progress update roughly every 60 seconds or less.**
 
-**Current stage → label mapping:**
+With ~8-9 minutes of provisioning, that means ~8-10 stages minimum. Stages can be added, removed, renumbered, or relabeled freely — just update the Shortcut dictionary to match.
 
-| Server Stage | Shortcut Position | Label | Current Script |
-|-------------|-------------------|-------|----------------|
-| 0 | 7 | ✨ Initializing... | cloud-init bootcmd |
-| 1 | 8 | 🖼️ Downloading software... | phase1 (parse config) |
-| 2 | 9 | 🤖 Installing bots... | phase1 (install OpenClaw) |
-| 3 | 10 | ✅ First bot online! | phase1 complete |
-| 4 | 11 | 🖼️ Installing desktop... | phase2 (desktop env) |
-| 5 | 12 | 🛠️ Installing tools... | phase2 (dev tools) |
-| 6 | 13 | 🌐 Installing browser... | phase2 (Chrome) |
-| 7 | 14 | 🖥️ Installing remote desktop... | phase2 (xrdp) |
-| 8 | 15 | 🐙 Installing skills... | phase2 (skills/apps) |
-| 9 | 16 | 🖼️ Enabling remote desktop... | phase2 (remote access) |
-| 10 | 17 | ♻️ Restarting... | phase2 (finalizing + reboot) |
-| 11 | 18 | ✅ Software installation complete! | post-reboot (health check pass) |
-| 12 | 19 | ⚠️ Safe mode triggered! | health check → safe mode |
-| 13 | 20 | ❌ Could not launch OpenClaw... | critical failure |
+**`provision.sh` stages:**
 
-Post-install checks (not stage-based):
-- Position 21: 🔬 Testing remote desktop...
-- Position 22: 🖥️ Testing domain name...
+| Stage | Description | Est. Duration |
+|-------|-------------|---------------|
+| 1 | Parsing config, installing Node | ~30s |
+| 2 | Installing OpenClaw, creating user | ~45s |
+| 3 | Installing packages (desktop + tools + browser) | ~3-4 min |
+| 4 | Configuring desktop & remote access | ~30s |
+| 5 | Installing skills & apps | ~60s |
+| 6 | Building configs & generating services | ~15s |
+| 7 | Fixing permissions, rebooting | ~30-60s |
+| 8 | ✅ Health check passed / ⚠️ Safe mode / ❌ Critical | post-reboot |
 
-**Constraint:** `provision.sh` MUST emit stages 0-13 in the same order and meaning. The labels are in the Shortcut, not the server — so the stage numbers are the contract. The descriptions passed to `set-stage.sh` are for server logs only.
+**Problem:** Stage 3 (package install) takes 3-4 minutes — too long without updates. Split it:
 
-**`provision.sh` stage plan:**
+| Stage | Description | Est. Duration |
+|-------|-------------|---------------|
+| 1 | Parsing config, installing Node | ~30s |
+| 2 | Installing OpenClaw | ~45s |
+| 3 | Installing desktop environment | ~60-90s |
+| 4 | Installing developer tools | ~60s |
+| 5 | Installing browser & pip packages | ~45s |
+| 6 | Configuring desktop & remote access | ~30s |
+| 7 | Installing skills & apps | ~60s |
+| 8 | Building configs & generating services | ~15s |
+| 9 | Rebooting... | ~30-60s |
+| 10 | ✅ Complete / ⚠️ Safe mode / ❌ Critical | post-reboot |
 
-| provision.sh Stage | Maps To | What Happens |
-|-------------------|---------|-------------|
-| 1 | 8 (Downloading software) | Parse config, install Node/jq |
-| 2 | 9 (Installing bots) | Install OpenClaw, create user |
-| 3 | 10 (First bot online!) | OpenClaw installed (no service start) |
-| 4 | 11 (Installing desktop) | Desktop environment packages |
-| 5 | 12 (Installing tools) | Developer tools |
-| 6 | 13 (Installing browser) | Chrome + pip packages |
-| 7 | 14 (Installing remote desktop) | xrdp/xvfb/vnc config |
-| 8 | 15 (Installing skills) | Skills, apps, credentials |
-| 9 | 16 (Enabling remote desktop) | Desktop services, remote access |
-| 10 | 17 (Restarting) | Build configs, fix permissions, REBOOT |
-| 11 | 18 (Complete!) | Post-reboot, health check passed |
-| 12 | 19 (Safe mode!) | Safe mode recovery |
-| 13 | 20 (Critical failure) | All recovery failed |
+That's 10 stages, each under 90s. The Shortcut just needs a matching dictionary with 10 entries + whatever post-reboot statuses are desired (safe mode, critical, testing RDP, testing DNS, etc.).
 
-This preserves the exact stage→label mapping. Stage 3 ("First bot online!") is a slight misnomer in the new flow since we don't start the bot until after reboot, but it signals "OpenClaw is installed and configured" which is the meaningful milestone. Alternatively, we could skip stage 3 (go 2→4) but that would leave a gap in the progress bar.
+**Special post-reboot stages** (set by health check scripts, not provision.sh):
+
+| Stage | Meaning |
+|-------|---------|
+| 10 | ✅ Health check passed, all agents online |
+| 11 | ⚠️ Safe mode triggered |
+| 12 | ❌ Critical failure, bot offline |
 
 ---
 
