@@ -1,9 +1,10 @@
 # Simplification Plan: Boot & Health Check Architecture
 
 > Branch: `experiment/single-phase-boot`
-> Status: Planning
-> Author: Claude (architectural review, Feb 20 2026)
-> Related: [SAFE-MODE-V2.md](SAFE-MODE-V2.md) (current architecture reference)
+> Status: **✅ COMPLETE** — all 6 PRs implemented, 117 tests passing, reviewed by ChatGPT
+> Author: Claude (architectural review + implementation, Feb 20 2026)
+> Reviewer: ChatGPT (code review, Feb 20 2026) — see `~/clawd/shared/SIMPLIFICATION-CODE-REVIEW.md`
+> Related: [SAFE-MODE-V2.md](SAFE-MODE-V2.md) (architecture reference — updated to reflect implementation)
 
 ## Motivation
 
@@ -34,19 +35,19 @@ The iOS Shortcut already provides excellent progress notifications during provis
 
 ## Changes Overview
 
-| # | Change | Effort | Impact | Phase |
-|---|--------|--------|--------|-------|
-| 1 | Reduce health check settle time (45s → 10s) | Trivial | 🟢 Medium | — (ship now) |
-| 2 | Create `lib-env.sh` (shared env loading) | Low | 🟢 Low | 5 |
-| 3 | Unified config generator (`generate-config.sh`) | Medium | 🔴 High | 2 |
-| 4 | Split `build-full-config.sh` responsibilities | Low-Med | 🟡 Medium | 2 |
-| 5 | Extract shared auth to `lib-auth.sh` (incl. OAuth headers), slim recovery | Medium | 🟠 High | 3 |
-| 6 | Single-phase provisioning (eliminate background fork) | Medium | 🔴 High | 1 |
-| 7 | Separate E2E test prompt from agent intro | Low | 🟡 Medium | 4 |
-| 8 | Unify E2E normal/safe-mode paths | Low | 🟡 Low | 4 |
-| 9 | Reduce `TimeoutStartSec` (420s → 180s for HTTP check) | Trivial | 🟢 Low | — (ship with #1) |
-| 10 | Add fatal guards for missing library sources | Low | 🟢 Medium | 5 |
-| 11 | Fix `local_*` naming in `safe-mode-handler.sh` | Low | 🟢 Low | 3 |
+| # | Change | Effort | Impact | Phase | Status |
+|---|--------|--------|--------|-------|--------|
+| 1 | Reduce health check settle time (45s → 10s) | Trivial | 🟢 Medium | — (ship now) | ✅ PR1 |
+| 2 | Create `lib-env.sh` (shared env loading) | Low | 🟢 Low | 5 | ✅ PR2 |
+| 3 | Unified config generator (`generate-config.sh`) | Medium | 🔴 High | 2 | ✅ PR3 |
+| 4 | Split `build-full-config.sh` responsibilities | Low-Med | 🟡 Medium | 2 | ✅ PR3 |
+| 5 | Extract shared auth to `lib-auth.sh` (incl. OAuth headers), slim recovery | Medium | 🟠 High | 3 | ✅ PR4 |
+| 6 | Single-phase provisioning (eliminate background fork) | Medium | 🔴 High | 1 | ✅ PR5 |
+| 7 | Separate E2E test prompt from agent intro | Low | 🟡 Medium | 4 | ✅ PR6 |
+| 8 | Unify E2E normal/safe-mode paths | Low | 🟡 Low | 4 | ✅ PR6 |
+| 9 | Reduce `TimeoutStartSec` (420s → 180s for HTTP check) | Trivial | 🟢 Low | — (ship with #1) | ✅ PR1 |
+| 10 | Add fatal guards for missing library sources | Low | 🟢 Medium | 5 | ✅ PR2 |
+| 11 | Fix `local_*` naming in `safe-mode-handler.sh` | Low | 🟢 Low | 3 | ✅ Post-review |
 
 **Priority order:** 1 → 2 → 3 → 5 → 6 → 7 (per ChatGPT review — config DRY problem causes real bugs *now*; provisioning fork is ugly but functional)
 
@@ -729,3 +730,112 @@ Each PR is independently mergeable. Ship PR 1 immediately — it's zero risk.
 | 4 | 3 | `lib-auth.sh` (incl. OAuth headers) + slim `safe-mode-recovery.sh` + fix `local_*` naming | PR 2, PR 3 | Second highest — 1,461→~400 lines |
 | 5 | 1 | `provision.sh` with reboot + `bootstrap.sh` auto-detect | PR 3 | Lower urgency — current flow works, fork is ugly but functional |
 | 6 | 4b,4c | Separate E2E test from intro, unify normal/safe-mode paths | PR 4 | Nice-to-have, not blocking |
+
+---
+
+## Implementation Results
+
+> All 6 PRs implemented on branch `experiment/single-phase-boot`.
+> Latest commit: `d7cb6a4` (post-review fixes).
+> Code review: ChatGPT — **✅ Approved** with 3 issues, all fixed.
+
+### PR Summary
+
+| PR | Commit | Tests | Key Changes |
+|----|--------|-------|-------------|
+| 1 | `71d87b9` | 6 | `HEALTH_CHECK_SETTLE_SECS` 45→10, `TimeoutStartSec` 420→180 |
+| 2 | `749657d` | 21 | `lib-env.sh` (44 lines), `d()` deduplicated from 10 scripts, fatal guards on all library sourcing |
+| 3 | `ebbdef7` | 43 | `generate-config.sh` (496 lines, jq-only), 3 modes (full/session/safe-mode), replaced 5 heredocs |
+| 4 | `ddcd485` | 27 | `lib-auth.sh` (333 lines), `safe-mode-recovery.sh` 1461→987 lines, `get_auth_header()` centralized |
+| 5 | `81361f1` | 12 | `provision.sh` (446 lines), reboot restored, `killall apt` removed, no background fork |
+| 6 | `d88c0f4` | 8 | E2E uses `HEALTH_CHECK_OK` deterministic prompt (no `--deliver`), `send_agent_intros()` separate, unified `check_agents_e2e()` for normal + safe-mode |
+| Post-review | `d7cb6a4` | — | Deduplicated auth headers, token validation, SafeModeBot intro (ChatGPT review fixes) |
+
+**Total: 117 new tests, all passing. 0 regressions in existing suite.**
+
+### Actual Line Counts (vs. estimates)
+
+| File | Estimated | Actual | Notes |
+|------|-----------|--------|-------|
+| `generate-config.sh` | ~250 | 496 | More modes + builder functions than estimated |
+| `lib-auth.sh` | ~300 | 333 | Close to estimate |
+| `lib-env.sh` | ~40 | 44 | On target |
+| `safe-mode-recovery.sh` | ~400 | 987 | Slimmed 32% (not 73%) — kept delegation wrappers + tombstone comments for clean migration |
+| `provision.sh` | ~450 | 446 | On target |
+| `gateway-health-check.sh` | ~100 | 103 | On target |
+| `gateway-e2e-check.sh` | ~280 | ~340 | Larger due to shared `send_agent_intros()` + `notify_send_safe_mode_intro()` delegation |
+
+### New File Inventory
+
+| File | Lines | Purpose | Deployed to |
+|------|-------|---------|-------------|
+| `scripts/lib-env.sh` | 44 | Base64 decode (`d()`), `env_load()`, `env_decode_keys()` | `/usr/local/sbin/` |
+| `scripts/lib-auth.sh` | 333 | Token validation, auth headers, provider discovery, token hunting | `/usr/local/sbin/` |
+| `scripts/generate-config.sh` | 496 | Unified jq-based config generator (full/session/safe-mode) | `/usr/local/bin/` |
+| `scripts/provision.sh` | 446 | Single-phase provisioning (replaces phase1+phase2) | `/usr/local/sbin/` |
+
+### Modified Files
+
+| File | Change Summary |
+|------|---------------|
+| `scripts/gateway-health-check.sh` | Settle 45→10s, sources `lib-env.sh` |
+| `scripts/gateway-e2e-check.sh` | Separated E2E from intros, uses `lib-auth.sh` for all auth, unified normal/safe-mode paths, `notify_send_safe_mode_intro()` delegated to `lib-notify.sh` |
+| `scripts/safe-mode-handler.sh` | Fixed `local_*` naming, SafeModeBot intro delegated to `lib-notify.sh` |
+| `scripts/safe-mode-recovery.sh` | 1461→987 lines, auth functions extracted to `lib-auth.sh` with tombstone comments |
+| `scripts/lib-notify.sh` | Sources `lib-auth.sh` for token validation (removed duplicate `_direct` functions), added `notify_send_safe_mode_intro()` |
+| `scripts/build-full-config.sh` | Config heredoc replaced with `generate-config.sh --mode full`, `TimeoutStartSec=180` |
+| `scripts/generate-session-services.sh` | Config heredoc replaced with `generate-config.sh --mode session` |
+| `scripts/collect-debug-logs.sh` | Updated for new script names |
+| `scripts/test-auth-headers.sh` | Updated for `lib-auth.sh` |
+| `hatch.yaml` | Added `lib-env.sh`, `lib-auth.sh`, `generate-config.sh`, `provision.sh` to deployment list |
+
+### Library Dependency Graph (as implemented)
+
+```
+lib-env.sh                    ← standalone (no dependencies)
+  ↑
+lib-auth.sh                   ← sources lib-env.sh (for d())
+  ↑
+lib-notify.sh                 ← sources lib-auth.sh (for validate_*_token, get_auth_header)
+  ↑
+lib-health-check.sh           ← sources lib-env.sh (for env loading)
+  ↑
+┌─────────────────────────────────────────────────────────────┐
+│ gateway-health-check.sh  — sources lib-health-check, lib-env │
+│ gateway-e2e-check.sh     — sources lib-health-check, lib-notify, lib-auth │
+│ safe-mode-handler.sh     — sources lib-health-check, lib-notify │
+│ safe-mode-recovery.sh    — sources lib-auth (via safe-mode-handler) │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Code Review Issues (all resolved)
+
+| # | Issue | Severity | Fix |
+|---|-------|----------|-----|
+| 1 | `gateway-e2e-check.sh` inlined auth headers instead of using `get_auth_header()` | 🔴 Fix | Replaced both occurrences with `get_auth_header()` calls |
+| 2 | `lib-notify.sh` duplicated `validate_*_token_direct()` functions from `lib-auth.sh` | 🔴 Fix | Removed `_direct` functions; `lib-notify.sh` now sources `lib-auth.sh` directly |
+| 3 | `safe-mode-handler.sh` had `local_*` names at script scope + duplicated SafeModeBot intro | 🟡 Soon | Extracted `notify_send_safe_mode_intro()` to `lib-notify.sh`; both callers delegate to it |
+
+After fixes: **auth headers in 1 place, token validation in 1 place, SafeModeBot intro in 1 place.**
+
+### Deduplication Audit (final state)
+
+| Function | Before (locations) | After (location) |
+|----------|-------------------|-------------------|
+| `d()` base64 decode | 10 scripts | `lib-env.sh` only (+ inline fallback in `provision.sh` for first boot) |
+| Auth header construction | 3 scripts | `lib-auth.sh` `get_auth_header()` only |
+| Telegram token validation | 3 scripts | `lib-auth.sh` `validate_telegram_token()` only |
+| Discord token validation | 3 scripts | `lib-auth.sh` `validate_discord_token()` only |
+| Config JSON generation | 5 heredocs | `generate-config.sh` only |
+| SafeModeBot intro | 2 scripts | `lib-notify.sh` `notify_send_safe_mode_intro()` only |
+
+### What's Left
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Fresh droplet test | ⏳ Not started | Deploy branch on real droplet to validate end-to-end |
+| `setup-workspaces.sh` extraction | ⏸️ Deferred | Workspace setup still in `build-full-config.sh`; works fine, lower priority |
+| Emergency config removal | ⏸️ Deferred | `generate-config.sh` makes structural corruption unlikely; keep as safety net |
+| `run-integration-tests.sh` | ⏸️ Deferred | Test runner for live droplet E2E scenarios |
+| 9 pre-existing test failures | ⏸️ Low priority | Old monolith test expectations; not regressions |
+| Merge to main | ⏳ Blocked on fresh droplet test | Branch is 25 commits ahead of main |
