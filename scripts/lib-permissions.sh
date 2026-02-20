@@ -160,7 +160,9 @@ fix_session_config_dir() {
   local config_dir="$1"
   [ -d "$config_dir" ] || return 0
   
-  # Config dirs need to be readable by systemd but config files secured
+  # Config dir needs bot ownership so OpenClaw can write temp files for atomic saves
+  # (auto-enable plugin persistence requires creating .tmp files in this directory)
+  chown "$BOT_USER:$BOT_USER" "$config_dir" 2>/dev/null || true
   chmod 755 "$config_dir" 2>/dev/null || true
   
   # Config file contains tokens - restrict access

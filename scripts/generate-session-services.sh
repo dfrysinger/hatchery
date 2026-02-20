@@ -126,12 +126,13 @@ for group in "${SESSION_GROUPS[@]}"; do
     # Create directories with proper ownership
     if type ensure_bot_dir &>/dev/null; then
       ensure_bot_dir "$state_dir" 700
-      # Config dir needs 755 for systemd to read
-      mkdir -p "$group_dir" && chmod 755 "$group_dir"
+      # Config dir needs bot ownership so OpenClaw can write temp files for atomic saves
+      mkdir -p "$group_dir" && chown "${SVC_USER}:${SVC_USER}" "$group_dir" && chmod 755 "$group_dir"
     else
       mkdir -p "$group_dir"
       mkdir -p "$state_dir"
       [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 700 "$state_dir"
+      [ -z "${DRY_RUN:-}" ] && chown "${SVC_USER}:${SVC_USER}" "$group_dir"
       chmod 755 "$group_dir"
     fi
 
