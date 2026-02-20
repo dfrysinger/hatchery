@@ -220,24 +220,23 @@ for group in "${SESSION_GROUPS[@]}"; do
 
     # --- Generate session config via generate-config.sh ---
     # Collect agent IDs in this group as comma-separated list
-    local group_agent_ids=""
+    group_agent_ids=""
     for i in $(seq 1 "$AGENT_COUNT"); do
-      local _ag_var="AGENT${i}_ISOLATION_GROUP"
-      local _ag="${!_ag_var:-}"
+      _ag_var="AGENT${i}_ISOLATION_GROUP"
+      _ag="${!_ag_var:-}"
       if [ "$_ag" = "$group_name" ]; then
         [ -n "$group_agent_ids" ] && group_agent_ids="${group_agent_ids},"
         group_agent_ids="${group_agent_ids}agent${i}"
       fi
     done
 
-    local session_gw_token
     session_gw_token=$(openssl rand -hex 16 2>/dev/null || echo "session-token-$(date +%s)")
 
-    local GEN_CONFIG_SCRIPT=""
+    GEN_CONFIG_SCRIPT=""
     for _gc_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
       [ -f "$_gc_path/generate-config.sh" ] && { GEN_CONFIG_SCRIPT="$_gc_path/generate-config.sh"; break; }
     done
-    [ -z "$GEN_CONFIG_SCRIPT" ] && { echo "FATAL: generate-config.sh not found" >&2; return 1; }
+    [ -z "$GEN_CONFIG_SCRIPT" ] && { echo "FATAL: generate-config.sh not found" >&2; exit 1; }
 
     "$GEN_CONFIG_SCRIPT" --mode session \
       --group "$group_name" \
