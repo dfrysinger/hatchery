@@ -121,7 +121,7 @@ write_files:
       notify(){ [ -x /usr/local/bin/tg-notify.sh ]&&/usr/local/bin/tg-notify.sh "$1" 2>/dev/null||true;}
       fetch(){ local u="$1" d="$2" i;for i in 1 2 3;do curl -fSL --max-time 60 -o "$d" "$u"&&return 0;sleep $((i*5));done;notify "bootstrap: fetch failed -- $u";return 1;}
       mkdir -p "$DIR";T=$(mktemp)
-      if [[ "$VER" == "main" ]] || [[ "$VER" == feature/* ]] || [[ "$VER" == fix/* ]];then
+      if [[ "$VER" == "main" ]] || [[ "$VER" == feature/* ]] || [[ "$VER" == fix/* ]] || [[ "$VER" == experiment/* ]] || [[ "$VER" == refactor/* ]];then
         log "Fetching branch $VER";fetch "https://github.com/${REPO}/archive/refs/heads/${VER}.tar.gz" "$T"
         tar -xzf "$T" --strip-components=1 -C "$DIR"
       else
@@ -140,7 +140,7 @@ write_files:
       [ -f "$DIR/gmail-api.py" ]&&cp "$DIR/gmail-api.py" /usr/local/bin/gmail-api.py&&chmod 755 /usr/local/bin/gmail-api.py
       [ -f "$DIR/set-council-group.sh" ]&&cp "$DIR/set-council-group.sh" /usr/local/bin/set-council-group.telegram.sh&&chmod 755 /usr/local/bin/set-council-group.telegram.sh
       chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null||true
-      /usr/local/sbin/phase1-critical.sh
+      if [ -f /usr/local/sbin/provision.sh ];then log "Handing off to provision.sh (single-phase)";/usr/local/sbin/provision.sh;else log "Handing off to phase1-critical.sh (legacy)";/usr/local/sbin/phase1-critical.sh;fi
 users:
   - default
 runcmd:
