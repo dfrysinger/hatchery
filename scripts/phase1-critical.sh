@@ -268,13 +268,14 @@ Type=simple
 User=$USERNAME
 WorkingDirectory=$H
 ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port 18789
-ExecStartPost=+/usr/local/bin/gateway-health-check.sh
+# No ExecStartPost health check on bootstrap service.
+# In session isolation, per-group services run their own health checks.
+# In single mode, build-full-config.sh rebuilds this service with a health check.
 Restart=on-failure
 RestartSec=5
 RestartPreventExitStatus=2
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
-Environment=RUN_MODE=execstartpost
 Environment=ANTHROPIC_API_KEY=${AK}
 $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
 $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")

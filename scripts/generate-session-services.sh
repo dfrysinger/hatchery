@@ -45,6 +45,7 @@ fi
 ISOLATION="${ISOLATION_DEFAULT:-none}"
 ISO_GROUPS="${ISOLATION_GROUPS:-}"
 SVC_USER="${USERNAME:-bot}"
+HOME_DIR="${HOME_DIR:-/home/${SVC_USER}}"
 HABITAT="${HABITAT_NAME:-default}"
 # shellcheck disable=SC2034  # Reserved for future shared path mounting
 SHARED="${ISOLATION_SHARED_PATHS:-}"
@@ -297,7 +298,7 @@ ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstar
 Restart=on-failure
 RestartSec=10
 RestartPreventExitStatus=2
-TimeoutStartSec=120
+TimeoutStartSec=420
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
