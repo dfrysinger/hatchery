@@ -117,6 +117,52 @@ echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME"
 H="/home/$USERNAME"
 chown "$USERNAME:$USERNAME" "$H"
 
+# --- OpenClaw workspace + gateway token ---
+AK=$(d "$ANTHROPIC_API_KEY_B64")
+GK=$(d "$GOOGLE_API_KEY_B64")
+GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
+OK=$(d "$OPENAI_KEY_B64")
+GT=$(openssl rand -hex 24)
+
+AC="${AGENT_COUNT:-1}"
+mkdir -p "$H/.openclaw" "$H/clawd/shared"
+for i in $(seq 1 "$AC"); do
+  mkdir -p "$H/clawd/agents/agent${i}/memory"
+done
+echo "$GT" > "$H/.openclaw/gateway-token.txt"
+
+# .env with API keys (consumed by generate-config.sh and openclaw)
+{
+  echo "ANTHROPIC_API_KEY=${AK}"
+  [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}"
+  [ -n "$OK" ] && echo "OPENAI_API_KEY=${OK}"
+  [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}"
+} > "$H/.openclaw/.env"
+
+# Emergency config for safe mode fallback
+EMERGENCY_GT=$(openssl rand -hex 16)
+# Find agent1's bot token for emergency config
+_SM_TOKEN="${AGENT1_TELEGRAM_BOT_TOKEN:-${AGENT1_BOT_TOKEN:-}}"
+_SM_OWNER="${TELEGRAM_USER_ID:-$(d "${TELEGRAM_USER_ID_B64:-}")}"
+_SM_PLATFORM="${PLATFORM:-telegram}"
+GEN_SCRIPT=""
+for _p in /usr/local/sbin /usr/local/bin /opt/hatchery/scripts; do
+  [ -f "$_p/generate-config.sh" ] && { GEN_SCRIPT="$_p/generate-config.sh"; break; }
+done
+if [ -n "$GEN_SCRIPT" ] && [ -n "$_SM_TOKEN" ]; then
+  "$GEN_SCRIPT" --mode safe-mode \
+    --gateway-token "$EMERGENCY_GT" \
+    --bot-token "$_SM_TOKEN" \
+    --platform "$_SM_PLATFORM" \
+    --owner-id "$_SM_OWNER" \
+    > "$H/.openclaw/openclaw.emergency.json" 2>>"$LOG" || log "WARN: emergency config generation failed"
+fi
+
+chown -R "$USERNAME:$USERNAME" "$H/.openclaw" "$H/clawd"
+chmod 700 "$H/.openclaw"
+chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
+chmod 600 "$H/.openclaw/openclaw.emergency.json" 2>/dev/null || true
+
 # =============================================================================
 # Stage 3: Install system packages (desktop + tools)
 # =============================================================================
