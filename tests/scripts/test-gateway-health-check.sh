@@ -41,11 +41,11 @@ BROKEN_DC_TOKEN="broken-dc-token"
 # Create mock validate functions
 cat > "$TEST_TMPDIR/mock-validators.sh" << MOCK
 # Mock token validators - check against expected values
-validate_telegram_token_direct() {
+validate_telegram_token() {
   [ "\$1" = "$VALID_TG_TOKEN" ]
 }
 
-validate_discord_token_direct() {
+validate_discord_token() {
   [ "\$1" = "$VALID_DC_TOKEN" ]
 }
 

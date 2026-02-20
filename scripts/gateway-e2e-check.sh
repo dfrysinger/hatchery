@@ -74,7 +74,7 @@ check_api_key_validity() {
 
     if [ -n "$cfg_anthropic" ]; then
       local auth_header
-      [[ "$cfg_anthropic" == sk-ant-oat* ]] && auth_header="Authorization: Bearer ${cfg_anthropic}" || auth_header="x-api-key: ${cfg_anthropic}"
+      auth_header=$(get_auth_header "anthropic" "$cfg_anthropic")
       if curl -sf --max-time 5 -H "$auth_header" -H "anthropic-version: 2023-06-01" \
         "https://api.anthropic.com/v1/models" >/dev/null 2>&1; then
         log "  Anthropic API key OK"; return 0
@@ -98,7 +98,7 @@ check_api_key_validity() {
   # Direct API validation
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     local auth_header
-    [[ "${ANTHROPIC_API_KEY}" == sk-ant-oat* ]] && auth_header="Authorization: Bearer ${ANTHROPIC_API_KEY}" || auth_header="x-api-key: ${ANTHROPIC_API_KEY}"
+    auth_header=$(get_auth_header "anthropic" "${ANTHROPIC_API_KEY}")
     local response
     response=$(curl -sf --max-time 5 -H "$auth_header" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
       -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
@@ -130,13 +130,13 @@ check_channel_connectivity() {
   if hc_is_in_safe_mode && [ -f "$config_file" ]; then
     local tg_token
     tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
-    if [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
+    if [ -n "$tg_token" ] && validate_telegram_token "$tg_token"; then
       log "  Channel connectivity verified (safe mode)"; return 0
     fi
 
     local dc_token
     dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
-    if [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
+    if [ -n "$dc_token" ] && validate_discord_token "$dc_token"; then
       log "  Channel connectivity verified (safe mode)"; return 0
     fi
 
@@ -156,13 +156,13 @@ check_channel_connectivity() {
       local tg_token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
       local tg_token="${!tg_token_var:-}"
       [ -z "$tg_token" ] && tg_token_var="AGENT${i}_BOT_TOKEN" && tg_token="${!tg_token_var:-}"
-      [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token" && { log "  Agent${i} Telegram OK"; agent_valid=true; }
+      [ -n "$tg_token" ] && validate_telegram_token "$tg_token" && { log "  Agent${i} Telegram OK"; agent_valid=true; }
     fi
 
     if [ "$HC_PLATFORM" = "discord" ] || [ "$HC_PLATFORM" = "both" ]; then
       local dc_token_var="AGENT${i}_DISCORD_BOT_TOKEN"
       local dc_token="${!dc_token_var:-}"
-      [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token" && { log "  Agent${i} Discord OK"; agent_valid=true; }
+      [ -n "$dc_token" ] && validate_discord_token "$dc_token" && { log "  Agent${i} Discord OK"; agent_valid=true; }
     fi
 
     if [ "$agent_valid" = "false" ]; then
@@ -281,59 +281,7 @@ send_agent_intros() {
   log "========== INTROS COMPLETE =========="
 }
 
-# =============================================================================
-# SafeModeBot intro (sends diagnostics to user)
-# =============================================================================
-
-send_safe_mode_intro() {
-  log "========== SAFE MODE BOT INTRO =========="
-
-  # Generate boot report
-  local report="$H/clawd/agents/safe-mode/BOOT_REPORT.md"
-  mkdir -p "$(dirname "$report")"
-  cat > "$report" <<REPORT
-# Boot Report - Safe Mode Active
-## Recovery Actions
-$(grep -E "Recovery|recovery|SAFE MODE|token|API" "$HC_LOG" 2>/dev/null | tail -20)
-## Next Steps
-1. Check which credentials failed
-2. Review $HC_LOG for details
-3. Fix credentials in habitat config
-REPORT
-  chown "$HC_USERNAME:$HC_USERNAME" "$report" 2>/dev/null
-
-  local owner_id
-  owner_id=$(get_owner_id_for_platform "$HC_PLATFORM" "with_prefix")
-  local has_sm
-  has_sm=$(jq -r '.agents.list[]? | select(.id == "safe-mode") | .id' "$CONFIG_PATH" 2>/dev/null)
-
-  if [ -z "$has_sm" ] || [ -z "$owner_id" ] || [ "$owner_id" = "user:" ]; then
-    log "  Skipping (no safe-mode agent or owner)"; return 0
-  fi
-
-  local env_prefix=""
-  [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
-  [ -n "${GROUP:-}" ] && [ -n "${GROUP_PORT:-}" ] && env_prefix="$env_prefix OPENCLAW_GATEWAY_URL=ws://127.0.0.1:${GROUP_PORT}"
-
-  local prompt="You just came online in SAFE MODE after a boot failure.
-
-IMPORTANT: Just reply directly - your response will be automatically delivered. Do NOT use the message tool.
-
-Read BOOT_REPORT.md and reply with: 1) Brief intro 2) What went wrong 3) Offer to help. Keep it to 3-5 sentences."
-
-  local output
-  output=$(timeout 120 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
-    --agent "safe-mode" --message "$prompt" --deliver \
-    --reply-channel "$HC_PLATFORM" --reply-account "safe-mode" --reply-to "$owner_id" \
-    --timeout 90 --json 2>&1)
-
-  if [ $? -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
-    log "  ✓ SafeModeBot intro sent"
-  else
-    log "  ✗ SafeModeBot intro failed (user already notified via API)"
-  fi
-  log "========== SAFE MODE INTRO COMPLETE =========="
-}
+# send_safe_mode_intro() — now in lib-notify.sh as notify_send_safe_mode_intro()
 
 # =============================================================================
 # Main
@@ -367,7 +315,7 @@ if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
   rm -f "$HC_UNHEALTHY_MARKER" "$HC_RECOVERY_COUNTER" "/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}"
   echo '11' > /var/lib/init-status/stage
   touch /var/lib/init-status/setup-complete
-  send_safe_mode_intro
+  notify_send_safe_mode_intro
 
 elif [ "$HEALTHY" = "true" ]; then
   log "DECISION: SUCCESS — all agents healthy"

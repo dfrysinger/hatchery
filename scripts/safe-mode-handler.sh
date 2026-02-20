@@ -257,53 +257,8 @@ restart_and_verify() {
 date +%s > /var/lib/init-status/recently-recovered${GROUP:+-$GROUP}
 
 if restart_and_verify; then
-  # --- Trigger SafeModeBot intro ---
-  log "========== SAFE MODE BOT INTRO =========="
-
-  local_owner_id=$(get_owner_id_for_platform "${HC_PLATFORM}" "with_prefix")
-
-  local_has_safe_mode=$(jq -r '.agents.list[]? | select(.id == "safe-mode") | .id' "$CONFIG_PATH" 2>/dev/null)
-
-  if [ -n "$local_has_safe_mode" ] && [ -n "$local_owner_id" ] && [ "$local_owner_id" != "user:" ]; then
-    local_prompt="You just came online in SAFE MODE after a boot failure.
-
-IMPORTANT: Just reply directly here - your response will be automatically delivered to the user. Do NOT use the message tool.
-
-Read your BOOT_REPORT.md file and reply with:
-1. Brief intro (you're SafeModeBot, running in emergency mode)
-2. What went wrong (summarize from BOOT_REPORT.md)
-3. Offer to help investigate
-
-Keep it to 3-5 sentences. Be helpful, not verbose."
-
-    local_env_prefix=""
-    [ -n "${GROUP:-}" ] && local_env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
-    [ -n "${GROUP:-}" ] && [ -n "${GROUP_PORT:-}" ] && local_env_prefix="$local_env_prefix OPENCLAW_GATEWAY_URL=ws://127.0.0.1:${GROUP_PORT}"
-
-    local_channel="${NOTIFY_PLATFORM:-${HC_PLATFORM:-telegram}}"
-
-    log "  Command: openclaw agent --agent safe-mode --deliver --reply-channel $local_channel --reply-to $local_owner_id"
-
-    local_output=$(timeout 120 sudo -u "$HC_USERNAME" env $local_env_prefix openclaw agent \
-      --agent "safe-mode" \
-      --message "$local_prompt" \
-      --deliver \
-      --reply-channel "$local_channel" \
-      --reply-account "safe-mode" \
-      --reply-to "$local_owner_id" \
-      --timeout 90 \
-      --json 2>&1)
-    local_exit=$?
-
-    if [ $local_exit -eq 0 ] && ! echo "$local_output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
-      log "  ✓ SafeModeBot intro sent"
-    else
-      log "  ✗ SafeModeBot intro failed (exit=$local_exit)"
-      log "  User was already notified via direct API"
-    fi
-  else
-    log "  Skipping SafeModeBot intro (no safe-mode agent or no owner ID)"
-  fi
+  # Trigger SafeModeBot intro (shared implementation in lib-notify.sh)
+  notify_send_safe_mode_intro
 
   log "========== SAFE MODE HANDLER COMPLETE =========="
   # Clean up the unhealthy marker since we've handled it

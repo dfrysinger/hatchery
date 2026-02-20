@@ -11,39 +11,12 @@
 #   notify_find_token "telegram"   # sets NOTIFY_PLATFORM, NOTIFY_TOKEN, NOTIFY_OWNER
 # =============================================================================
 
-# --- Token Validation ---
+# --- Auth library (token validation delegated to lib-auth.sh) ---
 
-validate_telegram_token_direct() {
-  local token="$1"
-  [ -z "$token" ] && return 1
-
-  local response
-  response=$(curl -sf --max-time 10 "https://api.telegram.org/bot${token}/getMe" 2>&1)
-
-  if [ $? -eq 0 ] && echo "$response" | jq -e '.ok == true' >/dev/null 2>&1; then
-    return 0
-  fi
-
-  log "  Telegram token validation failed: $response"
-  return 1
-}
-
-validate_discord_token_direct() {
-  local token="$1"
-  [ -z "$token" ] && return 1
-
-  local response
-  response=$(curl -sf --max-time 10 \
-    -H "Authorization: Bot ${token}" \
-    "https://discord.com/api/v10/users/@me" 2>&1)
-
-  if [ $? -eq 0 ] && echo "$response" | jq -e '.id' >/dev/null 2>&1; then
-    return 0
-  fi
-
-  log "  Discord token validation failed: $response"
-  return 1
-}
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-auth.sh" ] && { source "$_lib_path/lib-auth.sh"; break; }
+done
+# validate_telegram_token() and validate_discord_token() now come from lib-auth.sh
 
 # --- Low-level Send ---
 
@@ -110,16 +83,16 @@ notify_find_token() {
 
     local preferred="${HC_PLATFORM:-telegram}"
 
-    if [ "$preferred" = "telegram" ] && [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
+    if [ "$preferred" = "telegram" ] && [ -n "$tg_token" ] && validate_telegram_token "$tg_token"; then
       NOTIFY_PLATFORM="telegram"; NOTIFY_TOKEN="$tg_token"
       NOTIFY_OWNER=$(get_owner_id_for_platform "telegram"); return 0
-    elif [ "$preferred" = "discord" ] && [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
+    elif [ "$preferred" = "discord" ] && [ -n "$dc_token" ] && validate_discord_token "$dc_token"; then
       NOTIFY_PLATFORM="discord"; NOTIFY_TOKEN="$dc_token"
       NOTIFY_OWNER=$(get_owner_id_for_platform "discord" "with_prefix"); return 0
-    elif [ -n "$tg_token" ] && validate_telegram_token_direct "$tg_token"; then
+    elif [ -n "$tg_token" ] && validate_telegram_token "$tg_token"; then
       NOTIFY_PLATFORM="telegram"; NOTIFY_TOKEN="$tg_token"
       NOTIFY_OWNER=$(get_owner_id_for_platform "telegram"); return 0
-    elif [ -n "$dc_token" ] && validate_discord_token_direct "$dc_token"; then
+    elif [ -n "$dc_token" ] && validate_discord_token "$dc_token"; then
       NOTIFY_PLATFORM="discord"; NOTIFY_TOKEN="$dc_token"
       NOTIFY_OWNER=$(get_owner_id_for_platform "discord" "with_prefix"); return 0
     fi
@@ -137,7 +110,7 @@ notify_find_token() {
       local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
       local token="${!token_var:-}"
       [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-      if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
+      if [ -n "$token" ] && validate_telegram_token "$token"; then
         NOTIFY_PLATFORM="telegram"; NOTIFY_TOKEN="$token"
         NOTIFY_OWNER=$(get_owner_id_for_platform "telegram"); return 0
       fi
@@ -145,7 +118,7 @@ notify_find_token() {
     if [ "$platform" = "discord" ] || [ "$platform" = "both" ]; then
       local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
       local token="${!token_var:-}"
-      if [ -n "$token" ] && validate_discord_token_direct "$token"; then
+      if [ -n "$token" ] && validate_discord_token "$token"; then
         NOTIFY_PLATFORM="discord"; NOTIFY_TOKEN="$token"
         NOTIFY_OWNER=$(get_owner_id_for_platform "discord" "with_prefix"); return 0
       fi
@@ -161,7 +134,7 @@ notify_find_token() {
       local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
       local token="${!token_var:-}"
       [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-      if [ -n "$token" ] && validate_telegram_token_direct "$token"; then
+      if [ -n "$token" ] && validate_telegram_token "$token"; then
         NOTIFY_PLATFORM="telegram"; NOTIFY_TOKEN="$token"
         NOTIFY_OWNER=$(get_owner_id_for_platform "telegram")
         log "  Cross-platform fallback to Telegram"; return 0
@@ -169,7 +142,7 @@ notify_find_token() {
     elif [ "$alt_platform" = "discord" ]; then
       local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
       local token="${!token_var:-}"
-      if [ -n "$token" ] && validate_discord_token_direct "$token"; then
+      if [ -n "$token" ] && validate_discord_token "$token"; then
         NOTIFY_PLATFORM="discord"; NOTIFY_TOKEN="$token"
         NOTIFY_OWNER=$(get_owner_id_for_platform "discord" "with_prefix")
         log "  Cross-platform fallback to Discord"; return 0
@@ -207,4 +180,65 @@ notify_send_message() {
     log "  Unknown platform: $NOTIFY_PLATFORM"
     return 1
   fi
+}
+
+# --- SafeModeBot Intro ---
+
+# Send SafeModeBot intro with diagnostics via --deliver.
+# Shared by gateway-e2e-check.sh and safe-mode-handler.sh.
+# Requires: HC_PLATFORM, CONFIG_PATH, H, HC_USERNAME, HC_LOG, GROUP (optional), GROUP_PORT (optional)
+notify_send_safe_mode_intro() {
+  log "========== SAFE MODE BOT INTRO =========="
+
+  # Generate boot report
+  local report="$H/clawd/agents/safe-mode/BOOT_REPORT.md"
+  mkdir -p "$(dirname "$report")"
+  cat > "$report" <<REPORT
+# Boot Report - Safe Mode Active
+## Recovery Actions
+$(grep -E "Recovery|recovery|SAFE MODE|token|API" "$HC_LOG" 2>/dev/null | tail -20)
+## Next Steps
+1. Check which credentials failed
+2. Review $HC_LOG for details
+3. Fix credentials in habitat config
+REPORT
+  chown "${HC_USERNAME:-bot}:${HC_USERNAME:-bot}" "$report" 2>/dev/null
+
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "${HC_PLATFORM:-telegram}" "with_prefix")
+  local has_sm
+  has_sm=$(jq -r '.agents.list[]? | select(.id == "safe-mode") | .id' "$CONFIG_PATH" 2>/dev/null)
+
+  if [ -z "$has_sm" ] || [ -z "$owner_id" ] || [ "$owner_id" = "user:" ]; then
+    log "  Skipping (no safe-mode agent or owner)"; return 0
+  fi
+
+  local env_prefix=""
+  [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
+  [ -n "${GROUP:-}" ] && [ -n "${GROUP_PORT:-}" ] && env_prefix="$env_prefix OPENCLAW_GATEWAY_URL=ws://127.0.0.1:${GROUP_PORT}"
+
+  local prompt="You just came online in SAFE MODE after a boot failure.
+
+IMPORTANT: Just reply directly - your response will be automatically delivered. Do NOT use the message tool.
+
+Read BOOT_REPORT.md and reply with: 1) Brief intro 2) What went wrong 3) Offer to help. Keep it to 3-5 sentences."
+
+  local channel="${NOTIFY_PLATFORM:-${HC_PLATFORM:-telegram}}"
+
+  log "  Command: openclaw agent --agent safe-mode --deliver --reply-channel $channel --reply-to $owner_id"
+
+  local output exit_code
+  output=$(timeout 120 sudo -u "${HC_USERNAME:-bot}" env $env_prefix openclaw agent \
+    --agent "safe-mode" --message "$prompt" --deliver \
+    --reply-channel "$channel" --reply-account "safe-mode" --reply-to "$owner_id" \
+    --timeout 90 --json 2>&1)
+  exit_code=$?
+
+  if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+    log "  ✓ SafeModeBot intro sent"
+  else
+    log "  ✗ SafeModeBot intro failed (exit=$exit_code)"
+    log "  User was already notified via direct API"
+  fi
+  log "========== SAFE MODE INTRO COMPLETE =========="
 }
