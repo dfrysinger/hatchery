@@ -12,7 +12,7 @@
 # On failure: writes unhealthy marker, exits 1, systemd restarts (on-failure)
 #
 # Env vars (all optional, for testing):
-#   HEALTH_CHECK_SETTLE_SECS  — initial wait (default: 45)
+#   HEALTH_CHECK_SETTLE_SECS  — initial wait (default: 10)
 #   HEALTH_CHECK_HARD_MAX_SECS — give up after (default: 300)
 #   HEALTH_CHECK_WARN_SECS    — "still waiting" notification (default: 120)
 #   GROUP / GROUP_PORT         — per-group session isolation
@@ -30,7 +30,7 @@ hc_init_logging "${GROUP:-}"
 hc_load_environment || exit 0
 
 PORT="${GROUP_PORT:-18789}"
-SETTLE="${HEALTH_CHECK_SETTLE_SECS:-45}"
+SETTLE="${HEALTH_CHECK_SETTLE_SECS:-10}"
 HARD_MAX="${HEALTH_CHECK_HARD_MAX_SECS:-300}"
 WARN_AT="${HEALTH_CHECK_WARN_SECS:-120}"
 

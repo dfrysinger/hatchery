@@ -298,7 +298,7 @@ ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstar
 Restart=on-failure
 RestartSec=10
 RestartPreventExitStatus=2
-TimeoutStartSec=420
+TimeoutStartSec=180
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin

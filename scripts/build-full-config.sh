@@ -472,7 +472,7 @@ ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port 18789
 $([ "${ISOLATION_DEFAULT:-none}" = "none" ] && echo "ExecStartPost=+/bin/bash -c 'RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'")
 ExecStop=+/usr/local/bin/sync-openclaw-state.sh
 TimeoutStopSec=30
-TimeoutStartSec=420
+TimeoutStartSec=180
 Restart=on-failure
 RestartSec=10
 RestartPreventExitStatus=2
