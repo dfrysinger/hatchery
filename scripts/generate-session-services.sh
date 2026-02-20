@@ -224,7 +224,7 @@ for group in "${SESSION_GROUPS[@]}"; do
     for i in $(seq 1 "$AGENT_COUNT"); do
       _ag_var="AGENT${i}_ISOLATION_GROUP"
       _ag="${!_ag_var:-}"
-      if [ "$_ag" = "$group_name" ]; then
+      if [ "$_ag" = "$group" ]; then
         [ -n "$group_agent_ids" ] && group_agent_ids="${group_agent_ids},"
         group_agent_ids="${group_agent_ids}agent${i}"
       fi
@@ -239,7 +239,7 @@ for group in "${SESSION_GROUPS[@]}"; do
     [ -z "$GEN_CONFIG_SCRIPT" ] && { echo "FATAL: generate-config.sh not found" >&2; exit 1; }
 
     "$GEN_CONFIG_SCRIPT" --mode session \
-      --group "$group_name" \
+      --group "$group" \
       --agents "$group_agent_ids" \
       --port "$port" \
       --gateway-token "$session_gw_token" \
