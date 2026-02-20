@@ -40,31 +40,26 @@ log() {
 
 # --- Environment Loading ---
 
+# Source lib-env.sh for d() and env helpers
+for _hc_lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_hc_lib_path/lib-env.sh" ] && { source "$_hc_lib_path/lib-env.sh"; break; }
+done
+type d &>/dev/null || { echo "FATAL: lib-env.sh not found (d() undefined)" >&2; exit 1; }
+
 hc_load_environment() {
-  # Source droplet.env
-  if [ -f /etc/droplet.env ]; then
-    set -a; source /etc/droplet.env; set +a
-  else
-    log "ERROR: /etc/droplet.env not found"
+  # Load env files (droplet.env + habitat-parsed.env)
+  if ! env_load; then
+    log "ERROR: env_load failed (missing /etc/droplet.env?)"
     return 1
   fi
 
-  # Base64 decode helper
-  _hc_d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-
-  # Source habitat-parsed.env
-  if [ -f /etc/habitat-parsed.env ]; then
-    source /etc/habitat-parsed.env
-  else
+  if [ ! -f /etc/habitat-parsed.env ] && [ -z "${TEST_MODE:-}" ]; then
     log "ERROR: /etc/habitat-parsed.env not found"
     return 1
   fi
 
   # Decode API keys from base64
-  export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$(_hc_d "${ANTHROPIC_KEY_B64:-}")}"
-  export OPENAI_API_KEY="${OPENAI_API_KEY:-$(_hc_d "${OPENAI_KEY_B64:-}")}"
-  export GOOGLE_API_KEY="${GOOGLE_API_KEY:-$(_hc_d "${GOOGLE_API_KEY_B64:-}")}"
-  export BRAVE_API_KEY="${BRAVE_API_KEY:-$(_hc_d "${BRAVE_KEY_B64:-}")}"
+  env_decode_keys
 
   # Common variables
   HC_AGENT_COUNT="${AGENT_COUNT:-1}"

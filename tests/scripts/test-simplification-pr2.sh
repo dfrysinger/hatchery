@@ -156,6 +156,7 @@ scripts_with_own_d=$(grep -rl '^d() {' "$REPO_DIR/scripts/" \
   | grep -v 'lib-env.sh' \
   | grep -v 'phase1-critical.sh' \
   | grep -v 'phase2-background.sh' \
+  | grep -v 'README.md' \
   || true)
 
 if [ -z "$scripts_with_own_d" ]; then

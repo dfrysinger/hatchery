@@ -30,8 +30,15 @@ log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [provision] $*" | tee -a "$LOG"; }
 # Source permission utilities
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 
+# lib-env.sh may not be installed yet during early provisioning — inline fallback
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-env.sh" ] && { source "$_lib_path/lib-env.sh"; break; }
+done
+if ! type d &>/dev/null; then
+  # Inline fallback for first boot before lib-env.sh is deployed
+  d() { [ -n "${1:-}" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+fi
 set -a; source /etc/droplet.env; set +a
-d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 
 S="/usr/local/bin/set-stage.sh"
 
