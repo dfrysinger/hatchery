@@ -129,7 +129,7 @@ if [ ! -f /etc/api-server.env ]; then
   else
     API_SECRET=$(openssl rand -hex 32)
   fi
-  umask 077; printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env; chmod 600 /etc/api-server.env
+  (umask 077; printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env; chmod 600 /etc/api-server.env)
 fi
 systemctl daemon-reload
 systemctl enable --now api-server || true
