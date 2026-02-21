@@ -38,9 +38,6 @@ done
 hc_init_logging "${GROUP:-}"
 hc_load_environment || exit 0
 
-# Signal health-check stage to API server (stage 10)
-echo '10' > /var/lib/init-status/stage 2>/dev/null || true
-
 # --- Skip if recently recovered (safe mode handler will restart + re-test) ---
 RECENTLY_RECOVERED="/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}"
 if [ -f "$RECENTLY_RECOVERED" ]; then
@@ -50,6 +47,10 @@ if [ -f "$RECENTLY_RECOVERED" ]; then
     exit 0
   fi
 fi
+
+# Signal health-check stage to API server (stage 10)
+# (after skip check so we don't clobber stage 12 set by safe-mode-handler)
+echo '10' > /var/lib/init-status/stage 2>/dev/null || true
 
 log "============================================================"
 log "========== E2E HEALTH CHECK STARTING =========="
