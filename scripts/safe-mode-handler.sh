@@ -246,6 +246,10 @@ if restart_and_verify; then
   # Trigger SafeModeBot intro (shared implementation in lib-notify.sh)
   notify_send_safe_mode_intro
 
+  # Mark boot as complete (safe mode IS a completed boot, just degraded)
+  touch /var/lib/init-status/setup-complete
+  rm -f /var/lib/init-status/needs-post-boot-check
+
   log "========== SAFE MODE HANDLER COMPLETE =========="
   # Clean up the unhealthy marker since we've handled it
   rm -f "$HC_UNHEALTHY_MARKER"
