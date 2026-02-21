@@ -190,23 +190,6 @@ notify_send_message() {
 notify_send_safe_mode_intro() {
   log "========== SAFE MODE BOT INTRO =========="
 
-  # Ensure boot report exists (handler's generate_boot_report() should have created it;
-  # only generate a minimal fallback if it's missing)
-  local report="$H/clawd/agents/safe-mode/BOOT_REPORT.md"
-  if [ ! -s "$report" ]; then
-    mkdir -p "$(dirname "$report")"
-    cat > "$report" <<REPORT
-# Boot Report - Safe Mode Active
-## Recovery Actions
-$(grep -E "Recovery|recovery|SAFE MODE|token|API" "$HC_LOG" 2>/dev/null | tail -20)
-## Next Steps
-1. Check which credentials failed
-2. Review $HC_LOG for details
-3. Fix credentials in habitat config
-REPORT
-    chown "${HC_USERNAME:-bot}:${HC_USERNAME:-bot}" "$report" 2>/dev/null
-  fi
-
   local has_sm
   has_sm=$(jq -r '.agents.list[]? | select(.id == "safe-mode") | .id' "$CONFIG_PATH" 2>/dev/null)
   [ -z "$has_sm" ] && { log "  Skipping (no safe-mode agent)"; return 0; }
