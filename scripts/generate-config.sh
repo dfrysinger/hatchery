@@ -9,7 +9,7 @@
 #   generate-config.sh --mode full --gateway-token TOKEN
 #   generate-config.sh --mode session --group NAME --agents "a1,a2" --port 18790 --gateway-token TOKEN
 #   generate-config.sh --mode safe-mode --token BOT_TOKEN --provider anthropic --platform telegram \
-#                       --bot-token BOT_TK --owner-id 12345 --gateway-token TOKEN
+#                       --bot-token BOT_TK --owner-id 12345 --model anthropic/claude-sonnet-4-5 --gateway-token TOKEN
 #
 # Modes:
 #   full       — Complete production config (all agents, all channels, browser, skills)
@@ -55,6 +55,7 @@ while [ $# -gt 0 ]; do
     --platform)   SM_PLATFORM="$2"; shift 2 ;;
     --bot-token)  SM_BOT_TOKEN="$2"; shift 2 ;;
     --owner-id)   SM_OWNER_ID="$2"; shift 2 ;;
+    --model)      SM_MODEL="$2"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -117,7 +118,7 @@ build_agents() {
     fi
 
     local name_var="AGENT${i}_NAME"; local name="${!name_var:-Agent${i}}"
-    local model_var="AGENT${i}_MODEL"; local model="${!model_var:-anthropic/claude-sonnet-4}"
+    local model_var="AGENT${i}_MODEL"; local model="${!model_var:-anthropic/claude-sonnet-4-5}"
     local is_first=false
     [ "$(echo "$agents_json" | jq 'length')" = "0" ] && is_first=true
 
@@ -430,14 +431,16 @@ generate_safe_mode() {
     esac
   fi
 
-  # Determine model from provider
-  local model
-  case "$SM_PROVIDER" in
-    anthropic) model="anthropic/claude-sonnet-4-5" ;;
-    openai)    model="openai/gpt-4.1-mini" ;;
-    google)    model="google/gemini-2.5-flash" ;;
-    *)         model="anthropic/claude-sonnet-4-5" ;;
-  esac
+  # Use explicitly passed model, or fall back to provider default
+  local model="${SM_MODEL:-}"
+  if [ -z "$model" ]; then
+    case "$SM_PROVIDER" in
+      anthropic) model="anthropic/claude-sonnet-4-5" ;;
+      openai)    model="openai/gpt-4.1-mini" ;;
+      google)    model="google/gemini-2.5-flash" ;;
+      *)         model="anthropic/claude-sonnet-4-5" ;;
+    esac
+  fi
 
   # Build channel config
   local tg_config dc_config

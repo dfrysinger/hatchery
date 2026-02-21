@@ -788,6 +788,7 @@ run_smart_recovery() {
     --platform "$platform" \
     --bot-token "$token" \
     --owner-id "$owner_id" \
+    --model "$model" \
     --gateway-token "$gw_token" \
     --port "${GROUP_PORT:-18789}")
   
