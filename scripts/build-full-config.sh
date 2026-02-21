@@ -377,6 +377,9 @@ E2EFILE
   systemctl enable openclaw-safeguard.path 2>/dev/null || true
   systemctl enable openclaw-e2e.service 2>/dev/null || true
 fi
+
+# Enable the main openclaw service (session isolation will replace it with per-group services)
+systemctl enable openclaw.service 2>/dev/null || true
 systemctl daemon-reload
 
 # --- Fix permissions BEFORE starting services ---
