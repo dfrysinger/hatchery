@@ -7,17 +7,16 @@
 #
 # Called by: bootstrap.sh (which is called by cloud-init runcmd)
 #
-# Stages (roughly 60s each for progress bar updates):
-#   1. Parse config + install Node/jq
-#   2. Install OpenClaw + create user
-#   3. Install desktop environment
-#   4. Install developer tools
-#   5. Install browser + pip packages
-#   6. Configure desktop & remote access
-#   7. Install skills & apps
-#   8. Build OpenClaw configs + generate services (enable only)
-#   9. Fix permissions
-#  10. REBOOT
+# Stages:
+#   1. Parse config + install Node/jq + start API server
+#   2. Install OpenClaw + create user + workspace
+#   3. Install system packages (apt)
+#   4. Install Chrome, pip packages & helpers
+#   5. Configure desktop services
+#   6. Apps & integrations (skills, credentials, CalDAV)
+#   7. Build OpenClaw configs + generate services
+#   8. Enable services + firewall
+#   9. REBOOT
 #
 # After reboot: systemd starts enabled services → health check → E2E
 # Reboot is REQUIRED: packages need kernel modules, systemd needs
@@ -192,7 +191,7 @@ chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
 chmod 600 "$H/.openclaw/openclaw.emergency.json" 2>/dev/null || true
 
 # =============================================================================
-# Stage 3: Install system packages (desktop + tools)
+# Stage 3: Install system packages (apt)
 # =============================================================================
 $S 3 "installing-packages"
 log "Stage 3: Installing system packages..."
@@ -221,6 +220,12 @@ DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-instal
 rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
 apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
 
+# =============================================================================
+# Stage 4: Install Chrome, pip packages & helper scripts
+# =============================================================================
+$S 4 "installing-tools"
+log "Stage 4: Installing Chrome, pip packages & helpers..."
+
 # Chrome
 [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
 rm -f /tmp/downloads/chrome.deb
@@ -238,10 +243,10 @@ curl -sf -o "/usr/local/bin/set-council-group.telegram.sh" "https://raw.githubus
   && chmod 755 "/usr/local/bin/set-council-group.telegram.sh" >> "$LOG" 2>&1 || true
 
 # =============================================================================
-# Stage 4: Configure desktop services
+# Stage 5: Configure desktop services
 # =============================================================================
-$S 4 "configuring-desktop"
-log "Stage 4: Configuring desktop..."
+$S 5 "configuring-desktop"
+log "Stage 5: Configuring desktop..."
 
 cat > /etc/systemd/system/xvfb.service <<SVC
 [Unit]
@@ -359,10 +364,10 @@ systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc xrdp
 
 # =============================================================================
-# Stage 5: Apps & integrations
+# Stage 6: Apps & integrations
 # =============================================================================
-$S 5 "configuring-apps"
-log "Stage 5: Configuring apps..."
+$S 6 "configuring-apps"
+log "Stage 6: Configuring apps..."
 
 # Skills
 npm install -g clawhub@latest >> "$LOG" 2>&1
@@ -432,10 +437,10 @@ fi
 chown -R "$USERNAME:$USERNAME" "$H/.config"
 
 # =============================================================================
-# Stage 6: Build OpenClaw configs + generate services
+# Stage 7: Build OpenClaw configs + generate services
 # =============================================================================
-$S 6 "building-config"
-log "Stage 6: Building OpenClaw config..."
+$S 7 "building-config"
+log "Stage 7: Building OpenClaw config..."
 
 # API server already started in Stage 1 for early status polling
 
@@ -449,10 +454,10 @@ systemctl enable openclaw-restore.service 2>/dev/null || true
 }
 
 # =============================================================================
-# Stage 7: Start everything
+# Stage 8: Start everything
 # =============================================================================
-$S 7 "starting-services"
-log "Stage 7: Starting services..."
+$S 8 "starting-services"
+log "Stage 8: Starting services..."
 
 # Firewall
 ufw allow 8080/tcp   # API
@@ -464,22 +469,20 @@ systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 
 # Memory sync — enable only, starts after reboot
 systemctl enable openclaw-sync.timer 2>/dev/null || true
-# =============================================================================
-# Stage 9: Fix permissions + REBOOT
-# =============================================================================
-$S 9 "permissions"
-log "Stage 9: Final permissions..."
+
+# Fix ownership — everything under bot's home should be bot-owned
+chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
 
 # Mark provisioning complete (before reboot)
 touch /var/lib/init-status/provision-complete
 touch /var/lib/init-status/needs-post-boot-check
 
-# Fix ownership — everything under bot's home should be bot-owned
-chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
-
 ELAPSED=$(( $(date +%s) - START ))
 log "Provisioning complete in ${ELAPSED}s — rebooting"
 
+# =============================================================================
+# Stage 9: REBOOT
+# =============================================================================
 # Reboot is REQUIRED:
 # - Packages need kernel modules loaded (xrdp, chrome sandbox)
 # - systemd needs clean daemon-reload after new unit files
@@ -490,6 +493,6 @@ if [ -f /var/lib/init-status/build-failed ]; then
   log "!!! BUILD FAILED — rebooting anyway but services will not start correctly !!!"
 fi
 
-$S 10 "rebooting"
+$S 9 "rebooting"
 sleep 2
 reboot

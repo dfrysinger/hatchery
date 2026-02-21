@@ -31,8 +31,10 @@ HABITAT_PATH='/etc/habitat.json'
 AGENTS_PATH='/etc/agents.json'
 MARKER_PATH='/etc/config-api-uploaded'
 APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
-P1_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
-P2_STAGES={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
+P1_STAGES={0:"init",1:"parsing-config",2:"installing-openclaw",3:"installing-packages",4:"installing-tools",5:"configuring-desktop",6:"configuring-apps",7:"building-config",8:"starting-services",9:"rebooting"}
+P2_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online",4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
+# Combined map for single-phase provisioning (provision.sh)
+ALL_STAGES={**P1_STAGES, 10:"finalizing", 11:"ready"}
 
 def check_service(name):
   try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
@@ -118,7 +120,7 @@ def get_status():
       svc['openclaw']=check_service('openclaw')
     for sv in base_services:
       svc[sv]=check_service(sv)
-  desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
+  desc=ALL_STAGES.get(s) or P2_STAGES.get(s,f"stage-{s}")
   safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
   rebooting=setup_done and needs_check  # System rebooted, waiting for post-boot-check
   return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online and not needs_check,"rebooting":rebooting,"safe_mode":safe_mode,"services":svc if svc else None}
