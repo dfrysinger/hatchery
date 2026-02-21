@@ -180,29 +180,10 @@ echo "$GT" > "$H/.openclaw/gateway-token.txt"
   [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}"
 } > "$H/.openclaw/.env"
 
-# Emergency config for safe mode fallback
-EMERGENCY_GT=$(openssl rand -hex 16)
-_SM_TOKEN="${AGENT1_TELEGRAM_BOT_TOKEN:-${AGENT1_BOT_TOKEN:-}}"
-_SM_OWNER="${TELEGRAM_USER_ID:-$(d "${TELEGRAM_USER_ID_B64:-}")}"
-_SM_PLATFORM="${PLATFORM:-telegram}"
-GEN_SCRIPT=""
-for _p in /usr/local/sbin /usr/local/bin /opt/hatchery/scripts; do
-  [ -f "$_p/generate-config.sh" ] && { GEN_SCRIPT="$_p/generate-config.sh"; break; }
-done
-if [ -n "$GEN_SCRIPT" ] && [ -n "$_SM_TOKEN" ]; then
-  "$GEN_SCRIPT" --mode safe-mode \
-    --gateway-token "$EMERGENCY_GT" \
-    --bot-token "$_SM_TOKEN" \
-    --platform "$_SM_PLATFORM" \
-    --owner-id "$_SM_OWNER" \
-    > "$H/.openclaw/openclaw.emergency.json" 2>>"$LOG" || log "WARN: emergency config generation failed"
-fi
-
 # Fix ownership + tighten sensitive files
 chown -R "$USERNAME:$USERNAME" "$H/.openclaw" "$H/clawd"
 chmod 700 "$H/.openclaw"
 chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
-chmod 600 "$H/.openclaw/openclaw.emergency.json" 2>/dev/null || true
 
 # =============================================================================
 # Stage 4: Install desktop packages (apt)

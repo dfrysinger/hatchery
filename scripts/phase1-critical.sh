@@ -180,67 +180,7 @@ cat > $H/.openclaw/openclaw.json <<CFG
   }
 }
 CFG
-# Generate emergency config for safe mode fallback
-# Uses agent1's EXACT settings - no fallback logic (that's what smart recovery is for)
-# This is a safety net for when the smart recovery script itself is broken
-EMERGENCY_MODEL="${AGENT1_MODEL:-anthropic/claude-sonnet-4-5}"
-
-# Pick API key based on agent1's model provider
-case "$EMERGENCY_MODEL" in
-  google/*|gemini/*)
-    EMERGENCY_ENV="\"GOOGLE_API_KEY\": \"${GK}\""
-    ;;
-  openai/*)
-    OK=$(d "$OPENAI_KEY_B64")
-    EMERGENCY_ENV="\"OPENAI_API_KEY\": \"${OK}\""
-    ;;
-  *)
-    # Default to Anthropic (covers anthropic/* and unknown providers)
-    EMERGENCY_ENV="\"ANTHROPIC_API_KEY\": \"${AK}\""
-    ;;
-esac
-
-# Use agent1's exact bot token - no searching for alternatives
-EMERGENCY_TOKEN="${TBT}"
-
-EMERGENCY_GT=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
-cat > $H/.openclaw/openclaw.emergency.json <<EMCFG
-{
-  "env": {
-    ${EMERGENCY_ENV}
-  },
-  "agents": {
-    "defaults": {
-      "model": {"primary": "${EMERGENCY_MODEL}"},
-      "workspace": "$H/clawd"
-    },
-    "list": [
-      {
-        "id": "safe-mode",
-        "default": true,
-        "name": "SafeModeBot",
-        "workspace": "$H/clawd/agents/safe-mode"
-      }
-    ]
-  },
-  "gateway": {
-    "mode": "local",
-    "port": 18789,
-    "bind": "loopback",
-    "auth": {"mode": "token", "token": "${EMERGENCY_GT}"}
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "botToken": "${EMERGENCY_TOKEN}",
-      "dmPolicy": "allowlist",
-      "allowFrom": ["${TO}"]
-    },
-    "discord": {"enabled": false}
-  }
-}
-EMCFG
-chmod 600 $H/.openclaw/openclaw.emergency.json
+# .env with API keys (used by OpenClaw at runtime)
 echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
 [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
 GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")

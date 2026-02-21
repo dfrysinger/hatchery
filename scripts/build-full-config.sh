@@ -392,7 +392,7 @@ else
   # Fallback if lib-permissions.sh not available
   chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
   chmod 700 $H/.openclaw
-  chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
+  chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json 2>/dev/null || true
 fi
 
 # --- Agent Isolation: wire isolation scripts into pipeline ---

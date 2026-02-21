@@ -524,7 +524,6 @@ EOF
   echo "$safe_mode_dir"
 }
 
-# generate_emergency_config() — now in generate-config.sh
 
 
 # =============================================================================

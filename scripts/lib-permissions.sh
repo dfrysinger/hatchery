@@ -116,7 +116,6 @@ fix_state_permissions() {
   # Sensitive config files (600 = owner read/write only)
   ensure_bot_file "$home/.openclaw/openclaw.json" 600
   ensure_bot_file "$home/.openclaw/openclaw.full.json" 600
-  ensure_bot_file "$home/.openclaw/openclaw.emergency.json" 600
   ensure_bot_file "$home/.openclaw/agents/main/agent/auth-profiles.json" 600
   
   # Safe-mode agent state

@@ -117,30 +117,16 @@ run_recovery_attempt() {
 
 if run_recovery_attempt; then
   SMART_RECOVERY_SUCCESS=true
-fi
-
-# Fall back to emergency config
-if [ "$SMART_RECOVERY_SUCCESS" = "false" ]; then
-  log "!!! SMART RECOVERY FAILED — falling back to emergency.json !!!"
-  if [ -f "$H/.openclaw/openclaw.emergency.json" ]; then
-    cp "$H/.openclaw/openclaw.emergency.json" "$CONFIG_PATH"
-    if type ensure_bot_file &>/dev/null; then
-      ensure_bot_file "$CONFIG_PATH" 600
-    else
-      chown "$HC_USERNAME:$HC_USERNAME" "$CONFIG_PATH"
-      chmod 600 "$CONFIG_PATH"
-    fi
-    log "Emergency config applied"
-  else
-    log "ERROR: emergency.json does not exist!"
-  fi
+else
+  log "!!! SMART RECOVERY FAILED — no fallback available !!!"
+  log "Manual intervention required. Check /var/log/gateway-health-check.log"
 fi
 
 # Mark safe mode
 touch "$SAFE_MODE_FILE"
 
 # Write SAFE_MODE.md for agents
-recovery_status="minimal config"
+recovery_status="FAILED — manual intervention needed"
 [ "$SMART_RECOVERY_SUCCESS" = "true" ] && recovery_status="smart recovery"
 
 for si in $(seq 1 "$AC"); do
