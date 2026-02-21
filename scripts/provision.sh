@@ -9,14 +9,13 @@
 #
 # Stages:
 #   1. Parse config + install Node/jq + start API server
-#   2. Install OpenClaw + create user + workspace
-#   3. Install system packages (apt)
-#   4. Install Chrome, pip packages & helpers
-#   5. Configure desktop services
-#   6. Apps & integrations (skills, credentials, CalDAV)
-#   7. Build OpenClaw configs + generate services
-#   8. Enable services + firewall
-#   9. REBOOT
+#   2. Install OpenClaw (npm)
+#   3. Create user + workspace + gateway token
+#   4. Install desktop packages (apt)
+#   5. Install developer tools (apt)
+#   6. Install Chrome, pip packages & helpers
+#   7. Configure desktop + apps + build config + enable services
+#   8. REBOOT
 #
 # After reboot: systemd starts enabled services → health check → E2E
 # Reboot is REQUIRED: packages need kernel modules, systemd needs
@@ -129,12 +128,18 @@ systemctl daemon-reload
 systemctl enable --now api-server || true
 
 # =============================================================================
-# Stage 2: Install OpenClaw + create user
+# Stage 2: Install OpenClaw
 # =============================================================================
 $S 2 "installing-openclaw"
 log "Stage 2: Installing OpenClaw..."
 
 npm install -g openclaw@latest >> "$LOG" 2>&1
+
+# =============================================================================
+# Stage 3: Create user + workspace
+# =============================================================================
+$S 3 "creating-workspace"
+log "Stage 3: Creating user + workspace..."
 
 PW=$(d "$PASSWORD_B64")
 USERNAME="${USERNAME:-bot}"
@@ -168,7 +173,6 @@ echo "$GT" > "$H/.openclaw/gateway-token.txt"
 
 # Emergency config for safe mode fallback
 EMERGENCY_GT=$(openssl rand -hex 16)
-# Find agent1's bot token for emergency config
 _SM_TOKEN="${AGENT1_TELEGRAM_BOT_TOKEN:-${AGENT1_BOT_TOKEN:-}}"
 _SM_OWNER="${TELEGRAM_USER_ID:-$(d "${TELEGRAM_USER_ID_B64:-}")}"
 _SM_PLATFORM="${PLATFORM:-telegram}"
@@ -191,10 +195,10 @@ chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
 chmod 600 "$H/.openclaw/openclaw.emergency.json" 2>/dev/null || true
 
 # =============================================================================
-# Stage 3: Install system packages (apt)
+# Stage 4: Install desktop packages (apt)
 # =============================================================================
-$S 3 "installing-packages"
-log "Stage 3: Installing system packages..."
+$S 4 "installing-desktop"
+log "Stage 4: Installing desktop packages..."
 
 # Wait for Chrome download (started in bootcmd)
 CHROME_PID=$(cat /tmp/downloads/chrome.pid 2>/dev/null)
@@ -206,25 +210,33 @@ sleep 2
 rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
 dpkg --configure -a 2>/dev/null || true
 
-# Package list already fresh from Stage 1 — no second apt refresh needed
-
-# Single combined apt install (instead of two separate calls in phase1+phase2)
+# Desktop environment + display server
 DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
   xrdp xorgxrdp xvfb x11vnc lightdm dbus-x11 xserver-xorg-video-dummy \
   xfce4 xfce4-goodies xfce4-terminal elementary-xfce-icon-theme yaru-theme-gtk \
-  build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
-  thunderbird pandoc scrot flameshot qpdf htop ncdu bc wget xz-utils \
-  python3 python3-pip rclone fuse3 khal vdirsyncer unattended-upgrades \
+  python3 python3-pip \
   >> "$LOG" 2>&1
 
 rm -f /etc/xdg/autostart/xfce4-screensaver.desktop
 apt-get purge -y xfce4-screensaver gnome-keyring libpam-gnome-keyring seahorse 2>/dev/null || true
 
 # =============================================================================
-# Stage 4: Install Chrome, pip packages & helper scripts
+# Stage 5: Install developer tools (apt)
 # =============================================================================
-$S 4 "installing-tools"
-log "Stage 4: Installing Chrome, pip packages & helpers..."
+$S 5 "installing-tools"
+log "Stage 5: Installing developer tools..."
+
+DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends \
+  build-essential git gh ffmpeg imagemagick vlc libreoffice-writer \
+  thunderbird pandoc scrot flameshot qpdf htop ncdu bc wget xz-utils \
+  rclone fuse3 khal vdirsyncer unattended-upgrades \
+  >> "$LOG" 2>&1
+
+# =============================================================================
+# Stage 6: Install Chrome, pip packages & helper scripts
+# =============================================================================
+$S 6 "installing-extras"
+log "Stage 6: Installing Chrome, pip packages & helpers..."
 
 # Chrome
 [ -f /tmp/downloads/chrome.deb ] && dpkg -i /tmp/downloads/chrome.deb >> "$LOG" 2>&1
@@ -243,10 +255,10 @@ curl -sf -o "/usr/local/bin/set-council-group.telegram.sh" "https://raw.githubus
   && chmod 755 "/usr/local/bin/set-council-group.telegram.sh" >> "$LOG" 2>&1 || true
 
 # =============================================================================
-# Stage 5: Configure desktop services
+# Stage 7: Configure + build + enable services
 # =============================================================================
-$S 5 "configuring-desktop"
-log "Stage 5: Configuring desktop..."
+$S 7 "configuring"
+log "Stage 7: Configuring desktop, apps & services..."
 
 cat > /etc/systemd/system/xvfb.service <<SVC
 [Unit]
@@ -363,11 +375,7 @@ systemctl unmask xrdp xrdp-sesman
 systemctl daemon-reload
 systemctl enable xvfb desktop x11vnc xrdp
 
-# =============================================================================
-# Stage 6: Apps & integrations
-# =============================================================================
-$S 6 "configuring-apps"
-log "Stage 6: Configuring apps..."
+# --- Apps & integrations ---
 
 # Skills
 npm install -g clawhub@latest >> "$LOG" 2>&1
@@ -436,13 +444,7 @@ fi
 
 chown -R "$USERNAME:$USERNAME" "$H/.config"
 
-# =============================================================================
-# Stage 7: Build OpenClaw configs + generate services
-# =============================================================================
-$S 7 "building-config"
-log "Stage 7: Building OpenClaw config..."
-
-# API server already started in Stage 1 for early status polling
+# --- Build OpenClaw configs + generate services ---
 
 # Restore service — enable only, will run after reboot before openclaw
 systemctl enable openclaw-restore.service 2>/dev/null || true
@@ -453,11 +455,7 @@ systemctl enable openclaw-restore.service 2>/dev/null || true
   touch /var/lib/init-status/build-failed
 }
 
-# =============================================================================
-# Stage 8: Start everything
-# =============================================================================
-$S 8 "starting-services"
-log "Stage 8: Starting services..."
+# --- Enable services + firewall ---
 
 # Firewall
 ufw allow 8080/tcp   # API
@@ -481,7 +479,7 @@ ELAPSED=$(( $(date +%s) - START ))
 log "Provisioning complete in ${ELAPSED}s — rebooting"
 
 # =============================================================================
-# Stage 9: REBOOT
+# Stage 8: REBOOT
 # =============================================================================
 # Reboot is REQUIRED:
 # - Packages need kernel modules loaded (xrdp, chrome sandbox)
@@ -493,6 +491,6 @@ if [ -f /var/lib/init-status/build-failed ]; then
   log "!!! BUILD FAILED — rebooting anyway but services will not start correctly !!!"
 fi
 
-$S 9 "rebooting"
+$S 8 "rebooting"
 sleep 2
 reboot

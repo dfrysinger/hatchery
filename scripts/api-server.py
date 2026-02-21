@@ -31,10 +31,10 @@ HABITAT_PATH='/etc/habitat.json'
 AGENTS_PATH='/etc/agents.json'
 MARKER_PATH='/etc/config-api-uploaded'
 APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
-P1_STAGES={0:"init",1:"parsing-config",2:"installing-openclaw",3:"installing-packages",4:"installing-tools",5:"configuring-desktop",6:"configuring-apps",7:"building-config",8:"starting-services",9:"rebooting"}
+P1_STAGES={0:"init",1:"parsing-config",2:"installing-openclaw",3:"creating-workspace",4:"installing-desktop",5:"installing-tools",6:"installing-extras",7:"configuring",8:"rebooting"}
 P2_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online",4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
 # Combined map for single-phase provisioning (provision.sh)
-ALL_STAGES={**P1_STAGES, 10:"restarting", 11:"health-check", 12:"ready"}
+ALL_STAGES={**P1_STAGES, 9:"restarting", 10:"health-check", 11:"ready"}
 
 def check_service(name):
   try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
@@ -51,11 +51,11 @@ def get_status():
   # Smart defaults based on completion state (handles transient read failures during reboot)
   # needs-post-boot-check exists during reboot until post-boot-check.sh completes
   if setup_done and not needs_check:
-    s,p=12,2  # Ready state (fully booted)
+    s,p=11,2  # Ready state (fully booted)
   elif setup_done and needs_check:
-    s,p=10,2  # Rebooting (setup done but post-boot-check pending)
+    s,p=9,2   # Rebooting (setup done but post-boot-check pending)
   elif prov_done or p2_done:
-    s,p=10,2  # Provisioning/phase2 done, rebooting for health checks
+    s,p=9,2   # Provisioning/phase2 done, rebooting for health checks
   elif p1_done:
     s,p=4,2   # Phase 1 done, starting phase 2
   else:
@@ -64,8 +64,8 @@ def get_status():
   # Minimum stage implied by marker files (monotonic — stage must never go backward)
   min_stage=0
   if p1_done:min_stage=4
-  if prov_done or p2_done:min_stage=10
-  if setup_done:min_stage=12
+  if prov_done or p2_done:min_stage=9
+  if setup_done:min_stage=11
   
   # Try to read actual values (overrides defaults if file read succeeds)
   try:
