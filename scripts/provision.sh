@@ -135,6 +135,10 @@ log "Stage 2: Installing OpenClaw..."
 
 npm install -g openclaw@latest >> "$LOG" 2>&1
 
+# Fix npm global package permissions (npm installs with root's umask 077,
+# but openclaw runs as bot user and needs read+execute access)
+chmod -R o+rX /usr/local/lib/node_modules/openclaw/ 2>/dev/null || true
+
 # =============================================================================
 # Stage 3: Create user + workspace
 # =============================================================================
@@ -379,6 +383,7 @@ systemctl enable xvfb desktop x11vnc xrdp
 
 # Skills
 npm install -g clawhub@latest >> "$LOG" 2>&1
+chmod -R o+rX /usr/local/lib/node_modules/clawhub/ 2>/dev/null || true
 for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
   su - "$USERNAME" -c "cd $H/clawd && clawhub install $s" >> "$LOG" 2>&1 || true
 done
