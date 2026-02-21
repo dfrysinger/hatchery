@@ -13,6 +13,12 @@
 # Original: /usr/local/sbin/phase2-background.sh (in hatch.yaml write_files)
 # =============================================================================
 set -a; source /etc/droplet.env; set +a
+# CRITICAL: Set permissive umask for the entire phase2 run.
+# DO images default to umask 077 (root creates files as rwx------).
+# npm install -g creates files owned by root — without 022, other users
+# (including the bot user) can't read/execute installed packages.
+umask 022
+
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 S="/usr/local/bin/set-stage.sh"
