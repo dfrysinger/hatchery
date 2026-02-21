@@ -219,10 +219,12 @@ check_agents_e2e() {
     local rc=$?
     local dur=$(( $(date +%s) - start_time ))
 
-    if [ $rc -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+    if [ $rc -eq 0 ] && echo "$output" | grep -q "HEALTH_CHECK_OK" && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
       log "  ✓ $agent_id responded in ${dur}s"
     else
-      log "  ✗ $agent_id FAILED (exit=$rc, ${dur}s)"
+      local reason="exit=$rc"
+      [ $rc -eq 0 ] && ! echo "$output" | grep -q "HEALTH_CHECK_OK" && reason="missing HEALTH_CHECK_OK (LLM error?)"
+      log "  ✗ $agent_id FAILED ($reason, ${dur}s)"
       echo "$output" | while IFS= read -r line; do log "    | $line"; done
       all_healthy=false; failed_agents="${failed_agents} ${agent_id}"
     fi
