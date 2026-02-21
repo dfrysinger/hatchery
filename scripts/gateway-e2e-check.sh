@@ -41,6 +41,16 @@ hc_load_environment || exit 0
 # Signal health-check stage to API server (stage 10)
 echo '10' > /var/lib/init-status/stage 2>/dev/null || true
 
+# --- Skip if recently recovered (safe mode handler will restart + re-test) ---
+RECENTLY_RECOVERED="/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}"
+if [ -f "$RECENTLY_RECOVERED" ]; then
+  age=$(( $(date +%s) - $(cat "$RECENTLY_RECOVERED" 2>/dev/null || echo 0) ))
+  if [ "$age" -lt 120 ]; then
+    log "Skipping E2E — recovered ${age}s ago (safe mode handler will verify)"
+    exit 0
+  fi
+fi
+
 log "============================================================"
 log "========== E2E HEALTH CHECK STARTING =========="
 log "============================================================"
