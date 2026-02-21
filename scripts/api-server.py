@@ -34,7 +34,7 @@ APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
 P1_STAGES={0:"init",1:"parsing-config",2:"installing-openclaw",3:"creating-workspace",4:"installing-desktop",5:"installing-tools",6:"installing-extras",7:"configuring",8:"rebooting"}
 P2_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online",4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
 # Combined map for single-phase provisioning (provision.sh)
-ALL_STAGES={**P1_STAGES, 9:"restarting", 10:"health-check", 11:"ready"}
+ALL_STAGES={**P1_STAGES, 9:"restarting", 10:"health-check", 11:"ready", 12:"safe-mode", 13:"critical-failure"}
 
 def check_service(name):
   try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
@@ -62,6 +62,8 @@ def get_status():
     s,p=0,1   # Initial state
   
   # Minimum stage implied by marker files (monotonic — stage must never go backward)
+  # Note: safe mode (12) and critical failure (13) are ABOVE ready (11),
+  # so setup_done floor of 11 won't prevent them from showing
   min_stage=0
   if p1_done:min_stage=4
   if prov_done or p2_done:min_stage=9
@@ -121,9 +123,13 @@ def get_status():
     for sv in base_services:
       svc[sv]=check_service(sv)
   desc=ALL_STAGES.get(s) or P2_STAGES.get(s,f"stage-{s}")
-  safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
+  # Check for safe mode: either the generic marker or any group-specific marker
+  safe_mode=os.path.exists('/var/lib/init-status/safe-mode') or any(
+    f.startswith('safe-mode-') for f in os.listdir('/var/lib/init-status/') if os.path.isfile(os.path.join('/var/lib/init-status/', f))
+  ) if os.path.isdir('/var/lib/init-status/') else False
   rebooting=setup_done and needs_check  # System rebooted, waiting for post-boot-check
-  return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online and not needs_check,"rebooting":rebooting,"safe_mode":safe_mode,"services":svc if svc else None}
+  ready=setup_done and bot_online and not needs_check
+  return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":ready,"rebooting":rebooting,"safe_mode":safe_mode,"services":svc if svc else None}
 
 def validate_config_upload(data):
   """Validate config upload request data."""
