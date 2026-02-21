@@ -433,10 +433,10 @@ generate_safe_mode() {
   # Determine model from provider
   local model
   case "$SM_PROVIDER" in
-    anthropic) model="anthropic/claude-sonnet-4" ;;
+    anthropic) model="anthropic/claude-sonnet-4-5" ;;
     openai)    model="openai/gpt-4.1-mini" ;;
     google)    model="google/gemini-2.5-flash" ;;
-    *)         model="anthropic/claude-sonnet-4" ;;
+    *)         model="anthropic/claude-sonnet-4-5" ;;
   esac
 
   # Build channel config

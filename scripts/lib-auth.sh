@@ -184,7 +184,7 @@ get_provider_from_model() {
 # Order: user's preferred → anthropic → openai → google
 get_provider_order() {
   local user_pref
-  user_pref=$(get_provider_from_model "${AGENT1_MODEL:-anthropic/claude-sonnet-4}")
+  user_pref=$(get_provider_from_model "${AGENT1_MODEL:-anthropic/claude-sonnet-4-5}")
 
   local ordered=("$user_pref")
   for p in "anthropic" "openai" "google"; do
@@ -200,11 +200,11 @@ get_provider_order() {
 get_default_model_for_provider() {
   local provider="$1"
   case "$provider" in
-    anthropic)    echo "anthropic/claude-sonnet-4" ;;
+    anthropic)    echo "anthropic/claude-sonnet-4-5" ;;
     openai)       echo "openai/gpt-4.1-mini" ;;
     google)       echo "google/gemini-2.5-flash" ;;
     openai-codex) echo "openai/gpt-4.1-mini" ;;
-    *)            echo "anthropic/claude-sonnet-4" ;;
+    *)            echo "anthropic/claude-sonnet-4-5" ;;
   esac
 }
 
