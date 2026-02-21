@@ -289,6 +289,7 @@ Environment=OPENCLAW_CONFIG_PATH=${config_dir}/openclaw.session.json
 Environment=OPENCLAW_STATE_DIR=${state_dir}
 Environment=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 Environment=GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+Environment=GEMINI_API_KEY=${GOOGLE_API_KEY:-}
 Environment=BRAVE_API_KEY=${BRAVE_API_KEY:-}
 
 [Install]

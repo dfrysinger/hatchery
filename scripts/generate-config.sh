@@ -427,7 +427,7 @@ generate_safe_mode() {
     case "$SM_PROVIDER" in
       anthropic) env_json=$(jq -n --arg k "$SM_API_TOKEN" '{ANTHROPIC_API_KEY: $k}') ;;
       openai)    env_json=$(jq -n --arg k "$SM_API_TOKEN" '{OPENAI_API_KEY: $k}') ;;
-      google)    env_json=$(jq -n --arg k "$SM_API_TOKEN" '{GOOGLE_API_KEY: $k}') ;;
+      google)    env_json=$(jq -n --arg k "$SM_API_TOKEN" '{GOOGLE_API_KEY: $k, GEMINI_API_KEY: $k}') ;;
     esac
   fi
 

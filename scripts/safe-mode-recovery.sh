@@ -857,7 +857,7 @@ run_smart_recovery() {
     "google:default": {
       "type": "api_key",
       "provider": "google",
-      "token": "${api_key}"
+      "key": "${api_key}"
     }
   }
 }
@@ -872,7 +872,7 @@ AUTHEOF
     "anthropic:default": {
       "type": "api_key",
       "provider": "anthropic",
-      "token": "${api_key}"
+      "key": "${api_key}"
     }
   }
 }
@@ -887,7 +887,7 @@ AUTHEOF
     "openai:default": {
       "type": "api_key",
       "provider": "openai",
-      "token": "${api_key}"
+      "key": "${api_key}"
     }
   }
 }
