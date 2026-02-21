@@ -24,6 +24,13 @@
 
 set -o pipefail
 
+# CRITICAL: Set permissive umask for the entire provisioning run.
+# DO images default to umask 077 (root creates files as rwx------).
+# This causes permission failures when bot user tries to read/execute
+# files created by root (npm packages, config files, etc.).
+# umask 022 = standard Linux default: owner rwx, group+other rx.
+umask 022
+
 LOG="/var/log/provision.log"
 START=$(date +%s)
 
@@ -135,10 +142,6 @@ log "Stage 2: Installing OpenClaw..."
 
 npm install -g openclaw@latest >> "$LOG" 2>&1
 
-# Fix npm global package permissions (npm installs with root's umask 077,
-# but openclaw runs as bot user and needs read+execute access)
-chmod -R o+rX /usr/local/lib/node_modules/openclaw/ 2>/dev/null || true
-
 # =============================================================================
 # Stage 3: Create user + workspace
 # =============================================================================
@@ -153,21 +156,23 @@ echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME"
 H="/home/$USERNAME"
 chown "$USERNAME:$USERNAME" "$H"
 
-# --- OpenClaw workspace + gateway token ---
+# Decode secrets
 AK=$(d "$ANTHROPIC_API_KEY_B64")
 GK=$(d "$GOOGLE_API_KEY_B64")
 GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
 OK=$(d "$OPENAI_KEY_B64")
 GT=$(openssl rand -hex 24)
-
 AC="${AGENT_COUNT:-1}"
+
+# Create workspace directories and config files
+# (umask 022 ensures these are world-readable; chown at end gives bot ownership)
 mkdir -p "$H/.openclaw" "$H/clawd/shared"
 for i in $(seq 1 "$AC"); do
   mkdir -p "$H/clawd/agents/agent${i}/memory"
 done
 echo "$GT" > "$H/.openclaw/gateway-token.txt"
 
-# .env with API keys (consumed by generate-config.sh and openclaw)
+# .env with API keys
 {
   echo "ANTHROPIC_API_KEY=${AK}"
   [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}"
@@ -193,6 +198,7 @@ if [ -n "$GEN_SCRIPT" ] && [ -n "$_SM_TOKEN" ]; then
     > "$H/.openclaw/openclaw.emergency.json" 2>>"$LOG" || log "WARN: emergency config generation failed"
 fi
 
+# Fix ownership + tighten sensitive files
 chown -R "$USERNAME:$USERNAME" "$H/.openclaw" "$H/clawd"
 chmod 700 "$H/.openclaw"
 chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
@@ -383,7 +389,7 @@ systemctl enable xvfb desktop x11vnc xrdp
 
 # Skills
 npm install -g clawhub@latest >> "$LOG" 2>&1
-chmod -R o+rX /usr/local/lib/node_modules/clawhub/ 2>/dev/null || true
+# umask 022 ensures npm packages are world-readable (no chmod fix needed)
 for s in weather github video-frames goplaces youtube-transcript yt-dlp-downloader-skill; do
   su - "$USERNAME" -c "cd $H/clawd && clawhub install $s" >> "$LOG" 2>&1 || true
 done
@@ -473,8 +479,13 @@ systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 # Memory sync — enable only, starts after reboot
 systemctl enable openclaw-sync.timer 2>/dev/null || true
 
-# Fix ownership — everything under bot's home should be bot-owned
-chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
+# Fix ownership and permissions (safety net — umask 022 handles most cases,
+# but this catches anything created before umask was set or by subprocesses)
+if type fix_bot_permissions &>/dev/null; then
+  fix_bot_permissions "$H"
+else
+  chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
+fi
 
 # Mark provisioning complete (before reboot)
 touch /var/lib/init-status/provision-complete

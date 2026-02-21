@@ -31,6 +31,7 @@
 # =============================================================================
 
 set -euo pipefail
+umask 022  # Ensure files are world-readable (DO defaults to 077)
 
 # --- Source environment files (may be called standalone or from another script) ---
 [ -r /etc/droplet.env ] && source /etc/droplet.env || true
