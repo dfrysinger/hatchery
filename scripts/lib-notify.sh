@@ -204,26 +204,42 @@ $(grep -E "Recovery|recovery|SAFE MODE|token|API" "$HC_LOG" 2>/dev/null | tail -
 REPORT
   chown "${HC_USERNAME:-bot}:${HC_USERNAME:-bot}" "$report" 2>/dev/null
 
-  local owner_id
-  owner_id=$(get_owner_id_for_platform "${HC_PLATFORM:-telegram}" "with_prefix")
   local has_sm
   has_sm=$(jq -r '.agents.list[]? | select(.id == "safe-mode") | .id' "$CONFIG_PATH" 2>/dev/null)
-
-  if [ -z "$has_sm" ] || [ -z "$owner_id" ] || [ "$owner_id" = "user:" ]; then
-    log "  Skipping (no safe-mode agent or owner)"; return 0
-  fi
+  [ -z "$has_sm" ] && { log "  Skipping (no safe-mode agent)"; return 0; }
 
   local env_prefix=""
   [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
   [ -n "${GROUP:-}" ] && [ -n "${GROUP_PORT:-}" ] && env_prefix="$env_prefix OPENCLAW_GATEWAY_URL=ws://127.0.0.1:${GROUP_PORT}"
+
+  # Detect the active channel from the config (the original platform may be broken in safe mode)
+  local channel="${NOTIFY_PLATFORM:-}"
+  if [ -z "$channel" ] && [ -f "$CONFIG_PATH" ]; then
+    local dc_enabled tg_enabled
+    dc_enabled=$(jq -r '.channels.discord.enabled // false' "$CONFIG_PATH" 2>/dev/null)
+    tg_enabled=$(jq -r '.channels.telegram.enabled // false' "$CONFIG_PATH" 2>/dev/null)
+    if [ "$dc_enabled" = "true" ] && [ "$tg_enabled" != "true" ]; then
+      channel="discord"
+    elif [ "$tg_enabled" = "true" ] && [ "$dc_enabled" != "true" ]; then
+      channel="telegram"
+    else
+      channel="${HC_PLATFORM:-telegram}"
+    fi
+  fi
+  channel="${channel:-${HC_PLATFORM:-telegram}}"
+
+  # Get owner ID for the detected channel (not the habitat's original platform)
+  local owner_id
+  owner_id=$(get_owner_id_for_platform "$channel" "with_prefix")
+  if [ -z "$owner_id" ] || [ "$owner_id" = "user:" ]; then
+    log "  Skipping (no owner for $channel)"; return 0
+  fi
 
   local prompt="You just came online in SAFE MODE after a boot failure.
 
 IMPORTANT: Just reply directly - your response will be automatically delivered. Do NOT use the message tool.
 
 Read BOOT_REPORT.md and reply with: 1) Brief intro 2) What went wrong 3) Offer to help. Keep it to 3-5 sentences."
-
-  local channel="${NOTIFY_PLATFORM:-${HC_PLATFORM:-telegram}}"
 
   log "  Command: openclaw agent --agent safe-mode --deliver --reply-channel $channel --reply-to $owner_id"
 
