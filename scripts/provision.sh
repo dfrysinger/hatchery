@@ -101,6 +101,34 @@ else
 fi
 apt-get install -y jq >> "$LOG" 2>&1 || true
 
+# Start API server early so iOS Shortcut can track provisioning stages
+if [ ! -f /etc/systemd/system/api-server.service ]; then
+  cat > /etc/systemd/system/api-server.service <<'APISVC'
+[Unit]
+Description=Droplet Status API
+After=network.target
+[Service]
+EnvironmentFile=-/etc/api-server.env
+EnvironmentFile=-/etc/habitat-parsed.env
+ExecStart=/usr/local/bin/api-server.py
+Restart=always
+RestartSec=3
+User=root
+[Install]
+WantedBy=multi-user.target
+APISVC
+fi
+if [ ! -f /etc/api-server.env ]; then
+  if [ -n "$API_SECRET_B64" ] && [ "$API_SECRET_B64" != "[[API_SECRET_B64]]" ]; then
+    API_SECRET=$(echo "$API_SECRET_B64" | base64 -d)
+  else
+    API_SECRET=$(openssl rand -hex 32)
+  fi
+  umask 077; printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env; chmod 600 /etc/api-server.env
+fi
+systemctl daemon-reload
+systemctl enable --now api-server || true
+
 # =============================================================================
 # Stage 2: Install OpenClaw + create user
 # =============================================================================
@@ -409,35 +437,7 @@ chown -R "$USERNAME:$USERNAME" "$H/.config"
 $S 6 "building-config"
 log "Stage 6: Building OpenClaw config..."
 
-# API server
-if [ ! -f /etc/systemd/system/api-server.service ]; then
-  cat > /etc/systemd/system/api-server.service <<'APISVC'
-[Unit]
-Description=Droplet Status API
-After=network.target
-[Service]
-EnvironmentFile=-/etc/api-server.env
-EnvironmentFile=-/etc/habitat-parsed.env
-ExecStart=/usr/local/bin/api-server.py
-Restart=always
-RestartSec=3
-User=root
-[Install]
-WantedBy=multi-user.target
-APISVC
-fi
-
-if [ ! -f /etc/api-server.env ]; then
-  if [ -n "$API_SECRET_B64" ] && [ "$API_SECRET_B64" != "[[API_SECRET_B64]]" ]; then
-    API_SECRET=$(echo "$API_SECRET_B64" | base64 -d)
-  else
-    API_SECRET=$(openssl rand -hex 32)
-  fi
-  umask 077; printf 'API_SECRET=%s\n' "$API_SECRET" > /etc/api-server.env; chmod 600 /etc/api-server.env
-fi
-
-systemctl daemon-reload
-systemctl enable --now api-server || true
+# API server already started in Stage 1 for early status polling
 
 # Restore service — enable only, will run after reboot before openclaw
 systemctl enable openclaw-restore.service 2>/dev/null || true
