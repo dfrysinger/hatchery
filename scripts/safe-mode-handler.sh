@@ -169,23 +169,46 @@ generate_boot_report() {
   local report_path="$H/clawd/agents/safe-mode/BOOT_REPORT.md"
   mkdir -p "$(dirname "$report_path")"
 
+  # Capture the actual errors from OpenClaw service logs (journalctl)
+  local service_name="openclaw${GROUP:+-$GROUP}"
+  local service_errors
+  service_errors=$(journalctl -u "$service_name" --no-pager -n 100 --since "5 min ago" 2>/dev/null \
+    | grep -iE "401|403|error|failed|authentication|unauthorized|invalid.*key|No API key" \
+    | grep -v "rename-bots" \
+    | head -15 || echo "Could not read service logs")
+
+  # Capture errors from OpenClaw log file (JSON format)
+  local openclaw_log_errors=""
+  local log_file
+  log_file=$(ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1)
+  if [ -n "$log_file" ]; then
+    openclaw_log_errors=$(grep -o '"0":"[^"]*401[^"]*\|"0":"[^"]*error[^"]*\|"0":"[^"]*authentication[^"]*' "$log_file" 2>/dev/null \
+      | sed 's/"0":"//; s/"$//' \
+      | head -10 || true)
+  fi
+
   cat > "$report_path" <<REPORT
 # Boot Report - Safe Mode Active
 
-## Status
-Safe mode was triggered because the full config failed health checks.
+## What Happened
+Safe mode was triggered because the health check detected the primary bot could not respond.
+This usually means an API credential (Anthropic, OpenAI, or Google) is invalid or expired.
 
-## Recovery Actions Taken
-$(grep -E "Recovery|recovery|SAFE MODE|token|API" "$HC_LOG" 2>/dev/null | tail -20)
+## Errors Detected
+\`\`\`
+${service_errors:-No service errors captured}
+\`\`\`
+
+## Recovery Actions
+$(grep -E "Recovery|recovery|SAFE MODE|token|API|provider|model" "$HC_LOG" 2>/dev/null | tail -20)
 
 ## Diagnostics
 $(cat /var/log/safe-mode-diagnostics.txt 2>/dev/null || echo "No diagnostics available")
 
 ## Next Steps
-1. Check which credentials failed above
-2. Review $HC_LOG for details
-3. Fix the broken credentials in habitat config
-4. Upload new config via API or recreate droplet
+1. Check the "Errors Detected" section above for the root cause (usually a 401/invalid API key)
+2. Fix the broken credential in your habitat config or iOS Shortcut
+3. Upload new config via API or recreate the droplet
 REPORT
 
   if type ensure_bot_file &>/dev/null; then
