@@ -468,6 +468,12 @@ generate_safe_mode() {
     --arg defaults_workspace "${HOME_DIR}/clawd" \
     '{
       env: $env,
+      browser: {
+        enabled: true,
+        executablePath: "/usr/bin/google-chrome-stable",
+        headless: false,
+        noSandbox: true
+      },
       tools: {
         exec: { security: "full", ask: "off" }
       },
