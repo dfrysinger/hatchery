@@ -337,7 +337,7 @@ $([ "${ISOLATION_DEFAULT:-none}" = "none" ] && echo "ExecStartPost=+/bin/bash -c
 ExecStop=+/usr/local/bin/sync-openclaw-state.sh
 TimeoutStopSec=30
 TimeoutStartSec=180
-Restart=on-failure
+Restart=always
 RestartSec=10
 RestartPreventExitStatus=2
 Environment=NODE_ENV=production

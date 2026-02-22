@@ -275,9 +275,10 @@ User=${SVC_USER}
 WorkingDirectory=${HOME_DIR}
 ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port ${port}
 ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
-# on-failure (not always): clean exit 0 means intentional shutdown (e.g., config reload),
+# Restart=always so SIGUSR1-based restarts (e.g., /restart command) work correctly.
 # exit 2 is excluded via RestartPreventExitStatus to allow permanent stop on fatal errors.
-Restart=on-failure
+# systemctl stop is always excluded from restart regardless of policy.
+Restart=always
 RestartSec=10
 RestartPreventExitStatus=2
 TimeoutStartSec=180
