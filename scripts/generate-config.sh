@@ -89,6 +89,11 @@ esac
 # Config Section Builders
 # =============================================================================
 
+# Exec policy — single definition used by both top-level tools and agents.defaults.
+# Top-level tools.exec = gateway policy; agents.defaults.tools.exec = agent policy.
+# Both must be set (OpenClaw reads different levels for different operations).
+EXEC_POLICY='{"security":"full","ask":"off"}'
+
 # Build the gateway section (common to all modes)
 build_gateway() {
   jq -n \
@@ -317,6 +322,7 @@ generate_full() {
     --argjson dc "$dc_channel" \
     --argjson tg_enabled "$_tg_enabled" \
     --argjson dc_enabled "$_dc_enabled" \
+    --argjson exec_policy "$EXEC_POLICY" \
     --arg workspace "${HOME_DIR}/clawd" \
     '{
       env: $env,
@@ -328,7 +334,7 @@ generate_full() {
       },
       tools: {
         agentToAgent: { enabled: true },
-        exec: { security: "full", ask: "off" }
+        exec: $exec_policy
       },
       agents: {
         defaults: {
@@ -339,9 +345,7 @@ generate_full() {
           models: {
             "openai/gpt-5.2": { params: { reasoning_effort: "high" } }
           },
-          tools: {
-            exec: { security: "full", ask: "off" }
-          }
+          tools: { exec: $exec_policy }
         },
         list: $agents_list
       },
@@ -390,6 +394,7 @@ generate_session() {
     --argjson dc "$dc_channel" \
     --argjson tg_enabled "$_tg_enabled" \
     --argjson dc_enabled "$_dc_enabled" \
+    --argjson exec_policy "$EXEC_POLICY" \
     --arg workspace "${HOME_DIR}/clawd" \
     '{
       agents: {
@@ -397,9 +402,7 @@ generate_session() {
           model: { primary: "anthropic/claude-opus-4-5" },
           maxConcurrent: 4,
           workspace: $workspace,
-          tools: {
-            exec: { security: "full", ask: "off" }
-          }
+          tools: { exec: $exec_policy }
         },
         list: $agents_list
       },
@@ -469,6 +472,7 @@ generate_safe_mode() {
     --argjson gateway "$(build_gateway)" \
     --argjson tg "$tg_config" \
     --argjson dc "$dc_config" \
+    --argjson exec_policy "$EXEC_POLICY" \
     --arg model "$model" \
     --arg workspace "${HOME_DIR}/clawd/agents/safe-mode" \
     --arg defaults_workspace "${HOME_DIR}/clawd" \
@@ -481,15 +485,13 @@ generate_safe_mode() {
         noSandbox: true
       },
       tools: {
-        exec: { security: "full", ask: "off" }
+        exec: $exec_policy
       },
       agents: {
         defaults: {
           model: { primary: $model },
           workspace: $defaults_workspace,
-          tools: {
-            exec: { security: "full", ask: "off" }
-          }
+          tools: { exec: $exec_policy }
         },
         list: [{
           id: "safe-mode",
