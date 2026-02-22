@@ -395,7 +395,7 @@ The fix: set permissions **during creation** using the helper, and call `fix_bot
 | Code | Meaning | Systemd Action |
 |------|---------|----------------|
 | 0 | Healthy (or safe mode stable) | Service running |
-| 1 | Entered safe mode, needs restart | Restart service (`Restart=on-failure`) |
+| 1 | Entered safe mode, needs restart | Restart service (`Restart=always`) |
 | 2 | Critical failure | Stop permanently (`RestartPreventExitStatus=2`) |
 
 ## Key Files

@@ -213,7 +213,7 @@ openclaw-{group}.service                    ← Main gateway process
        └─ HTTP not responding? → writes unhealthy marker → exit 1
             │                      (also triggers safeguard)
             │
-            └─ systemd Restart=on-failure → retries gateway start
+            └─ systemd Restart=always → retries gateway start
 ```
 
 ### Why Three Separate Units?
@@ -258,7 +258,7 @@ Benefits:
 
 **Exit codes:**
 - `0` — HTTP responding, service becomes "active"
-- `1` — Failed, writes unhealthy marker, systemd restarts (`Restart=on-failure`)
+- `1` — Failed, writes unhealthy marker, systemd restarts (`Restart=always`)
 
 **Process-alive detection:** The script tracks whether the gateway process has been seen. If the process was running and then vanishes (crash), it fails immediately. If the process never appears within 60 seconds, it also fails. This prevents waiting 5 minutes for a process that crashed on startup.
 
@@ -492,12 +492,9 @@ Recovery uses `docker restart` instead of `systemctl restart`.
 | `BindsTo` (E2E) | main service | E2E dies when main service stops |
 | `Requisite` (E2E) | main service | Don't start E2E unless main is active |
 
-**On `Restart=on-failure`:** This means the service **will** restart after crashes, health check failures (exit 1), and unexpected shutdowns. It will **not** restart after:
-- Clean `systemctl stop` (exit 0)
-- Critical failure with exit code 2
-- Config changes applied via `openclaw config.apply` (which does a clean restart internally)
-
-This is safe because OpenClaw's internal config reload (`/config/apply` API) does its own clean restart cycle — it doesn't depend on systemd's restart mechanism.
+**On `Restart=always`:** The service restarts after any exit, including clean exits (exit 0) from SIGUSR1-based restarts (e.g., the `/restart` Discord command). It will **not** restart after:
+- `systemctl stop` (systemd always excludes intentional stops regardless of restart policy)
+- Critical failure with exit code 2 (via `RestartPreventExitStatus=2`)
 
 ---
 
@@ -801,7 +798,7 @@ Each container runs its own gateway. The health check scripts are mounted as rea
 | Code | Meaning | Systemd Action |
 |------|---------|----------------|
 | 0 | HTTP responding | Service becomes "active" |
-| 1 | HTTP failed | Write unhealthy marker, `Restart=on-failure` |
+| 1 | HTTP failed | Write unhealthy marker, `Restart=always` |
 
 ### gateway-e2e-check.sh (E2E service)
 
