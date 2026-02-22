@@ -26,6 +26,9 @@ _perm_log() {
 }
 
 # Create a directory with correct bot ownership
+# IMPORTANT: install -d only sets -o/-g/-m on the LEAF directory.
+# Intermediate directories get created as root:root with umask.
+# We fix this by chown-ing the full path after creation.
 # Usage: ensure_bot_dir /path/to/dir [mode]
 ensure_bot_dir() {
   local dir="$1"
@@ -36,9 +39,21 @@ ensure_bot_dir() {
     install -d -o "$BOT_USER" -g "$BOT_USER" -m "$mode" "$dir" 2>/dev/null || {
       # Fallback if install fails (e.g., parent not writable)
       mkdir -p "$dir" 2>/dev/null
-      chown "$BOT_USER:$BOT_USER" "$dir" 2>/dev/null || true
       chmod "$mode" "$dir" 2>/dev/null || true
     }
+    # Fix ownership on ALL components that were just created.
+    # install -d only sets -o/-g on the leaf; intermediate dirs stay root:root.
+    # Walk up from $dir and fix any root-owned directories we created.
+    local d="$dir"
+    while [ "$d" != "/" ] && [ "$d" != "." ]; do
+      [ -d "$d" ] || break
+      # Stop at first directory already owned by bot (wasn't created by us)
+      local owner
+      owner=$(stat -c %U "$d" 2>/dev/null) || break
+      [ "$owner" = "$BOT_USER" ] && break
+      chown "$BOT_USER:$BOT_USER" "$d" 2>/dev/null || true
+      d=$(dirname "$d")
+    done
   else
     # Directory exists, fix ownership if needed
     chown "$BOT_USER:$BOT_USER" "$dir" 2>/dev/null || true
@@ -110,18 +125,20 @@ fix_state_permissions() {
   ensure_bot_dir "$home/.openclaw" 700
   ensure_bot_dir "$home/.openclaw/credentials" 700
   ensure_bot_dir "$home/.openclaw/agents" 700
-  ensure_bot_dir "$home/.openclaw/agents/main" 700
-  ensure_bot_dir "$home/.openclaw/agents/main/agent" 700
+  
+  # Fix ALL agent state directories (main, agent1..N, safe-mode, etc.)
+  # install -d only sets ownership on the leaf — intermediate dirs like
+  # agents/agent1/ may be left as root:root, causing EACCES at runtime.
+  for agent_state_dir in "$home/.openclaw/agents"/*/; do
+    [ -d "$agent_state_dir" ] || continue
+    ensure_bot_dir "$agent_state_dir" 700
+    ensure_bot_dir "$agent_state_dir/agent" 700
+    ensure_bot_file "$agent_state_dir/agent/auth-profiles.json" 600
+  done
   
   # Sensitive config files (600 = owner read/write only)
   ensure_bot_file "$home/.openclaw/openclaw.json" 600
   ensure_bot_file "$home/.openclaw/openclaw.full.json" 600
-  ensure_bot_file "$home/.openclaw/agents/main/agent/auth-profiles.json" 600
-  
-  # Safe-mode agent state
-  if [ -d "$home/.openclaw/agents/safe-mode" ]; then
-    chown -R "$BOT_USER:$BOT_USER" "$home/.openclaw/agents/safe-mode" 2>/dev/null || true
-  fi
   
   # Session isolation state directories
   if [ -d "$home/.openclaw-sessions" ]; then
