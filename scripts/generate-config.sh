@@ -122,6 +122,7 @@ build_agents() {
 
     local name_var="AGENT${i}_NAME"; local name="${!name_var:-Agent${i}}"
     local model_var="AGENT${i}_MODEL"; local model="${!model_var:-anthropic/claude-sonnet-4-5}"
+    local reasoning_var="AGENT${i}_REASONING"; local reasoning="${!reasoning_var:-}"
     local is_first=false
     [ "$(echo "$agents_json" | jq 'length')" = "0" ] && is_first=true
 
@@ -130,6 +131,7 @@ build_agents() {
       --arg name "$name" \
       --arg model "$model" \
       --arg workspace "${HOME_DIR}/clawd/agents/${agent_id}" \
+      --arg reasoning "$reasoning" \
       --argjson default "$is_first" \
       '. + [{
         id: $id,
@@ -138,7 +140,7 @@ build_agents() {
         model: $model,
         workspace: $workspace,
         groupChat: { mentionPatterns: [($name + ","), ($name + ":")] }
-      }]')
+      } + (if $reasoning != "" then { thinkingDefault: $reasoning } else {} end)]')
   done
 
   echo "$agents_json"
@@ -341,7 +343,8 @@ generate_full() {
           workspace: $workspace,
           heartbeat: { every: "30m", session: "heartbeat" },
           models: {
-            "openai/gpt-5.2": { params: { reasoning_effort: "high" } }
+            "openai/gpt-5.2": { params: { reasoning_effort: "high" } },
+            "openai-codex/gpt-5.3-codex": { params: { reasoning_effort: "high" } }
           }
         },
         list: $agents_list

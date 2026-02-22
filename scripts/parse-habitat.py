@@ -247,6 +247,14 @@ def validate_agent_schema(agent, index):
         valid, err = validate_type(agent["model"], str, f"{prefix}.model")
         if not valid:
             errors.append(err)
+
+    # Optional: reasoning (string) - thinking/reasoning level (off|low|medium|high)
+    if "reasoning" in agent and agent["reasoning"] is not None:
+        valid, err = validate_type(agent["reasoning"], str, f"{prefix}.reasoning")
+        if not valid:
+            errors.append(err)
+        elif agent["reasoning"] not in ("off", "low", "medium", "high", "xhigh"):
+            errors.append(f"'{prefix}.reasoning' must be one of: off, low, medium, high, xhigh")
     
     # Optional: tokens (dict)
     if "tokens" in agent:
@@ -502,6 +510,7 @@ with open(os.path.join(output_dir, 'habitat-parsed.env'), 'w') as f:
         name = agent_ref["agent"]
         lib_entry = lib.get(name, {})
         model = agent_ref.get("model") or lib_entry.get("model", "anthropic/claude-opus-4-5")
+        reasoning = agent_ref.get("reasoning") or lib_entry.get("reasoning", "")
         identity = lib_entry.get("identity", "")
         soul = lib_entry.get("soul", "")
         agents_md = lib_entry.get("agents", "")
@@ -524,6 +533,8 @@ with open(os.path.join(output_dir, 'habitat-parsed.env'), 'w') as f:
         f.write('AGENT{}_DISCORD_BOT_TOKEN="{}"\n'.format(n, dc_bot_token))
         f.write('AGENT{}_DISCORD_BOT_TOKEN_B64="{}"\n'.format(n, b64(dc_bot_token)))
         f.write('AGENT{}_MODEL="{}"\n'.format(n, model))
+        if reasoning:
+            f.write('AGENT{}_REASONING="{}"\n'.format(n, reasoning))
         f.write('AGENT{}_IDENTITY_B64="{}"\n'.format(n, b64(identity)))
         f.write('AGENT{}_SOUL_B64="{}"\n'.format(n, b64(soul)))
         f.write('AGENT{}_AGENTS_B64="{}"\n'.format(n, b64(agents_md)))
