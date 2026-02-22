@@ -71,13 +71,7 @@ else
   done
 fi
 
-# Ensure exec-approvals.json exists — without it OpenClaw may require
-# interactive approval for every exec command, causing 120s timeouts
-if [ ! -f "$H/.openclaw/exec-approvals.json" ]; then
-  echo '{"version":1,"defaults":{"security":"full","ask":"off"}}' > "$H/.openclaw/exec-approvals.json"
-  chmod 600 "$H/.openclaw/exec-approvals.json"
-  chown "$USERNAME:$USERNAME" "$H/.openclaw/exec-approvals.json" 2>/dev/null || true
-fi
+ensure_exec_approvals "$H"
 
 echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
 # Copy full config to openclaw.json UNLESS safe mode is active

@@ -185,16 +185,11 @@ echo "$GT" > "$H/.openclaw/gateway-token.txt"
   [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}"
 } > "$H/.openclaw/.env"
 
-# Create exec-approvals.json — without this file OpenClaw may require
-# interactive approval for every exec command, causing 120s timeouts
-cat > "$H/.openclaw/exec-approvals.json" << 'EXECEOF'
-{"version":1,"defaults":{"security":"full","ask":"off"}}
-EXECEOF
-
 # Fix ownership + tighten sensitive files
 chown -R "$USERNAME:$USERNAME" "$H/.openclaw" "$H/clawd"
 chmod 700 "$H/.openclaw"
-chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env" "$H/.openclaw/exec-approvals.json"
+chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
+ensure_exec_approvals "$H"
 
 # =============================================================================
 # Stage 4: Install desktop packages (apt)

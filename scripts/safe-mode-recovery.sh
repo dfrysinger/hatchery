@@ -774,15 +774,7 @@ AUTHEOF
       log_recovery "Created auth-profiles.json at ${auth_dir}/auth-profiles.json"
     fi
 
-    # Ensure exec-approvals.json exists — without it OpenClaw may require
-    # interactive approval for every exec command, causing 120s timeouts
-    local exec_approvals_path="${home}/.openclaw/exec-approvals.json"
-    if [ ! -f "$exec_approvals_path" ]; then
-      echo '{"version":1,"defaults":{"security":"full","ask":"off"}}' > "$exec_approvals_path"
-      chmod 600 "$exec_approvals_path"
-      [ -n "${USERNAME:-}" ] && chown "${USERNAME}:${USERNAME}" "$exec_approvals_path" 2>/dev/null
-      log_recovery "Created exec-approvals.json (was missing)"
-    fi
+    ensure_exec_approvals "$home"
   else
     log_recovery "DRY_RUN: Would write config to $config_path"
   fi
