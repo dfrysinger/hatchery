@@ -58,6 +58,14 @@ The normal bot(s) failed to start. The health check detected a problem (invalid 
    - What you tried
    - What the user needs to do
 
+5. **Exit safe mode** - Once the issue is fixed, clear safe mode and restore the full config:
+   ```bash
+   sudo rm /var/lib/init-status/safe-mode
+   echo 0 | sudo tee /var/lib/init-status/recovery-attempts
+   cp ~/.openclaw/openclaw.full.json ~/.openclaw/openclaw.json
+   sudo systemctl restart openclaw
+   ```
+
 ## What You Have Access To
 
 - **The `exec` tool** - you have it, use it to run bash commands. `exec` is your primary tool for diagnosing and fixing this machine. You can run ANY command.
@@ -202,6 +210,37 @@ jq '.some.field = "value"' ~/.openclaw/openclaw.json > /tmp/oc.json && mv /tmp/o
 # Reboot as last resort
 sudo reboot
 ```
+
+## Exiting Safe Mode
+
+Once you've diagnosed and fixed the underlying issue (e.g., updated an API key, refreshed OAuth, fixed a config error), you **must** clear safe mode and restore the full config. Otherwise the system will keep running in degraded mode.
+
+```bash
+# 1. Remove the safe-mode marker
+sudo rm /var/lib/init-status/safe-mode
+
+# 2. Reset the recovery attempt counter
+echo 0 | sudo tee /var/lib/init-status/recovery-attempts
+
+# 3. Restore the full config from backup
+cp ~/.openclaw/openclaw.full.json ~/.openclaw/openclaw.json
+
+# 4. Restart OpenClaw with the restored config
+sudo systemctl restart openclaw
+```
+
+After restarting, verify the service is healthy:
+```bash
+systemctl status openclaw
+curl -sf http://127.0.0.1:18789/ && echo "Gateway OK"
+```
+
+You can also use the helper script which does this with health-check validation and automatic rollback:
+```bash
+sudo /usr/local/bin/try-full-config.sh
+```
+
+**IMPORTANT:** Only exit safe mode after you've confirmed the root cause is fixed. If the original problem persists, the health check will re-trigger safe mode.
 
 ## Re-authenticating OpenAI Codex OAuth
 
