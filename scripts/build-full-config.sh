@@ -2,6 +2,7 @@
 # =============================================================================
 # build-full-config.sh -- Generate full openclaw.json with all features
 # =============================================================================
+umask 022  # Ensure files are world-readable (DO defaults to 077)
 
 # Source permission utilities (creates dirs with correct ownership)
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
@@ -23,32 +24,18 @@
 #
 # Original: /usr/local/sbin/build-full-config.sh (in hatch.yaml write_files)
 # =============================================================================
-set -a; source /etc/droplet.env; set +a
-d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-env.sh" ] && { source "$_lib_path/lib-env.sh"; break; }
+done
+type d &>/dev/null || { echo "FATAL: lib-env.sh not found" >&2; exit 1; }
+env_load
 
-# JSON escape function: properly escapes quotes, backslashes, newlines, control chars
-json_escape() { local e; e=$(printf '%s' "$1" | jq -Rs .); e="${e#\"}"; e="${e%\"}"; printf '%s' "$e"; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 H="/home/$USERNAME"
-AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "$BRAVE_KEY_B64")
+# Decode secrets needed for auth-profiles.json (workspace code below)
+AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64")
 OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
-TUI=$(d "$TELEGRAM_USER_ID_B64")
-# PLATFORM must be explicitly set - no silent defaults
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
-DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
-DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
-TG_ENABLED="false"; DC_ENABLED="false"
-case "$PLATFORM" in
-  telegram) TG_ENABLED="true" ;;
-  discord)  DC_ENABLED="true" ;;
-  both)     TG_ENABLED="true"; DC_ENABLED="true" ;;
-  *)
-    echo "[build-full-config] ERROR: Invalid PLATFORM='${PLATFORM}'" >&2
-    echo "  Valid options: telegram, discord, both" >&2
-    echo "  Fix: Set PLATFORM in habitat config or /etc/droplet.env" >&2
-    exit 1
-    ;;
-esac
 HN="${HABITAT_NAME:-default}"
 GI=$(d "$GLOBAL_IDENTITY_B64"); GBO=$(d "$GLOBAL_BOOT_B64"); GBS=$(d "$GLOBAL_BOOTSTRAP_B64")
 GSO=$(d "$GLOBAL_SOUL_B64"); GAG=$(d "$GLOBAL_AGENTS_B64"); GU=$(d "$GLOBAL_USER_B64")
@@ -58,20 +45,20 @@ CGN="$COUNCIL_GROUP_NAME"
 CJ="$COUNCIL_JUDGE"
 GT=$(cat $H/.openclaw/gateway-token.txt)
 AC=${AGENT_COUNT:-1}
-# Escape user-provided values for JSON safety
-TUI_ESC=$(json_escape "$TUI"); DGI_ESC=$(json_escape "$DGI"); DOI_ESC=$(json_escape "$DOI")
-CGI_ESC=$(json_escape "$CGI"); GT_ESC=$(json_escape "$GT")
-AK_ESC=$(json_escape "$AK"); GK_ESC=$(json_escape "$GK"); BK_ESC=$(json_escape "$BK")
-# shellcheck disable=SC2034  # Reserved for future Google Chat/OpenAI config
-CGN_ESC=$(json_escape "$CGN")
-# Reserved for future OpenAI OAuth config - shellcheck disable=SC2034 for all below
-# shellcheck disable=SC2034
-OA_ESC=$(json_escape "$OA")
-# shellcheck disable=SC2034
-OR_ESC=$(json_escape "$OR")
-# shellcheck disable=SC2034
-OI_ESC=$(json_escape "$OI")
-# Use helper if available, fallback to mkdir+chmod
+# --- Generate config via generate-config.sh (single source of truth) ---
+GEN_CONFIG_SCRIPT=""
+for _gc_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_gc_path/generate-config.sh" ] && { GEN_CONFIG_SCRIPT="$_gc_path/generate-config.sh"; break; }
+done
+[ -z "$GEN_CONFIG_SCRIPT" ] && { echo "FATAL: generate-config.sh not found" >&2; exit 1; }
+
+CONFIG_JSON=$("$GEN_CONFIG_SCRIPT" --mode full --gateway-token "$GT")
+if [ -z "$CONFIG_JSON" ] || ! echo "$CONFIG_JSON" | jq . >/dev/null 2>&1; then
+  echo "ERROR: generate-config.sh produced invalid JSON" >&2
+  exit 1
+fi
+
+# Create directories
 if type ensure_bot_dir &>/dev/null; then
   ensure_bot_dir "$H/.openclaw/credentials" 700
   for i in $(seq 1 $AC); do
@@ -83,149 +70,7 @@ else
     mkdir -p "$H/clawd/agents/agent${i}/memory"
   done
 fi
-AL="["
-for i in $(seq 1 $AC); do
-  NV="AGENT${i}_NAME"; NAME="${!NV}"
-  MV="AGENT${i}_MODEL"; MODEL="${!MV}"
-  NAME_ESC=$(json_escape "$NAME"); MODEL_ESC=$(json_escape "$MODEL")
-  [ $i -gt 1 ] && AL="$AL,"
-  IS_DEFAULT="false"; [ $i -eq 1 ] && IS_DEFAULT="true"
-  AL="$AL{\"id\":\"agent${i}\",\"default\":${IS_DEFAULT},\"name\":\"${NAME_ESC}\",\"model\":\"${MODEL_ESC}\",\"workspace\":\"$H/clawd/agents/agent${i}\",\"groupChat\":{\"mentionPatterns\":[\"${NAME_ESC},\",\"${NAME_ESC}:\"]}}"
-done
-AL="$AL]"
-BD="["
-if [ "$TG_ENABLED" = "true" ]; then
-  if [ "$AC" -gt 1 ]; then
-    for i in $(seq 2 $AC); do
-      [ "$BD" != "[" ] && BD="$BD,"
-      BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"telegram\",\"accountId\":\"agent${i}\"}}"
-    done
-  fi
-fi
-if [ "$DC_ENABLED" = "true" ]; then
-  if [ "$AC" -gt 1 ]; then
-    for i in $(seq 2 $AC); do
-      [ "$BD" != "[" ] && BD="$BD,"
-      BD="$BD{\"agentId\":\"agent${i}\",\"match\":{\"channel\":\"discord\",\"accountId\":\"agent${i}\"}}"
-    done
-  fi
-fi
-BD="$BD]"
-A1_TG_TOK_ESC=$(json_escape "$AGENT1_BOT_TOKEN")
-TA="\"agent1\":{\"botToken\":\"${A1_TG_TOK_ESC}\"}"
-if [ "$AC" -gt 1 ]; then
-  for i in $(seq 2 $AC); do
-    TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"; TOK_ESC=$(json_escape "$TOK")
-    [ -n "$TOK" ] && TA="$TA,\"agent${i}\":{\"botToken\":\"${TOK_ESC}\"}"
-  done
-fi
-TG=""; [ -n "$CGI" ] && TG=",\"groups\":{\"${CGI_ESC}\":{\"requireMention\":true},\"*\":{\"requireMention\":true}}"
-A1_DC_TOK_ESC=$(json_escape "$AGENT1_DISCORD_BOT_TOKEN")
-DA="\"agent1\":{\"token\":\"${A1_DC_TOK_ESC}\"}"
-if [ "$AC" -gt 1 ]; then
-  for i in $(seq 2 $AC); do
-    DV="AGENT${i}_DISCORD_BOT_TOKEN"; DTOK="${!DV}"; DTOK_ESC=$(json_escape "$DTOK")
-    [ -n "$DTOK" ] && DA="$DA,\"agent${i}\":{\"token\":\"${DTOK_ESC}\"}"
-  done
-fi
-DG=""; [ -n "$DGI" ] && DG=",\"guilds\":{\"${DGI_ESC}\":{\"requireMention\":true}}"
-DC_DM_ALLOW=""; [ -n "$DOI" ] && DC_DM_ALLOW=",\"allowFrom\":[\"${DOI_ESC}\"]"
-AP="\"anthropic:default\":{\"provider\":\"anthropic\",\"mode\":\"api_key\"}"
-[ -n "$OA" ] && AP="$AP,\"openai-codex:default\":{\"provider\":\"openai-codex\",\"mode\":\"oauth\"}"
-[ -n "$GK" ] && AP="$AP,\"google:default\":{\"provider\":\"google\",\"mode\":\"api_key\"}"
-CONFIG_JSON=$(cat <<CFG
-{
-  "env": {
-    "ANTHROPIC_API_KEY": "${AK_ESC}",
-    "DISPLAY": ":10"
-    $([ -n "$GK" ] && echo ",\"GOOGLE_API_KEY\": \"${GK_ESC}\", \"GEMINI_API_KEY\": \"${GK_ESC}\"")
-    $([ -n "$BK" ] && echo ",\"BRAVE_API_KEY\": \"${BK_ESC}\"")
-  },
-  "browser": {
-    "enabled": true,
-    "executablePath": "/usr/bin/google-chrome-stable",
-    "headless": false,
-    "noSandbox": true
-  },
-  "tools": {
-    "agentToAgent": {
-      "enabled": true
-    },
-    "exec": {
-      "security": "full",
-      "ask": "off"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": {"primary": "anthropic/claude-opus-4-5"},
-      "maxConcurrent": 4,
-      "workspace": "$H/clawd",
-      "heartbeat": {"every": "30m", "session": "heartbeat"},
-      "models": {
-        "openai/gpt-5.2": {"params": {"reasoning_effort": "high"}}
-      }
-    },
-    "list": ${AL}
-  },
-  "bindings": ${BD},
-  "gateway": {
-    "mode": "local",
-    "port": 18789,
-    "bind": "loopback",
-    "controlUi": {"enabled": true, "allowInsecureAuth": true},
-    "auth": {"mode": "token", "token": "${GT_ESC}"}
-  },
-  "auth": {
-    "profiles": {${AP}}
-  },
-  "plugins": {
-    "entries": {
-      "telegram": {"enabled": ${TG_ENABLED}},
-      "discord": {"enabled": ${DC_ENABLED}}
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": ${TG_ENABLED},
-      "dmPolicy": "allowlist",
-      "allowFrom": ["${TUI_ESC}"],
-      "accounts": {${TA}}
-      ${TG}
-    },
-    "discord": {
-      "enabled": ${DC_ENABLED},
-      "groupPolicy": "allowlist",
-      "accounts": {${DA}},
-      "dm": {
-        "enabled": true,
-        "policy": "pairing"
-        ${DC_DM_ALLOW}
-      }
-      ${DG}
-    }
-  },
-  "skills": {
-    "install": {"nodeManager": "npm"}
-  },
-  "hooks": {
-    "internal": {
-      "enabled": true,
-      "entries": {
-        "boot-md": {"enabled": true}
-      }
-    }
-  }
-}
-CFG
-)
-# Validate JSON before writing (AC4: never write corrupt config)
-if ! echo "$CONFIG_JSON" | jq . >/dev/null 2>&1; then
-  echo "ERROR: Generated config is not valid JSON" >&2
-  ERROR_MSG=$(echo "$CONFIG_JSON" | jq . 2>&1 || true)
-  echo "Validation error: $ERROR_MSG" >&2
-  exit 1
-fi
+
 echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
 # Copy full config to openclaw.json UNLESS safe mode is active
 # (safe mode recovery already wrote a working config - don't overwrite it)
@@ -393,8 +238,11 @@ if type ensure_bot_dir &>/dev/null; then
 else
   mkdir -p "$H/.openclaw/agents/main/agent"
 fi
+# NOTE: This file provides actual credentials for OpenClaw's auth resolution.
+# generate-config.sh also references auth.profiles in the JSON config (provider list only).
+# Both are generated from the same env vars, but keep them in sync if adding providers.
 cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
-{"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","token":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"token\":\"${GK}\"}")}}
+{"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","key":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"key\":\"${GK}\"}")}}
 APJ
 # SECURITY: auth-profiles.json contains credentials - restrict permissions
 if type ensure_bot_file &>/dev/null; then
@@ -469,10 +317,10 @@ User=$USERNAME
 WorkingDirectory=$H
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port 18789
-ExecStartPost=+/bin/bash -c 'RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
+$([ "${ISOLATION_DEFAULT:-none}" = "none" ] && echo "ExecStartPost=+/bin/bash -c 'RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'")
 ExecStop=+/usr/local/bin/sync-openclaw-state.sh
 TimeoutStopSec=30
-TimeoutStartSec=120
+TimeoutStartSec=180
 Restart=on-failure
 RestartSec=10
 RestartPreventExitStatus=2
@@ -487,6 +335,54 @@ $([ -n "$BK" ] && echo "Environment=BRAVE_API_KEY=${BK}")
 [Install]
 WantedBy=multi-user.target
 SVC
+
+# Generate safeguard units for single mode (non-session)
+if [ "${ISOLATION_DEFAULT:-none}" = "none" ]; then
+  cat > /etc/systemd/system/openclaw-safeguard.path <<'PATHFILE'
+[Unit]
+Description=Watch for unhealthy marker
+
+[Path]
+PathExists=/var/lib/init-status/unhealthy
+MakeDirectory=no
+
+[Install]
+WantedBy=multi-user.target
+PATHFILE
+
+  cat > /etc/systemd/system/openclaw-safeguard.service <<'SGFILE'
+[Unit]
+Description=Safe mode handler
+After=openclaw.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/safe-mode-handler.sh
+Environment=RUN_MODE=path-triggered
+SGFILE
+
+  cat > /etc/systemd/system/openclaw-e2e.service <<E2EFILE
+[Unit]
+Description=E2E agent health check
+After=openclaw.service
+BindsTo=openclaw.service
+Requisite=openclaw.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gateway-e2e-check.sh
+TimeoutStartSec=600
+
+[Install]
+WantedBy=openclaw.service
+E2EFILE
+
+  systemctl enable openclaw-safeguard.path 2>/dev/null || true
+  systemctl enable openclaw-e2e.service 2>/dev/null || true
+fi
+
+# Enable the main openclaw service (session isolation will replace it with per-group services)
+systemctl enable openclaw.service 2>/dev/null || true
 systemctl daemon-reload
 
 # --- Fix permissions BEFORE starting services ---
@@ -499,7 +395,7 @@ else
   # Fallback if lib-permissions.sh not available
   chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
   chmod 700 $H/.openclaw
-  chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.emergency.json 2>/dev/null || true
+  chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json 2>/dev/null || true
 fi
 
 # --- Agent Isolation: wire isolation scripts into pipeline ---

@@ -15,9 +15,11 @@
 #
 # Original: /usr/local/bin/sync-openclaw-state.sh (in hatch.yaml write_files)
 # =============================================================================
-set -a; source /etc/droplet.env; set +a
-d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-env.sh" ] && { source "$_lib_path/lib-env.sh"; break; }
+done
+type d &>/dev/null || { echo "FATAL: lib-env.sh not found" >&2; exit 1; }
+env_load
 
 # shellcheck source=./rclone-validate.sh
 source "$(dirname "$0")/rclone-validate.sh"

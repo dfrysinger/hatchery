@@ -31,34 +31,25 @@ HABITAT_PATH='/etc/habitat.json'
 AGENTS_PATH='/etc/agents.json'
 MARKER_PATH='/etc/config-api-uploaded'
 APPLY_SCRIPT='/usr/local/bin/apply-config.sh'
-P1_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online"}
-P2_STAGES={4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
+P1_STAGES={0:"init",1:"parsing-config",2:"installing-openclaw",3:"creating-workspace",4:"installing-desktop",5:"installing-tools",6:"installing-extras",7:"configuring",8:"rebooting"}
+P2_STAGES={0:"init",1:"preparing",2:"installing-bot",3:"bot-online",4:"desktop-environment",5:"developer-tools",6:"browser-tools",7:"desktop-services",8:"skills-apps",9:"remote-access",10:"finalizing",11:"ready"}
+# Combined map for single-phase provisioning (provision.sh)
+ALL_STAGES={**P1_STAGES, 9:"restarting", 10:"health-check", 11:"ready", 12:"safe-mode", 13:"critical-failure"}
 
 def check_service(name):
   try:r=subprocess.run(["systemctl","is-active",name],capture_output=True,timeout=5);return r.stdout.decode().strip()=="active"
   except:return False
 
 def get_status():
-  # Check completion markers first to determine smart defaults
-  p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
-  p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
+  # Read completion markers (used for ready/rebooting flags, not stage logic)
   setup_done=os.path.exists('/var/lib/init-status/setup-complete')
   needs_check=os.path.exists('/var/lib/init-status/needs-post-boot-check')
+  p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
+  p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
+  prov_done=os.path.exists('/var/lib/init-status/provision-complete')
   
-  # Smart defaults based on completion state (handles transient read failures during reboot)
-  # needs-post-boot-check exists during reboot until post-boot-check.sh completes
-  if setup_done and not needs_check:
-    s,p=11,2  # Ready state (fully booted)
-  elif setup_done and needs_check:
-    s,p=10,2  # Rebooting (setup done but post-boot-check pending)
-  elif p2_done:
-    s,p=10,2  # Phase 2 done, finalizing
-  elif p1_done:
-    s,p=4,2   # Phase 1 done, starting phase 2
-  else:
-    s,p=0,1   # Initial state
-  
-  # Try to read actual values (overrides defaults if successful)
+  # Stage file is the single source of truth (monotonic writes enforced by set_stage/set-stage.sh)
+  s,p=0,1
   try:
     with open('/var/lib/init-status/stage','r') as f:
       val=f.read().strip()
@@ -67,6 +58,7 @@ def get_status():
       val=f.read().strip()
       if val:p=int(val)
   except:pass
+  if s>=9:p=2
   
   # Check bot status based on isolation mode
   # Read isolation config from habitat-parsed.env
@@ -107,10 +99,14 @@ def get_status():
       svc['openclaw']=check_service('openclaw')
     for sv in base_services:
       svc[sv]=check_service(sv)
-  desc=P1_STAGES.get(s) if p==1 else P2_STAGES.get(s,f"stage-{s}")
-  safe_mode=os.path.exists('/var/lib/init-status/safe-mode')
+  desc=ALL_STAGES.get(s) or P2_STAGES.get(s,f"stage-{s}")
+  # Check for safe mode: either the generic marker or any group-specific marker
+  safe_mode=os.path.exists('/var/lib/init-status/safe-mode') or any(
+    f.startswith('safe-mode-') for f in os.listdir('/var/lib/init-status/') if os.path.isfile(os.path.join('/var/lib/init-status/', f))
+  ) if os.path.isdir('/var/lib/init-status/') else False
   rebooting=setup_done and needs_check  # System rebooted, waiting for post-boot-check
-  return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":setup_done and bot_online and not needs_check,"rebooting":rebooting,"safe_mode":safe_mode,"services":svc if svc else None}
+  ready=setup_done and bot_online and not needs_check
+  return {"phase":p,"stage":s,"desc":desc,"bot_online":bot_online,"phase1_complete":p1_done,"phase2_complete":p2_done,"ready":ready,"rebooting":rebooting,"safe_mode":safe_mode,"services":svc if svc else None}
 
 def validate_config_upload(data):
   """Validate config upload request data."""

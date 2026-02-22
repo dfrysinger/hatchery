@@ -19,8 +19,11 @@
 # Platform-aware bot renaming script.
 # Renames Telegram bots via API when platform includes telegram.
 # Discord bot names are set in the Developer Portal (not via API).
-set -a; source /etc/droplet.env; set +a
-d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-env.sh" ] && { source "$_lib_path/lib-env.sh"; break; }
+done
+type d &>/dev/null || { echo "FATAL: lib-env.sh not found" >&2; exit 1; }
+env_load
 [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 # PLATFORM must be explicitly set - no silent defaults

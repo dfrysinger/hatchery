@@ -49,7 +49,6 @@ setup_mock_env() {
   
   # Create mock files
   echo '{"agents":{"defaults":{"model":"test"}}}' > "$TEST_TMPDIR/home/.openclaw/openclaw.json"
-  echo '{"agents":{"defaults":{"model":"emergency"}}}' > "$TEST_TMPDIR/home/.openclaw/openclaw.emergency.json"
   
   # Create droplet.env
   cat > "$TEST_TMPDIR/droplet.env" <<'EOF'

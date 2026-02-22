@@ -135,6 +135,31 @@ class TestSessionServiceGeneration(unittest.TestCase):
         self.assertIn('openclaw-council.service', files)
         self.assertIn('openclaw-workers.service', files)
 
+    def test_generates_safeguard_units_per_group(self):
+        """Each group gets a safeguard .path and .service unit."""
+        env = make_session_env()
+        files, _, _ = run_generator(env)
+        self.assertIn('openclaw-safeguard-council.path', files)
+        self.assertIn('openclaw-safeguard-council.service', files)
+        self.assertIn('openclaw-safeguard-workers.path', files)
+        self.assertIn('openclaw-safeguard-workers.service', files)
+        # Path unit watches for unhealthy marker
+        self.assertIn('unhealthy-council', files['openclaw-safeguard-council.path'])
+        # Service runs safe-mode-handler
+        self.assertIn('safe-mode-handler', files['openclaw-safeguard-council.service'])
+
+    def test_generates_e2e_service_per_group(self):
+        """Each group gets an E2E check service."""
+        env = make_session_env()
+        files, _, _ = run_generator(env)
+        self.assertIn('openclaw-e2e-council.service', files)
+        self.assertIn('openclaw-e2e-workers.service', files)
+        # E2E service runs gateway-e2e-check
+        e2e_svc = files['openclaw-e2e-council.service']
+        self.assertIn('gateway-e2e-check', e2e_svc)
+        self.assertIn('BindsTo=openclaw-council.service', e2e_svc)
+        self.assertIn('GROUP=council', e2e_svc)
+
     def test_service_contains_exec_start(self):
         """Service file has ExecStart running openclaw gateway."""
         env = make_session_env()
@@ -191,8 +216,8 @@ class TestSessionConfig(unittest.TestCase):
         """Each group gets its own openclaw config JSON."""
         env = make_session_env()
         files, _, _ = run_generator(env)
-        self.assertIn('council/openclaw.session.json', files)
-        self.assertIn('workers/openclaw.session.json', files)
+        self.assertIn('home/testuser/.openclaw/configs/council/openclaw.session.json', files)
+        self.assertIn('home/testuser/.openclaw/configs/workers/openclaw.session.json', files)
 
     def test_config_contains_only_group_agents(self):
         """Each config only includes agents belonging to that group."""
@@ -201,8 +226,8 @@ class TestSessionConfig(unittest.TestCase):
             agent_groups=['council', 'council', 'workers', 'workers'],
         )
         files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['council/openclaw.session.json'])
-        workers_cfg = json.loads(files['workers/openclaw.session.json'])
+        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
+        workers_cfg = json.loads(files['home/testuser/.openclaw/configs/workers/openclaw.session.json'])
 
         council_names = [a['name'] for a in council_cfg['agents']['list']]
         workers_names = [a['name'] for a in workers_cfg['agents']['list']]
@@ -214,14 +239,14 @@ class TestSessionConfig(unittest.TestCase):
         """Config gateway port matches the service port."""
         env = make_session_env()
         files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['council/openclaw.session.json'])
+        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
         self.assertEqual(council_cfg['gateway']['port'], 18790)
 
     def test_config_has_gateway_section(self):
         """Config includes gateway with local mode."""
         env = make_session_env()
         files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['council/openclaw.session.json'])
+        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
         self.assertEqual(council_cfg['gateway']['mode'], 'local')
 
     def test_single_group_single_service(self):
@@ -232,7 +257,8 @@ class TestSessionConfig(unittest.TestCase):
             agent_groups=['council', 'council', 'council'],
         )
         files, _, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service')]
+        # Filter to main service files only (exclude safeguard helper units)
+        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f and 'e2e' not in f]
         self.assertEqual(len(service_files), 1)
         self.assertIn('openclaw-council.service', files)
 
@@ -261,7 +287,7 @@ class TestSessionAgentGrouping(unittest.TestCase):
             agent_groups=['alpha', 'alpha', 'beta', 'beta', 'gamma', 'gamma'],
         )
         files, _, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service')]
+        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f and 'e2e' not in f]
         self.assertEqual(len(service_files), 3)
 
     def test_mixed_isolation_only_session_groups(self):

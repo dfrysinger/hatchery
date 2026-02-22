@@ -4,8 +4,18 @@
 # safe-mode-recovery.sh -- Smart Safe Mode Recovery
 # =============================================================================
 
-# Source permission utilities
+# Source shared libraries
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
+
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-env.sh" ] && { source "$_lib_path/lib-env.sh"; break; }
+done
+
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-auth.sh" ] && { source "$_lib_path/lib-auth.sh"; break; }
+done
+type validate_api_key &>/dev/null || { echo "FATAL: lib-auth.sh not found" >&2; exit 1; }
+
 # Purpose:  When full config fails, intelligently find working credentials
 #           and generate an emergency config to get a bot online.
 #
@@ -17,6 +27,10 @@
 #   - Config validation: Verify JSON syntax before applying
 #   - Doctor fix: Run openclaw doctor --fix as last resort
 #   - State cleanup: Clear corrupted state if needed
+#
+# Diagnostics:
+#   Set AUTH_DIAG_LOG before sourcing this file to record diagnostics.
+#   lib-auth.sh handles token/API diagnostics; this file adds network/doctor.
 #
 # Usage:    source safe-mode-recovery.sh
 #           run_smart_recovery
@@ -41,360 +55,36 @@ VALIDATE_API_KEY_FN="${VALIDATE_API_KEY_FN:-validate_api_key}"
 #   FOUND_TOKEN_RESULT    - Result of token hunting (platform:agent:token)
 #   FOUND_API_PROVIDER    - Result of API provider search
 #   OAUTH_CHECK_RESULT    - Result of OAuth profile check (oauth:provider)
-#   DIAG_*                - Diagnostic accumulator arrays
+#   AUTH_DIAG_LOG         - Diagnostic log file (set by caller, defaults /dev/null)
 #
 # Rule: Call these functions directly (not in subshells) when you need their
 # side effects. Use `local var; var=$(func)` only for pure return values.
 # =============================================================================
 
-# Diagnostics tracking - accumulates validation results for boot report
-declare -a DIAG_TELEGRAM_RESULTS=()
-declare -a DIAG_DISCORD_RESULTS=()
-declare -a DIAG_API_RESULTS=()
-DIAG_DOCTOR_RAN=""
-DIAG_DOCTOR_RESULT=""
-DIAG_NETWORK_OK=""
+# validate_telegram_token() — now in lib-auth.sh
 
-# Add a diagnostic result
-# Usage: diag_add "telegram" "agent1" "✅" "valid"
-#        diag_add "api" "anthropic" "❌" "401 unauthorized"
-diag_add() {
-  local category="$1"
-  local name="$2"
-  local icon="$3"
-  local reason="$4"
-  local entry="${name}:${icon}:${reason}"
-  
-  case "$category" in
-    telegram) DIAG_TELEGRAM_RESULTS+=("$entry") ;;
-    discord)  DIAG_DISCORD_RESULTS+=("$entry") ;;
-    api)      DIAG_API_RESULTS+=("$entry") ;;
-  esac
-}
 
-# Write diagnostics summary to file for boot report
-write_diagnostics_summary() {
-  local output_file="${1:-/var/log/safe-mode-diagnostics.txt}"
-  
-  {
-    echo "🔍 Recovery diagnostics:"
-    
-    # Telegram tokens - one per line
-    echo "  Telegram:"
-    if [ ${#DIAG_TELEGRAM_RESULTS[@]} -gt 0 ]; then
-      for entry in "${DIAG_TELEGRAM_RESULTS[@]}"; do
-        local name="${entry%%:*}"
-        local rest="${entry#*:}"
-        local icon="${rest%%:*}"
-        local reason="${rest#*:}"
-        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
-          echo "    ${icon} ${name} (${reason})"
-        else
-          echo "    ${icon} ${name}"
-        fi
-      done
-    else
-      echo "    (none configured)"
-    fi
-    
-    # Discord tokens - one per line
-    echo "  Discord:"
-    if [ ${#DIAG_DISCORD_RESULTS[@]} -gt 0 ]; then
-      for entry in "${DIAG_DISCORD_RESULTS[@]}"; do
-        local name="${entry%%:*}"
-        local rest="${entry#*:}"
-        local icon="${rest%%:*}"
-        local reason="${rest#*:}"
-        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
-          echo "    ${icon} ${name} (${reason})"
-        else
-          echo "    ${icon} ${name}"
-        fi
-      done
-    else
-      echo "    (none configured)"
-    fi
-    
-    # API providers - one per line
-    echo "  API:"
-    if [ ${#DIAG_API_RESULTS[@]} -gt 0 ]; then
-      for entry in "${DIAG_API_RESULTS[@]}"; do
-        local name="${entry%%:*}"
-        local rest="${entry#*:}"
-        local icon="${rest%%:*}"
-        local reason="${rest#*:}"
-        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
-          echo "    ${icon} ${name} (${reason})"
-        else
-          echo "    ${icon} ${name}"
-        fi
-      done
-    else
-      echo "    (none found)"
-    fi
-    
-    # Doctor status
-    if [ -n "$DIAG_DOCTOR_RAN" ]; then
-      echo "  Doctor: ran (${DIAG_DOCTOR_RESULT:-no issues})"
-    fi
-    
-    # Network status
-    if [ -n "$DIAG_NETWORK_OK" ]; then
-      if [ "$DIAG_NETWORK_OK" = "yes" ]; then
-        echo "  Network: ✅ OK"
-      else
-        echo "  Network: ❌ Issues detected"
-      fi
-    fi
-    
-  } > "$output_file"
-  
-  # Also return for inline use
-  cat "$output_file"
-}
+# validate_discord_token() — now in lib-auth.sh
 
-# =============================================================================
-# Token Validation Functions
-# =============================================================================
 
-# Validate a Telegram bot token by calling getMe
-# Returns: 0=valid, 1=invalid
-# Sets: VALIDATION_REASON with status/error details
-validate_telegram_token() {
-  local token="$1"
-  
-  if [ -z "$token" ]; then
-    VALIDATION_REASON="empty"
-    return 1
-  fi
-  
-  # In test mode, use mock
-  if [ "${TEST_MODE:-}" = "1" ]; then
-    VALIDATION_REASON="test-mode"
-    return 1
-  fi
-  
-  local http_code response
-  response=$(curl -s --max-time 10 -w "\n%{http_code}" "https://api.telegram.org/bot${token}/getMe" 2>/dev/null)
-  http_code=$(echo "$response" | tail -1)
-  response=$(echo "$response" | head -n -1)
-  
-  case "$http_code" in
-    200)
-      if echo "$response" | jq -e '.ok == true' >/dev/null 2>&1; then
-        VALIDATION_REASON="valid"
-        return 0
-      else
-        VALIDATION_REASON="invalid response"
-        return 1
-      fi
-      ;;
-    401) VALIDATION_REASON="401 unauthorized"; return 1 ;;
-    403) VALIDATION_REASON="403 forbidden"; return 1 ;;
-    404) VALIDATION_REASON="404 not found"; return 1 ;;
-    409) VALIDATION_REASON="409 conflict"; return 1 ;;
-    000) VALIDATION_REASON="timeout"; return 1 ;;
-    *)   VALIDATION_REASON="http ${http_code}"; return 1 ;;
-  esac
-}
+# validate_api_key() — now in lib-auth.sh
 
-# Validate a Discord bot token by calling /users/@me
-validate_discord_token() {
-  local token="$1"
-  
-  if [ -z "$token" ]; then
-    VALIDATION_REASON="empty"
-    return 1
-  fi
-  
-  if [ "${TEST_MODE:-}" = "1" ]; then
-    VALIDATION_REASON="test-mode"
-    return 1
-  fi
-  
-  local http_code response
-  response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-    -H "Authorization: Bot ${token}" \
-    "https://discord.com/api/v10/users/@me" 2>/dev/null)
-  http_code=$(echo "$response" | tail -1)
-  response=$(echo "$response" | head -n -1)
-  
-  case "$http_code" in
-    200)
-      if echo "$response" | jq -e '.id' >/dev/null 2>&1; then
-        VALIDATION_REASON="valid"
-        return 0
-      else
-        VALIDATION_REASON="invalid response"
-        return 1
-      fi
-      ;;
-    401) VALIDATION_REASON="401 unauthorized"; return 1 ;;
-    403) VALIDATION_REASON="403 forbidden"; return 1 ;;
-    000) VALIDATION_REASON="timeout"; return 1 ;;
-    *)   VALIDATION_REASON="http ${http_code}"; return 1 ;;
-  esac
-}
-
-# Validate an API key by making a minimal request
-validate_api_key() {
-  local provider="$1"
-  local key="$2"
-  
-  if [ -z "$key" ]; then
-    VALIDATION_REASON="no key"
-    return 1
-  fi
-  
-  if [ "${TEST_MODE:-}" = "1" ]; then
-    VALIDATION_REASON="test-mode"
-    return 1
-  fi
-  
-  local http_code response
-  
-  case "$provider" in
-    anthropic)
-      # Detect OAuth Access Token (sk-ant-oat*) vs API key (sk-ant-api*)
-      local auth_header
-      if [[ "$key" == sk-ant-oat* ]]; then
-        # OAuth tokens cannot be validated via API, trust them if present
-        VALIDATION_REASON="OAuth token (trusted)"
-        return 0
-      else
-        auth_header="x-api-key: ${key}"
-      fi
-      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-        -H "$auth_header" \
-        -H "anthropic-version: 2023-06-01" \
-        -H "content-type: application/json" \
-        -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
-        "https://api.anthropic.com/v1/messages" 2>/dev/null)
-      ;;
-    openai)
-      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-        -H "Authorization: Bearer ${key}" \
-        "https://api.openai.com/v1/models" 2>/dev/null)
-      ;;
-    google)
-      response=$(curl -s --max-time 10 -w "\n%{http_code}" \
-        "https://generativelanguage.googleapis.com/v1/models?key=${key}" 2>/dev/null)
-      ;;
-    *)
-      VALIDATION_REASON="unknown provider"
-      return 1
-      ;;
-  esac
-  
-  http_code=$(echo "$response" | tail -1)
-  
-  case "$http_code" in
-    200) VALIDATION_REASON="valid"; return 0 ;;
-    400) 
-      # Anthropic returns 400 for bad request but auth OK
-      if [ "$provider" = "anthropic" ]; then
-        VALIDATION_REASON="valid"
-        return 0
-      fi
-      VALIDATION_REASON="400 bad request"
-      return 1
-      ;;
-    401) VALIDATION_REASON="401 unauthorized"; return 1 ;;
-    403) VALIDATION_REASON="403 forbidden"; return 1 ;;
-    429) VALIDATION_REASON="429 rate limited"; return 1 ;;
-    000) VALIDATION_REASON="timeout"; return 1 ;;
-    *)   VALIDATION_REASON="http ${http_code}"; return 1 ;;
-  esac
-}
 
 # =============================================================================
 # Token Hunting Functions
 # =============================================================================
 
 # Global variables for function results (avoids subshell issues with $())
+# shellcheck disable=SC2034  # Read by callers after function returns
 VALIDATION_REASON=""
+# shellcheck disable=SC2034  # Read by callers after function returns
 FOUND_TOKEN_RESULT=""
 
-# Find a working Telegram token from agents in current GROUP (or all if no GROUP)
-# Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
-# Side effect: populates DIAG_TELEGRAM_RESULTS
-find_working_telegram_token() {
-  local count="${AGENT_COUNT:-0}"
-  local current_group="${GROUP:-}"
-  FOUND_TOKEN_RESULT=""
-  
-  for i in $(seq 1 "$count"); do
-    # If GROUP is set (session isolation), only consider agents in this group
-    if [ -n "$current_group" ]; then
-      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
-      local agent_group="${!agent_group_var:-}"
-      if [ "$agent_group" != "$current_group" ]; then
-        continue  # Skip agents not in this group
-      fi
-    fi
-    
-    local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-    local token="${!token_var:-}"
-    
-    # Also try generic BOT_TOKEN
-    [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-    
-    if [ -z "$token" ]; then
-      # Don't log "not configured" for every agent - only if none have tokens
-      continue
-    fi
-    
-    # Run validation - captures reason via VALIDATION_REASON global
-    VALIDATION_REASON=""
-    if $VALIDATE_TELEGRAM_TOKEN_FN "$token"; then
-      diag_add "telegram" "agent${i}" "✅" "valid"
-      [ -z "$FOUND_TOKEN_RESULT" ] && FOUND_TOKEN_RESULT="${i}:${token}"
-    else
-      diag_add "telegram" "agent${i}" "❌" "${VALIDATION_REASON:-unknown}"
-    fi
-  done
-  
-  [ -n "$FOUND_TOKEN_RESULT" ] && return 0
-  return 1
-}
+# find_working_telegram_token() — now in lib-auth.sh
 
-# Find a working Discord token from agents in current GROUP (or all if no GROUP)
-# Sets: FOUND_TOKEN_RESULT with agent_num:token (e.g., "2:abc123...")
-# Side effect: populates DIAG_DISCORD_RESULTS
-find_working_discord_token() {
-  local count="${AGENT_COUNT:-0}"
-  local current_group="${GROUP:-}"
-  FOUND_TOKEN_RESULT=""
-  
-  for i in $(seq 1 "$count"); do
-    # If GROUP is set (session isolation), only consider agents in this group
-    if [ -n "$current_group" ]; then
-      local agent_group_var="AGENT${i}_ISOLATION_GROUP"
-      local agent_group="${!agent_group_var:-}"
-      if [ "$agent_group" != "$current_group" ]; then
-        continue  # Skip agents not in this group
-      fi
-    fi
-    
-    local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
-    local token="${!token_var:-}"
-    
-    if [ -z "$token" ]; then
-      continue
-    fi
-    
-    VALIDATION_REASON=""
-    if $VALIDATE_DISCORD_TOKEN_FN "$token"; then
-      diag_add "discord" "agent${i}" "✅" "valid"
-      [ -z "$FOUND_TOKEN_RESULT" ] && FOUND_TOKEN_RESULT="${i}:${token}"
-    else
-      diag_add "discord" "agent${i}" "❌" "${VALIDATION_REASON:-unknown}"
-    fi
-  done
-  
-  [ -n "$FOUND_TOKEN_RESULT" ] && return 0
-  return 1
-}
+
+# find_working_discord_token() — now in lib-auth.sh
+
 
 # Global variable for function results (avoids subshell issues)
 FOUND_TOKEN_RESULT=""
@@ -404,33 +94,7 @@ FOUND_TOKEN_RESULT=""
 # Tries ALL tokens from preferred platform before moving to fallback
 # Sets: FOUND_TOKEN_RESULT with platform:agent_num:token (e.g., "telegram:2:abc123...")
 # Returns: 0 if found, 1 if not
-find_working_platform_and_token() {
-  local user_platform="${PLATFORM:-telegram}"
-  local platforms=()
-  FOUND_TOKEN_RESULT=""
-  
-  # Build ordered list: user's default first, then the other
-  if [ "$user_platform" = "discord" ]; then
-    platforms=("discord" "telegram")
-  else
-    platforms=("telegram" "discord")
-  fi
-  
-  for platform in "${platforms[@]}"; do
-    # Call directly (not in subshell) to preserve diagnostic array modifications
-    case "$platform" in
-      telegram) find_working_telegram_token ;;
-      discord)  find_working_discord_token ;;
-    esac
-    
-    if [ -n "$FOUND_TOKEN_RESULT" ]; then
-      FOUND_TOKEN_RESULT="${platform}:${FOUND_TOKEN_RESULT}"
-      return 0
-    fi
-  done
-  
-  return 1
-}
+# find_working_platform_token() — REMOVED, use find_working_platform_token() from lib-auth.sh
 
 # Get the model for a specific agent from habitat config
 # Falls back to provider default if not found
@@ -634,8 +298,7 @@ check_oauth_profile() {
     if [ "$is_expired" -eq 1 ]; then
       log_recovery "    Testing OAuth token with API call..."
       local test_result
-      test_result=$(test_oauth_token "$actual_provider" "$access_token")
-      if [ $? -eq 0 ]; then
+      if test_result=$(test_oauth_token "$actual_provider" "$access_token"); then
         log_recovery "    OAuth token WORKS (refresh succeeded or token still valid)"
         OAUTH_CHECK_RESULT="oauth:$actual_provider"
         return 0
@@ -659,157 +322,36 @@ check_oauth_profile() {
   return 1
 }
 
-# Extract provider name from model string (e.g., "anthropic/claude-opus-4-5" → "anthropic")
-get_provider_from_model() {
-  local model="$1"
-  echo "${model%%/*}"
-}
+# get_provider_from_model() — now in lib-auth.sh
 
-# Get user's preferred provider from their configured models
-# Returns the provider from AGENT1_MODEL, or first agent with a model
-get_user_preferred_provider() {
-  local count="${AGENT_COUNT:-0}"
-  
-  # Try AGENT1_MODEL first (primary agent)
-  local model="${AGENT1_MODEL:-}"
-  if [ -n "$model" ]; then
-    get_provider_from_model "$model"
-    return 0
-  fi
-  
-  # Fall back to first agent with a model configured
-  for i in $(seq 1 "$count"); do
-    local model_var="AGENT${i}_MODEL"
-    model="${!model_var:-}"
-    if [ -n "$model" ]; then
-      get_provider_from_model "$model"
-      return 0
-    fi
-  done
-  
-  # Default to anthropic if nothing configured
-  echo "anthropic"
-}
 
-# Build ordered list of providers to try
-# Order: user's default → anthropic → openai → google (skipping user's default in fallback)
-get_provider_order() {
-  local user_pref=$(get_user_preferred_provider)
-  local ordered=()
-  
-  # Add user's preference first
-  ordered+=("$user_pref")
-  
-  # Add remaining providers in fixed order: anthropic → openai → google
-  # (skipping whichever was the user's default)
-  for p in "anthropic" "openai" "google"; do
-    # Skip if already added (user's default)
-    # shellcheck disable=SC2076  # Quotes intentional for exact word match
-    [[ " ${ordered[*]} " =~ " $p " ]] && continue
-    ordered+=("$p")
-  done
-  
-  echo "${ordered[@]}"
-}
+# get_user_preferred_provider() — now in lib-auth.sh
+
+
+# get_provider_order() — now in lib-auth.sh
+
 
 # Global for API provider result
+# shellcheck disable=SC2034  # Read by callers after find_working_api_provider returns
 FOUND_API_PROVIDER=""
 
 # Global for OAuth check result (avoids subshell issues)
 OAUTH_CHECK_RESULT=""       # "oauth:<provider>" on success, empty on failure
+# shellcheck disable=SC2034  # Read by callers after check_oauth_profile returns
 OAUTH_CHECK_REASON=""       # failure reason for diagnostics
+# shellcheck disable=SC2034  # Read by callers after check_oauth_profile returns
 OAUTH_CHECK_PROVIDER=""     # actual provider name (e.g., openai-codex for openai)
 
 # Default log_recovery to no-op if not defined (allows function use outside run_smart_recovery)
 type log_recovery &>/dev/null || log_recovery() { :; }
 
-# Find a working API provider
-# Order: User's default provider → Anthropic → OpenAI → Google (skipping user's default)
-# Checks both OAuth (auth-profiles.json) and API keys
-# Sets: FOUND_API_PROVIDER with provider name (may be "openai-codex" for OAuth)
-# Side effect: populates DIAG_API_RESULTS
-find_working_api_provider() {
-  local providers
-  read -ra providers <<< "$(get_provider_order)"
-  log_recovery "  Provider order: ${providers[*]}"
-  log_recovery "  Available keys: ANTHROPIC=${ANTHROPIC_API_KEY:+yes} OPENAI=${OPENAI_API_KEY:+yes} GOOGLE=${GOOGLE_API_KEY:+yes}"
-  FOUND_API_PROVIDER=""
-  
-  for provider in "${providers[@]}"; do
-    log_recovery "  Checking provider: $provider"
-    local oauth_tried=0
-    local oauth_failed_reason=""
-    local oauth_provider=""
-    
-    # First check OAuth profile (NOT in subshell - uses globals)
-    check_oauth_profile "$provider"
-    local oauth_status=$?
-    
-    if [ $oauth_status -eq 0 ] && [ -n "$OAUTH_CHECK_RESULT" ]; then
-      # Parse "oauth:<actual_provider>" format
-      local actual_provider="${OAUTH_CHECK_RESULT#oauth:}"
-      log_recovery "    OAuth profile found for $provider → using $actual_provider"
-      diag_add "api" "$actual_provider" "✅" "OAuth"
-      [ -z "$FOUND_API_PROVIDER" ] && FOUND_API_PROVIDER="$actual_provider"
-      # Continue checking others for diagnostics, but we have our answer
-      continue
-    else
-      # OAuth failed - record details for diagnostic
-      if [ -n "$OAUTH_CHECK_PROVIDER" ]; then
-        oauth_tried=1
-        oauth_provider="$OAUTH_CHECK_PROVIDER"
-        oauth_failed_reason="${OAUTH_CHECK_REASON:-failed}"
-      fi
-      log_recovery "    No OAuth for $provider (reason: ${OAUTH_CHECK_REASON:-none})"
-    fi
-    
-    # Then check API key
-    local key=""
-    case "$provider" in
-      anthropic) key="${ANTHROPIC_API_KEY:-}" ;;
-      openai)    key="${OPENAI_API_KEY:-}" ;;
-      google)    key="${GOOGLE_API_KEY:-}" ;;
-    esac
-    
-    if [ -n "$key" ]; then
-      log_recovery "    API key found for $provider, validating..."
-      VALIDATION_REASON=""
-      if $VALIDATE_API_KEY_FN "$provider" "$key"; then
-        log_recovery "    API key valid for $provider"
-        diag_add "api" "$provider" "✅" "API key"
-        [ -z "$FOUND_API_PROVIDER" ] && FOUND_API_PROVIDER="$provider"
-      else
-        log_recovery "    API key invalid for $provider: ${VALIDATION_REASON:-unknown}"
-        diag_add "api" "$provider" "❌" "${VALIDATION_REASON:-unknown}"
-      fi
-    else
-      log_recovery "    No API key for $provider"
-      # Report OAuth failure if it was tried, otherwise "not configured"
-      if [ "$oauth_tried" -eq 1 ]; then
-        # OAuth was configured but failed
-        diag_add "api" "$oauth_provider" "❌" "$oauth_failed_reason"
-      else
-        # Neither OAuth nor API key configured
-        diag_add "api" "$provider" "⚪" "not configured"
-      fi
-    fi
-  done
-  
-  log_recovery "  === find_working_api_provider COMPLETE ==="
-  log_recovery "  FOUND_API_PROVIDER='$FOUND_API_PROVIDER'"
-  log_recovery "  DIAG_API_RESULTS: ${DIAG_API_RESULTS[*]:-empty}"
-  
-  [ -n "$FOUND_API_PROVIDER" ] && return 0
-  
-  log_recovery "  !!! No working provider found - returning failure !!!"
-  return 1
-}
+# find_working_api_provider() — now in lib-auth.sh
+
 
 # Get auth type for a provider (oauth or apikey)
 get_auth_type_for_provider() {
   local provider="$1"
-  check_oauth_profile "$provider" 2>/dev/null
-  if [ $? -eq 0 ] && [[ "$OAUTH_CHECK_RESULT" == oauth:* ]]; then
+  if check_oauth_profile "$provider" 2>/dev/null && [[ "$OAUTH_CHECK_RESULT" == oauth:* ]]; then
     echo "oauth"
   else
     echo "apikey"
@@ -827,17 +369,8 @@ get_api_key_for_provider() {
   esac
 }
 
-# Get the default model for a provider
-get_default_model_for_provider() {
-  local provider="$1"
-  case "$provider" in
-    anthropic)     echo "anthropic/claude-sonnet-4-5" ;;
-    openai)        echo "openai/gpt-4o" ;;
-    openai-codex)  echo "openai-codex/gpt-5.2" ;;  # OAuth provider uses different model names
-    google)        echo "google/gemini-2.0-flash" ;;
-    *)             echo "anthropic/claude-sonnet-4-5" ;;
-  esac
-}
+# get_default_model_for_provider() — now in lib-auth.sh
+
 
 # =============================================================================
 # Emergency Config Generation
@@ -889,137 +422,7 @@ EOF
   echo "$safe_mode_dir"
 }
 
-# Generate emergency OpenClaw config with working credentials
-# SCHEMA NOTE: Emergency config structure must match build-full-config.sh
-# Update both files when OpenClaw config schema changes.
-# Uses bind=lan (not local) because:
-#   - iOS Shortcut API needs to reach the gateway from the LAN
-#   - Safe mode still needs config apply/health check endpoints accessible
-#   - bind=local would only allow localhost connections, breaking remote management
-generate_emergency_config() {
-  local token="$1"       # Bot token (Telegram or Discord)
-  local platform="$2"    # "telegram" or "discord"
-  local provider="$3"    # API provider: "anthropic", "openai", "google"
-  local api_key="$4"     # API key (empty if using OAuth)
-  local auth_type="${5:-apikey}"  # "oauth" or "apikey"
-  local model="${6:-}"   # Model override (uses provider default if empty)
-  
-  [ -z "$model" ] && model=$(get_default_model_for_provider "$provider")
-  local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
-  local gateway_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-token-$(date +%s)")
-  
-  # Ensure safe-mode workspace exists
-  setup_safe_mode_workspace >/dev/null 2>&1
-  
-  # Build env section based on provider and auth type
-  local env_json=""
-  if [ "$auth_type" = "oauth" ]; then
-    # OAuth - no API key needed in env, uses auth-profiles.json
-    env_json=""
-  else
-    # API key auth
-    case "$provider" in
-      anthropic)
-        env_json="\"ANTHROPIC_API_KEY\": \"${api_key}\""
-        ;;
-      openai)
-        env_json="\"OPENAI_API_KEY\": \"${api_key}\""
-        ;;
-      google)
-        env_json="\"GOOGLE_API_KEY\": \"${api_key}\""
-        ;;
-    esac
-  fi
-  
-  # Build channel config
-  local telegram_config="\"telegram\": { \"enabled\": false }"
-  local discord_config="\"discord\": { \"enabled\": false }"
-  
-  if [ "$platform" = "telegram" ]; then
-    # Use correct OpenClaw schema: dmPolicy + allowFrom (not ownerId/allowlist)
-    local owner_id="${TELEGRAM_OWNER_ID:-}"
-    if [ -n "$owner_id" ]; then
-      telegram_config="\"telegram\": {
-        \"enabled\": true,
-        \"accounts\": {
-          \"safe-mode\": { \"botToken\": \"${token}\" }
-        },
-        \"dmPolicy\": \"allowlist\",
-        \"allowFrom\": [\"${owner_id}\"]
-      }"
-    else
-      # No owner ID - use pairing mode (safest default)
-      telegram_config="\"telegram\": {
-        \"enabled\": true,
-        \"accounts\": {
-          \"safe-mode\": { \"botToken\": \"${token}\" }
-        },
-        \"dmPolicy\": \"pairing\"
-      }"
-    fi
-  elif [ "$platform" = "discord" ]; then
-    # Use correct OpenClaw schema for Discord
-    # Token under accounts.default, DM config uses flat keys (dmPolicy, allowFrom)
-    local owner_id="${DISCORD_OWNER_ID:-}"
-    if [ -n "$owner_id" ]; then
-      discord_config="\"discord\": {
-        \"enabled\": true,
-        \"accounts\": {
-          \"safe-mode\": { \"token\": \"${token}\" }
-        },
-        \"dmPolicy\": \"allowlist\",
-        \"allowFrom\": [\"${owner_id}\"]
-      }"
-    else
-      discord_config="\"discord\": {
-        \"enabled\": true,
-        \"accounts\": {
-          \"safe-mode\": { \"token\": \"${token}\" }
-        },
-        \"dmPolicy\": \"pairing\"
-      }"
-    fi
-  fi
-  
-  cat <<EOF
-{
-  "env": {
-    ${env_json}
-  },
-  "agents": {
-    "defaults": {
-      "model": { "primary": "${model}" },
-      "workspace": "${home}/clawd"
-    },
-    "list": [
-      {
-        "id": "safe-mode",
-        "default": true,
-        "name": "SafeModeBot",
-        "workspace": "${home}/clawd/agents/safe-mode"
-      }
-    ]
-  },
-  "gateway": {
-    "mode": "local",
-    "port": ${GROUP_PORT:-18789},
-    "bind": "loopback",
-    "controlUi": {
-      "enabled": true,
-      "allowInsecureAuth": true
-    },
-    "auth": {
-      "mode": "token",
-      "token": "${gateway_token}"
-    }
-  },
-  "channels": {
-    ${telegram_config},
-    ${discord_config}
-  }
-}
-EOF
-}
+
 
 # =============================================================================
 # Resilience Functions
@@ -1103,47 +506,26 @@ clear_corrupted_state() {
 }
 
 # Try to notify user via any available channel
+# Emergency notification — delegates to lib-notify if available, falls back to raw curl
 notify_user_emergency() {
   local message="$1"
-  local tg_notify="${TG_NOTIFY:-/usr/local/bin/tg-notify.sh}"
-  
+
   if [ "${TEST_MODE:-}" = "1" ]; then
     echo "NOTIFY: $message"
     return 0
   fi
-  
-  # Try Telegram notification script
+
+  # Prefer lib-notify (single implementation of token discovery + send)
+  if type notify_send_message &>/dev/null; then
+    notify_send_message "$message" 2>/dev/null && return 0
+  fi
+
+  # Fallback: try tg-notify.sh script directly
+  local tg_notify="${TG_NOTIFY:-/usr/local/bin/tg-notify.sh}"
   if [ -x "$tg_notify" ]; then
     "$tg_notify" "$message" 2>/dev/null && return 0
   fi
-  
-  # Try curl to Telegram directly if we have owner ID and any bot token
-  local owner_id="${TELEGRAM_OWNER_ID:-}"
-  if [ -n "$owner_id" ]; then
-    for i in $(seq 1 "${AGENT_COUNT:-1}"); do
-      local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-      local token="${!token_var:-}"
-      [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-      
-      if [ -n "$token" ]; then
-        curl -sf --max-time 10 \
-          "https://api.telegram.org/bot${token}/sendMessage" \
-          -d "chat_id=${owner_id}" \
-          -d "text=${message}" \
-          -d "parse_mode=HTML" >/dev/null 2>&1 && return 0
-      fi
-    done
-  fi
-  
-  # Try Discord webhook if configured
-  local discord_webhook="${DISCORD_WEBHOOK_URL:-}"
-  if [ -n "$discord_webhook" ]; then
-    curl -sf --max-time 10 \
-      -H "Content-Type: application/json" \
-      -d "{\"content\": \"$message\"}" \
-      "$discord_webhook" >/dev/null 2>&1 && return 0
-  fi
-  
+
   return 1
 }
 
@@ -1167,13 +549,12 @@ run_smart_recovery() {
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$log"
   }
   
-  # Reset diagnostics arrays for this run
-  DIAG_TELEGRAM_RESULTS=()
-  DIAG_DISCORD_RESULTS=()
-  DIAG_API_RESULTS=()
-  DIAG_DOCTOR_RAN=""
-  DIAG_DOCTOR_RESULT=""
-  DIAG_NETWORK_OK=""
+  # Set up diagnostics — lib-auth.sh records token/API results here
+  local diag_file="${AUTH_DIAG_LOG:-/var/log/auth-diagnostics.log}"
+  [ "${TEST_MODE:-}" = "1" ] && diag_file="${TEST_TMPDIR:-/tmp}/auth-diagnostics.log"
+  export AUTH_DIAG_LOG="$diag_file"
+  : > "$AUTH_DIAG_LOG"  # Reset for this run
+  chmod 600 "$AUTH_DIAG_LOG" 2>/dev/null || true
   
   log_recovery "========== SMART RECOVERY STARTING =========="
   log_recovery "PID: $$ | HOME_DIR=${HOME_DIR:-unset} | USERNAME=${USERNAME:-unset}"
@@ -1189,36 +570,33 @@ run_smart_recovery() {
   log_recovery "Step 0: Checking network connectivity..."
   if ! check_network; then
     log_recovery "WARNING: Network connectivity issues detected"
-    DIAG_NETWORK_OK="no"
+    _diag "network:connectivity:❌:unreachable"
     notify_user_emergency "⚠️ Safe Mode: Network connectivity issues. Recovery may fail."
   else
     log_recovery "Network OK"
-    DIAG_NETWORK_OK="yes"
+    _diag "network:connectivity:✅:ok"
   fi
   
   # Step 1: Find working platform and token
   log_recovery "Step 1: Searching for working bot token..."
   # Call directly (not in subshell) to preserve diagnostic array modifications
-  find_working_platform_and_token
+  find_working_platform_token
   local platform_token="$FOUND_TOKEN_RESULT"
   
   if [ -z "$platform_token" ]; then
     log_recovery "ERROR: No working bot tokens found"
     log_recovery "Attempting openclaw doctor --fix..."
-    DIAG_DOCTOR_RAN="yes"
     if run_doctor_fix >> "$log" 2>&1; then
-      DIAG_DOCTOR_RESULT="completed"
+      _diag "doctor:fix:✅:completed"
     else
-      DIAG_DOCTOR_RESULT="errors"
+      _diag "doctor:fix:❌:errors"
     fi
     
     # Retry after doctor
-    find_working_platform_and_token
+    find_working_platform_token
     platform_token="$FOUND_TOKEN_RESULT"
     if [ -z "$platform_token" ]; then
       log_recovery "ERROR: Still no working tokens after doctor --fix"
-      # Write diagnostics before failing
-      write_diagnostics_summary "/var/log/safe-mode-diagnostics.txt" >/dev/null 2>&1
       notify_user_emergency "🚨 CRITICAL: Safe Mode failed - no working bot tokens found!"
       echo "ERROR: No working bot tokens found" >&2
       return 1
@@ -1241,8 +619,6 @@ run_smart_recovery() {
   if [ -z "$provider" ]; then
     log_recovery "!!! WARNING: No working API providers found via validation !!!"
     log_recovery "!!! Falling back to anthropic (THIS MAY FAIL) !!!"
-    log_recovery "Diagnostic arrays at this point:"
-    log_recovery "  DIAG_API_RESULTS: ${DIAG_API_RESULTS[*]:-empty}"
     provider="anthropic"  # Fallback - let it fail at runtime rather than here
   else
     log_recovery "  Using provider: $provider"
@@ -1261,9 +637,30 @@ run_smart_recovery() {
   log_recovery "Step 3: Generating emergency config..."
   log_recovery "  Parameters: token=${token:0:10}... platform=$platform provider=$provider auth_type=$auth_type model=$model"
   log_recovery "  api_key: ${api_key:+SET (${#api_key} chars)}"
-  # Use SafeModeBot identity - don't inherit original agent's name/identity
-  # The safe-mode workspace has its own IDENTITY.md and SOUL.md
-  local config=$(generate_emergency_config "$token" "$platform" "$provider" "$api_key" "$auth_type" "$model")
+  # Use SafeModeBot identity via generate-config.sh --mode safe-mode
+  local GEN_CONFIG_SCRIPT=""
+  for _gc_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+    [ -f "$_gc_path/generate-config.sh" ] && { GEN_CONFIG_SCRIPT="$_gc_path/generate-config.sh"; break; }
+  done
+  if [ -z "$GEN_CONFIG_SCRIPT" ]; then
+    log_recovery "FATAL: generate-config.sh not found"
+    return 1
+  fi
+
+  local gw_token
+  gw_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
+  local owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
+
+  local config
+  config=$("$GEN_CONFIG_SCRIPT" --mode safe-mode \
+    --token "${api_key:-}" \
+    --provider "$provider" \
+    --platform "$platform" \
+    --bot-token "$token" \
+    --owner-id "$owner_id" \
+    --model "$model" \
+    --gateway-token "$gw_token" \
+    --port "${GROUP_PORT:-18789}")
   
   # Validate config JSON
   if ! validate_config_json "$config"; then
@@ -1282,7 +679,7 @@ run_smart_recovery() {
   # Step 4: Write emergency config
   # Use OPENCLAW_CONFIG_PATH if set (from systemd environment) - this is the ACTUAL
   # config path the gateway uses. For session isolation, systemd sets this to
-  # /etc/systemd/system/${GROUP}/openclaw.session.json
+  # ~/.openclaw/configs/${GROUP}/openclaw.session.json
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
   local config_dir config_path
   
@@ -1292,7 +689,7 @@ run_smart_recovery() {
     config_dir="$(dirname "$config_path")"
     log_recovery "  Using OPENCLAW_CONFIG_PATH: ${config_path}"
   elif [ -n "${GROUP:-}" ]; then
-    config_dir="${home}/.openclaw-sessions/${GROUP}"
+    config_dir="${home}/.openclaw/configs/${GROUP}"
     config_path="${config_dir}/openclaw.session.json"
     log_recovery "  Session isolation mode (fallback): writing to ${config_path}"
   else
@@ -1331,7 +728,7 @@ run_smart_recovery() {
     "google:default": {
       "type": "api_key",
       "provider": "google",
-      "token": "${api_key}"
+      "key": "${api_key}"
     }
   }
 }
@@ -1346,7 +743,7 @@ AUTHEOF
     "anthropic:default": {
       "type": "api_key",
       "provider": "anthropic",
-      "token": "${api_key}"
+      "key": "${api_key}"
     }
   }
 }
@@ -1361,7 +758,7 @@ AUTHEOF
     "openai:default": {
       "type": "api_key",
       "provider": "openai",
-      "token": "${api_key}"
+      "key": "${api_key}"
     }
   }
 }
@@ -1384,12 +781,7 @@ AUTHEOF
   log_recovery "  Platform: $platform"
   log_recovery "  Provider: $provider (auth: $auth_type)"
   log_recovery "  Model: $(get_default_model_for_provider "$provider")"
-  
-  # Write diagnostics summary for boot report
-  local diag_file="/var/log/safe-mode-diagnostics.txt"
-  [ "${TEST_MODE:-}" = "1" ] && diag_file="${TEST_TMPDIR:-/tmp}/safe-mode-diagnostics.txt"
-  write_diagnostics_summary "$diag_file" >/dev/null 2>&1
-  log_recovery "Diagnostics written to $diag_file"
+  log_recovery "  Diagnostics: $AUTH_DIAG_LOG"
   
   # Note: Don't send celebratory notification here - the boot report flow
   # will send a proper safe mode notification with failure details.

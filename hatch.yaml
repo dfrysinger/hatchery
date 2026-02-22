@@ -3,10 +3,10 @@
 package_update: false
 package_upgrade: false
 bootcmd:
-  - [bash, -lc, "mkdir -p /var/lib/init-status;[ -f /var/lib/init-status/setup-complete ]&&exit 0;echo 0>/var/lib/init-status/stage;echo 1>/var/lib/init-status/phase;echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\">>/var/log/init-stages.log;systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null||true;systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null||true;killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null||true"]
-  - [bash, -lc, "[ -f /var/lib/init-status/phase2-complete ]&&exit 0;systemctl stop xrdp xrdp-sesman 2>/dev/null||true;systemctl mask xrdp xrdp-sesman 2>/dev/null||true"]
-  - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&exit 0;mkdir -p /tmp/downloads;curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz& echo $!>/tmp/downloads/node.pid;wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb& echo $!>/tmp/downloads/chrome.pid"]
-  - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&[ ! -f /var/lib/init-status/boot-complete ]&&{ echo 11>/var/lib/init-status/stage;echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready\">>/var/log/init-stages.log;touch /var/lib/init-status/boot-complete;}||true"]
+  - [bash, -lc, "mkdir -p /var/lib/init-status;[ -f /var/lib/init-status/setup-complete ]&&exit 0;[ -f /var/lib/init-status/provision-complete ]&&exit 0;[ -f /var/lib/init-status/phase2-complete ]&&exit 0;echo 0>/var/lib/init-status/stage;echo 1>/var/lib/init-status/phase;echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\">>/var/log/init-stages.log;systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null||true;systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null||true;killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null||true"]
+  - [bash, -lc, "[ -f /var/lib/init-status/phase2-complete ]&&exit 0;[ -f /var/lib/init-status/provision-complete ]&&exit 0;systemctl stop xrdp xrdp-sesman 2>/dev/null||true;systemctl mask xrdp xrdp-sesman 2>/dev/null||true"]
+  - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&exit 0;[ -f /var/lib/init-status/provision-complete ]&&exit 0;mkdir -p /tmp/downloads;curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz& echo $!>/tmp/downloads/node.pid;wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb& echo $!>/tmp/downloads/chrome.pid"]
+  - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&[ ! -f /var/lib/init-status/boot-complete ]&&{ /usr/local/bin/set-stage.sh 11 ready;touch /var/lib/init-status/boot-complete;}||true"]
 write_files:
   - path: /etc/hatchery-version
     content: "main"
@@ -56,7 +56,11 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      echo "$1">/var/lib/init-status/stage
+      # Monotonic stage setter -- only advances, never goes backward
+      NEW="$1"
+      CUR=$(cat /var/lib/init-status/stage 2>/dev/null||echo 0)
+      [ "$NEW" -le "$CUR" ] 2>/dev/null && exit 0
+      echo "$NEW">/var/lib/init-status/stage
       echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) STAGE=$1 PHASE=$(cat /var/lib/init-status/phase 2>/dev/null||echo 1) DESC=$2">>/var/log/init-stages.log
   - path: /usr/local/bin/set-phase.sh
     permissions: "0755"
@@ -121,7 +125,7 @@ write_files:
       notify(){ [ -x /usr/local/bin/tg-notify.sh ]&&/usr/local/bin/tg-notify.sh "$1" 2>/dev/null||true;}
       fetch(){ local u="$1" d="$2" i;for i in 1 2 3;do curl -fSL --max-time 60 -o "$d" "$u"&&return 0;sleep $((i*5));done;notify "bootstrap: fetch failed -- $u";return 1;}
       mkdir -p "$DIR";T=$(mktemp)
-      if [[ "$VER" == "main" ]] || [[ "$VER" == feature/* ]] || [[ "$VER" == fix/* ]];then
+      if [[ "$VER" == "main" ]] || [[ "$VER" == feature/* ]] || [[ "$VER" == fix/* ]] || [[ "$VER" == experiment/* ]] || [[ "$VER" == refactor/* ]];then
         log "Fetching branch $VER";fetch "https://github.com/${REPO}/archive/refs/heads/${VER}.tar.gz" "$T"
         tar -xzf "$T" --strip-components=1 -C "$DIR"
       else
@@ -135,12 +139,12 @@ write_files:
       fi
       rm -f "$T";chmod +x "$DIR"/scripts/*.sh 2>/dev/null||true
       for f in "$DIR"/scripts/*.sh;do bn=$(basename "$f")
-        case "$bn" in bootstrap.sh);;phase1-critical.sh|phase2-background.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh|lib-permissions.sh)cp "$f" /usr/local/sbin/;;*)cp "$f" /usr/local/bin/;;esac;done
+        case "$bn" in bootstrap.sh);;phase1-critical.sh|phase2-background.sh|provision.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh|lib-permissions.sh|lib-health-check.sh|lib-notify.sh|lib-env.sh|lib-auth.sh)cp "$f" /usr/local/sbin/;;*)cp "$f" /usr/local/bin/;;esac;done
       for f in "$DIR"/scripts/*.py;do [ -f "$f" ]&&cp "$f" /usr/local/bin/&&chmod 755 "/usr/local/bin/$(basename "$f")";done
       [ -f "$DIR/gmail-api.py" ]&&cp "$DIR/gmail-api.py" /usr/local/bin/gmail-api.py&&chmod 755 /usr/local/bin/gmail-api.py
       [ -f "$DIR/set-council-group.sh" ]&&cp "$DIR/set-council-group.sh" /usr/local/bin/set-council-group.telegram.sh&&chmod 755 /usr/local/bin/set-council-group.telegram.sh
       chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null||true
-      /usr/local/sbin/phase1-critical.sh
+      if [ -f /usr/local/sbin/provision.sh ];then log "Handing off to provision.sh (single-phase)";/usr/local/sbin/provision.sh;else log "Handing off to phase1-critical.sh (legacy)";/usr/local/sbin/phase1-critical.sh;fi
 users:
   - default
 runcmd:

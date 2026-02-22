@@ -46,11 +46,11 @@ fetch() {
 # ---------------------------------------------------------------------------
 mkdir -p "$INSTALL_DIR"
 
-if [ "$VERSION" = "main" ]; then
-  # Dev mode -- pull HEAD archive
-  log "Dev mode: fetching main branch archive"
+if [ "$VERSION" = "main" ] || [[ "$VERSION" == feature/* ]] || [[ "$VERSION" == fix/* ]] || [[ "$VERSION" == experiment/* ]] || [[ "$VERSION" == refactor/* ]]; then
+  # Branch mode -- pull HEAD archive of the branch
+  log "Branch mode: fetching $VERSION archive"
   TARBALL=$(mktemp)
-  fetch "https://github.com/${REPO}/archive/refs/heads/main.tar.gz" "$TARBALL"
+  fetch "https://github.com/${REPO}/archive/refs/heads/${VERSION}.tar.gz" "$TARBALL"
   tar -xzf "$TARBALL" --strip-components=1 -C "$INSTALL_DIR"
   rm -f "$TARBALL"
 else
@@ -86,7 +86,7 @@ for f in "$INSTALL_DIR"/scripts/*.sh; do
   case "$bn" in
     bootstrap.sh)
       ;; # skip -- do not overwrite ourselves mid-execution
-    phase1-critical.sh|phase2-background.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh|lib-permissions.sh)
+    phase1-critical.sh|phase2-background.sh|provision.sh|build-full-config.sh|generate-session-services.sh|generate-docker-compose.sh|lib-permissions.sh|lib-health-check.sh|lib-notify.sh|lib-env.sh|lib-auth.sh)
       cp "$f" /usr/local/sbin/
       ;;
     *)
@@ -119,5 +119,11 @@ fi
 
 chmod +x /usr/local/sbin/*.sh /usr/local/bin/*.sh 2>/dev/null || true
 
-log "Handing off to phase1-critical.sh"
-/usr/local/sbin/phase1-critical.sh
+# Use single-phase provisioning if available, fall back to legacy phase1→phase2
+if [ -f /usr/local/sbin/provision.sh ]; then
+  log "Handing off to provision.sh (single-phase)"
+  /usr/local/sbin/provision.sh
+else
+  log "Handing off to phase1-critical.sh (legacy)"
+  /usr/local/sbin/phase1-critical.sh
+fi

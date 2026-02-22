@@ -13,6 +13,14 @@
 # Original: /usr/local/sbin/phase2-background.sh (in hatch.yaml write_files)
 # =============================================================================
 set -a; source /etc/droplet.env; set +a
+# CRITICAL: Set permissive umask for the entire phase2 run.
+# DO images default to umask 077 (root creates files as rwx------).
+# npm install -g creates files owned by root — without 022, other users
+# (including the bot user) can't read/execute installed packages.
+umask 022
+
+# Legacy inline base64 decode — see lib-env.sh for canonical version.
+# Kept here because phase2 is a fallback when provision.sh doesn't exist.
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 S="/usr/local/bin/set-stage.sh"
@@ -255,7 +263,11 @@ $S 10 "finalizing"
 # Enable and run the restore service (runs before openclaw restarts)
 systemctl enable openclaw-restore.service 2>/dev/null || true
 systemctl start openclaw-restore.service 2>/dev/null || true
-/usr/local/sbin/build-full-config.sh
+/usr/local/sbin/build-full-config.sh || {
+  echo "FATAL: build-full-config.sh failed — session services may not exist" >&2
+  touch /var/lib/init-status/build-failed
+  # Continue with remaining setup (desktop, sync, etc.) but don't mark boot-complete later
+}
 systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
 systemctl enable openclaw-sync.timer 2>/dev/null || true
 systemctl start openclaw-sync.timer 2>/dev/null || true
@@ -278,8 +290,14 @@ systemctl start desktop
 sleep 3
 systemctl start x11vnc
 systemctl restart xrdp
-touch /var/lib/init-status/phase2-complete
-touch /var/lib/init-status/needs-post-boot-check
+# Only mark phase2 complete if build succeeded
+if [ ! -f /var/lib/init-status/build-failed ]; then
+  touch /var/lib/init-status/phase2-complete
+  touch /var/lib/init-status/needs-post-boot-check
+else
+  echo "WARNING: Skipping phase2-complete marker due to build failure" >> "$LOG"
+  touch /var/lib/init-status/needs-post-boot-check
+fi
 GT=$(cat /home/bot/.openclaw/gateway-token.txt 2>/dev/null)
 [ -n "$GT" ] && curl -sf -X POST http://localhost:18789/api/cron/wake \
   -H "Authorization: Bearer $GT" -H "Content-Type: application/json" \

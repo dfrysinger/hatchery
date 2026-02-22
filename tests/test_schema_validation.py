@@ -33,29 +33,11 @@ def run_parse_habitat(habitat_json, agent_lib=None) -> tuple[int, str, str]:
         env['AGENT_LIB_B64'] = base64.b64encode(json.dumps(agent_lib).encode()).decode()
     
     with tempfile.TemporaryDirectory() as tmpdir:
+        env['HABITAT_OUTPUT_DIR'] = tmpdir
         wrapper = f'''
-import sys
+import sys, os
 sys.path.insert(0, "{SCRIPTS_DIR}")
-
-original_open = open
-def mock_open(path, *args, **kwargs):
-    if path == '/etc/habitat.json':
-        path = "{tmpdir}/habitat.json"
-    elif path == '/etc/habitat-parsed.env':
-        path = "{tmpdir}/habitat-parsed.env"
-    return original_open(path, *args, **kwargs)
-
-import builtins
-builtins.open = mock_open
-
-import os
-original_chmod = os.chmod
-def mock_chmod(path, mode):
-    if path.startswith('/etc/'):
-        path = path.replace('/etc/', '{tmpdir}/')
-    return original_chmod(path, mode)
-os.chmod = mock_chmod
-
+os.environ["HABITAT_OUTPUT_DIR"] = "{tmpdir}"
 exec(open("{PARSE_HABITAT}").read())
 '''
         result = subprocess.run(
@@ -80,29 +62,11 @@ def run_parse_habitat_with_env(habitat_json, agent_lib=None) -> tuple[dict, str,
         env['AGENT_LIB_B64'] = base64.b64encode(json.dumps(agent_lib).encode()).decode()
     
     with tempfile.TemporaryDirectory() as tmpdir:
+        env['HABITAT_OUTPUT_DIR'] = tmpdir
         wrapper = f'''
-import sys
+import sys, os
 sys.path.insert(0, "{SCRIPTS_DIR}")
-
-original_open = open
-def mock_open(path, *args, **kwargs):
-    if path == '/etc/habitat.json':
-        path = "{tmpdir}/habitat.json"
-    elif path == '/etc/habitat-parsed.env':
-        path = "{tmpdir}/habitat-parsed.env"
-    return original_open(path, *args, **kwargs)
-
-import builtins
-builtins.open = mock_open
-
-import os
-original_chmod = os.chmod
-def mock_chmod(path, mode):
-    if path.startswith('/etc/'):
-        path = path.replace('/etc/', '{tmpdir}/')
-    return original_chmod(path, mode)
-os.chmod = mock_chmod
-
+os.environ["HABITAT_OUTPUT_DIR"] = "{tmpdir}"
 exec(open("{PARSE_HABITAT}").read())
 '''
         result = subprocess.run(
@@ -559,22 +523,11 @@ class TestAgentLibraryValidation:
         env['AGENT_LIB_B64'] = base64.b64encode(b'not json').decode()
         
         with tempfile.TemporaryDirectory() as tmpdir:
+            env['HABITAT_OUTPUT_DIR'] = tmpdir
             wrapper = f'''
-import sys
+import sys, os
 sys.path.insert(0, "{SCRIPTS_DIR}")
-original_open = open
-def mock_open(path, *args, **kwargs):
-    if path == '/etc/habitat.json': path = "{tmpdir}/habitat.json"
-    elif path == '/etc/habitat-parsed.env': path = "{tmpdir}/habitat-parsed.env"
-    return original_open(path, *args, **kwargs)
-import builtins
-builtins.open = mock_open
-import os
-original_chmod = os.chmod
-def mock_chmod(path, mode):
-    if path.startswith('/etc/'): path = path.replace('/etc/', '{tmpdir}/')
-    return original_chmod(path, mode)
-os.chmod = mock_chmod
+os.environ["HABITAT_OUTPUT_DIR"] = "{tmpdir}"
 exec(open("{PARSE_HABITAT}").read())
 '''
             result = subprocess.run(

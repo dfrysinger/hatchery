@@ -22,7 +22,7 @@
 #
 # Outputs:  Per-group systemd service files and OpenClaw configs
 #             openclaw-{group}.service
-#             {group}/openclaw.session.json
+#             ~/.openclaw/configs/{group}/openclaw.session.json
 #
 # Env:      SESSION_OUTPUT_DIR  — output directory (default: /etc/systemd/system)
 #           DRY_RUN             — if set, write to SESSION_OUTPUT_DIR only
@@ -31,6 +31,7 @@
 # =============================================================================
 
 set -euo pipefail
+umask 022  # Ensure files are world-readable (DO defaults to 077)
 
 # --- Source environment files (may be called standalone or from another script) ---
 [ -r /etc/droplet.env ] && source /etc/droplet.env || true
@@ -45,11 +46,15 @@ fi
 ISOLATION="${ISOLATION_DEFAULT:-none}"
 ISO_GROUPS="${ISOLATION_GROUPS:-}"
 SVC_USER="${USERNAME:-bot}"
+HOME_DIR="${HOME_DIR:-/home/${SVC_USER}}"
 HABITAT="${HABITAT_NAME:-default}"
 # shellcheck disable=SC2034  # Reserved for future shared path mounting
 SHARED="${ISOLATION_SHARED_PATHS:-}"
 PLATFORM="${PLATFORM:-telegram}"
 OUTPUT_DIR="${SESSION_OUTPUT_DIR:-/etc/systemd/system}"
+# Config files go in bot-owned space (not /etc/systemd/system/) so OpenClaw
+# can persist changes (atomic writes, auto-enable plugins) without root.
+CONFIG_BASE="${HOME_DIR}/.openclaw/configs"
 BASE_PORT=18790
 
 # --- Skip if not session mode or no groups ---
@@ -120,19 +125,20 @@ fi
 group_index=0
 for group in "${SESSION_GROUPS[@]}"; do
     port=$((BASE_PORT + group_index))
-    group_dir="${OUTPUT_DIR}/${group}"
+    config_dir="${CONFIG_BASE}/${group}"
     state_dir="${STATE_BASE}/${group}"
     
     # Create directories with proper ownership
+    # Config dir is under ~/.openclaw/ so bot owns it naturally
     if type ensure_bot_dir &>/dev/null; then
       ensure_bot_dir "$state_dir" 700
-      # Config dir needs 755 for systemd to read
-      mkdir -p "$group_dir" && chmod 755 "$group_dir"
+      ensure_bot_dir "$config_dir" 700
     else
-      mkdir -p "$group_dir"
-      mkdir -p "$state_dir"
-      [ -z "${DRY_RUN:-}" ] && chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 700 "$state_dir"
-      chmod 755 "$group_dir"
+      mkdir -p "$config_dir" "$state_dir"
+      if [ -z "${DRY_RUN:-}" ]; then
+        chown -R "${SVC_USER}:${SVC_USER}" "$state_dir" && chmod 700 "$state_dir"
+        chown "${SVC_USER}:${SVC_USER}" "$config_dir" && chmod 700 "$config_dir"
+      fi
     fi
 
     # Collect agents for this group
@@ -213,60 +219,35 @@ for group in "${SESSION_GROUPS[@]}"; do
     done
     agent_list_json="${agent_list_json}]"
 
-    # Get owner IDs (from habitat-parsed.env)
-    telegram_owner_id="${TELEGRAM_OWNER_ID:-}"
-    discord_owner_id="${DISCORD_OWNER_ID:-}"
+    # --- Generate session config via generate-config.sh ---
+    # Collect agent IDs in this group as comma-separated list
+    group_agent_ids=""
+    for i in $(seq 1 "$AGENT_COUNT"); do
+      _ag_var="AGENT${i}_ISOLATION_GROUP"
+      _ag="${!_ag_var:-}"
+      if [ "$_ag" = "$group" ]; then
+        [ -n "$group_agent_ids" ] && group_agent_ids="${group_agent_ids},"
+        group_agent_ids="${group_agent_ids}agent${i}"
+      fi
+    done
 
-    # Generate OpenClaw session config
-    cat > "${group_dir}/openclaw.session.json" <<SESSIONCFG
-{
-  "gateway": {
-    "mode": "local",
-    "port": ${port},
-    "bind": "loopback",
-    "controlUi": {"enabled": true, "allowInsecureAuth": true},
-    "auth": {"mode": "token", "token": "$(openssl rand -hex 16)"}
-  },
-  "agents": {
-    "defaults": {
-      "model": {"primary": "anthropic/claude-opus-4-5"},
-      "maxConcurrent": 4,
-      "workspace": "${HOME_DIR}/clawd"
-    },
-    "list": ${agent_list_json}
-  },
-  "channels": {
-    "telegram": {
-      "enabled": $([ "$PLATFORM" = "telegram" ] || [ "$PLATFORM" = "both" ] && echo true || echo false),
-      "dmPolicy": "allowlist",
-      "allowFrom": ["${telegram_owner_id}"],
-      "accounts": {${telegram_accounts_json}}
-    },
-    "discord": {
-      "enabled": $([ "$PLATFORM" = "discord" ] || [ "$PLATFORM" = "both" ] && echo true || echo false),
-      "groupPolicy": "allowlist",
-      "dm": {"enabled": true, "policy": "allowlist", "allowFrom": ["${discord_owner_id}"]},
-      "accounts": {${discord_accounts_json}}
-    }
-  },
-  "bindings": [${bindings_json}],
-  "plugins": {
-    "entries": {
-      "telegram": {"enabled": $([ "$PLATFORM" = "telegram" ] || [ "$PLATFORM" = "both" ] && echo true || echo false)},
-      "discord": {"enabled": $([ "$PLATFORM" = "discord" ] || [ "$PLATFORM" = "both" ] && echo true || echo false)}
-    }
-  }
-}
-SESSIONCFG
-    # Make config AND directory writable by service user (OpenClaw needs to persist config changes)
-    # SECURITY: Use restrictive permissions - only owner (bot user) should have write access
-    if type fix_session_config_dir &>/dev/null; then
-      fix_session_config_dir "$group_dir"
-    else
-      chown -R "${SVC_USER}:${SVC_USER}" "$group_dir" 2>/dev/null || true
-      chmod 750 "$group_dir"
-      chmod 600 "${group_dir}/openclaw.session.json"
-    fi
+    session_gw_token=$(openssl rand -hex 16 2>/dev/null || echo "session-token-$(date +%s)")
+
+    GEN_CONFIG_SCRIPT=""
+    for _gc_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+      [ -f "$_gc_path/generate-config.sh" ] && { GEN_CONFIG_SCRIPT="$_gc_path/generate-config.sh"; break; }
+    done
+    [ -z "$GEN_CONFIG_SCRIPT" ] && { echo "FATAL: generate-config.sh not found" >&2; exit 1; }
+
+    "$GEN_CONFIG_SCRIPT" --mode session \
+      --group "$group" \
+      --agents "$group_agent_ids" \
+      --port "$port" \
+      --gateway-token "$session_gw_token" \
+      > "${config_dir}/openclaw.session.json"
+    # Secure config file — bot-owned, read/write only by owner
+    chown "${SVC_USER}:${SVC_USER}" "${config_dir}/openclaw.session.json" 2>/dev/null || true
+    chmod 600 "${config_dir}/openclaw.session.json" 2>/dev/null || true
     
     # Final ownership fix for entire state tree (ensure all subdirs are accessible)
     if [ -z "${DRY_RUN:-}" ]; then
@@ -299,20 +280,70 @@ ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstar
 Restart=on-failure
 RestartSec=10
 RestartPreventExitStatus=2
-TimeoutStartSec=120
+TimeoutStartSec=180
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
 Environment=DISPLAY=:10
-Environment=OPENCLAW_CONFIG_PATH=${group_dir}/openclaw.session.json
+Environment=OPENCLAW_CONFIG_PATH=${config_dir}/openclaw.session.json
 Environment=OPENCLAW_STATE_DIR=${state_dir}
 Environment=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 Environment=GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+Environment=GEMINI_API_KEY=${GOOGLE_API_KEY:-}
 Environment=BRAVE_API_KEY=${BRAVE_API_KEY:-}
 
 [Install]
 WantedBy=multi-user.target
 SVCFILE
+
+    # Generate safeguard .path unit (watches for unhealthy marker)
+    cat > "${OUTPUT_DIR}/openclaw-safeguard-${group}.path" <<PATHFILE
+[Unit]
+Description=Watch for unhealthy marker - ${group}
+
+[Path]
+PathExists=/var/lib/init-status/unhealthy-${group}
+# Only trigger once per marker creation
+MakeDirectory=no
+
+[Install]
+WantedBy=multi-user.target
+PATHFILE
+
+    # Generate safeguard .service unit (runs recovery)
+    cat > "${OUTPUT_DIR}/openclaw-safeguard-${group}.service" <<SGFILE
+[Unit]
+Description=Safe mode handler - ${group}
+After=openclaw-${group}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/safe-mode-handler.sh
+Environment=GROUP=${group}
+Environment=GROUP_PORT=${port}
+Environment=RUN_MODE=path-triggered
+SGFILE
+
+    # Generate E2E check service (runs after main service becomes active)
+    cat > "${OUTPUT_DIR}/openclaw-e2e-${group}.service" <<E2EFILE
+[Unit]
+Description=E2E agent health check - ${group}
+After=openclaw-${group}.service
+BindsTo=openclaw-${group}.service
+# Only run when main service is active
+Requisite=openclaw-${group}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gateway-e2e-check.sh
+Environment=GROUP=${group}
+Environment=GROUP_PORT=${port}
+# E2E can take a while (agent intros), don't let systemd kill it
+TimeoutStartSec=600
+
+[Install]
+WantedBy=openclaw-${group}.service
+E2EFILE
 
     echo "  [${group}] port=${port} agents=${agent_count_in_group} → openclaw-${group}.service"
     group_index=$((group_index + 1))
@@ -334,30 +365,24 @@ if [ -z "${DRY_RUN:-}" ]; then
     systemctl stop openclaw 2>/dev/null || true
     systemctl disable openclaw 2>/dev/null || true
     
-    # Check if boot is complete - only START services after boot finishes
-    # During initial boot, just ENABLE them; they'll auto-start after reboot
-    boot_complete=false
-    [ -f /var/lib/init-status/boot-complete ] && boot_complete=true
-    
+    # Enable all services. Starting is handled by the caller (provision.sh or manual).
+    # Use START_SERVICES=true env var to also start them (e.g., config update while running).
     for group in "${SESSION_GROUPS[@]}"; do
         systemctl enable "openclaw-${group}.service"
+        systemctl enable "openclaw-safeguard-${group}.path" 2>/dev/null || true
+        systemctl enable "openclaw-e2e-${group}.service" 2>/dev/null || true
         
-        if [ "$boot_complete" = "true" ]; then
-            # Boot complete - this is a config update, start services now
+        if [ "${START_SERVICES:-false}" = "true" ]; then
             systemctl start "openclaw-${group}.service" || {
                 echo "  [${group}] Service start returned non-zero (health check may have triggered safe mode)"
-                echo "  [${group}] Service will restart automatically via systemd"
             }
+            systemctl start "openclaw-safeguard-${group}.path" 2>/dev/null || true
         else
-            echo "  [${group}] Boot not complete - service enabled but not started (will start after reboot)"
+            echo "  [${group}] Service enabled (caller will start)"
         fi
     done
     
-    if [ "$boot_complete" = "true" ]; then
-        echo "Session services started (or pending health check restart)."
-    else
-        echo "Session services enabled (will start automatically after reboot)."
-    fi
+    echo "Session services enabled${START_SERVICES:+ and started}."
 else
     echo "DRY_RUN mode — services written to ${OUTPUT_DIR}"
 fi
