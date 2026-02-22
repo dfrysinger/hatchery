@@ -145,6 +145,86 @@ class TestRestoreWorkspaceFiles:
 # scripts are in scripts/ directory (tested above), not embedded in hatch.yaml.
 
 
+class TestDropboxPriority:
+    """Tests for Dropbox workspace files taking priority over config regeneration."""
+
+    def test_restore_sets_dropbox_marker(self):
+        """Restore script should create a marker file when workspace files are restored."""
+        content = read_script('restore-openclaw-state.sh')
+        assert 'dropbox-workspace-restored' in content, \
+            "Restore must create dropbox-workspace-restored marker"
+
+    def test_restore_marker_conditional_on_workspace_count(self):
+        """Marker should only be set when workspace files were actually restored (WC > 0)."""
+        content = read_script('restore-openclaw-state.sh')
+        # Should check WC before setting marker
+        assert re.search(r'\$WC.*-gt\s*0', content), \
+            "Marker should only be set when workspace file count > 0"
+
+    def test_build_config_checks_dropbox_marker(self):
+        """build-full-config.sh should check for the Dropbox restore marker."""
+        content = read_script('build-full-config.sh')
+        assert 'dropbox-workspace-restored' in content, \
+            "build-full-config.sh must check for dropbox-workspace-restored marker"
+
+    def test_build_config_skips_workspace_when_marker_present(self):
+        """build-full-config.sh should skip workspace file generation when marker exists."""
+        content = read_script('build-full-config.sh')
+        assert 'SKIP_WORKSPACE_FILES' in content, \
+            "build-full-config.sh must use SKIP_WORKSPACE_FILES flag"
+        # Should have a conditional around workspace file writes
+        assert re.search(r'SKIP_WORKSPACE_FILES.*true', content), \
+            "build-full-config.sh must check SKIP_WORKSPACE_FILES flag"
+
+    def test_build_config_removes_marker_after_check(self):
+        """build-full-config.sh should consume (remove) the marker file after checking it."""
+        content = read_script('build-full-config.sh')
+        assert 'rm -f /var/lib/init-status/dropbox-workspace-restored' in content, \
+            "build-full-config.sh must remove marker after consuming it"
+
+    def test_build_config_still_creates_symlinks(self):
+        """build-full-config.sh should still create symlinks even when skipping workspace files."""
+        content = read_script('build-full-config.sh')
+        # Symlinks (TOOLS.md, HEARTBEAT.md, shared/) should be outside the skip block
+        # The fi closing SKIP_WORKSPACE_FILES should come before the ln -sf lines
+        lines = content.split('\n')
+        fi_line = None
+        ln_line = None
+        for idx, line in enumerate(lines):
+            if 'end SKIP_WORKSPACE_FILES' in line:
+                fi_line = idx
+            if fi_line and 'ln -sf' in line and 'TOOLS.md' in line:
+                ln_line = idx
+                break
+        assert fi_line is not None and ln_line is not None and ln_line > fi_line, \
+            "Symlinks must be created outside the SKIP_WORKSPACE_FILES conditional"
+
+    def test_apply_config_clears_dropbox_marker(self):
+        """apply-config.sh should clear the Dropbox marker so API uploads always regenerate."""
+        content = read_script('apply-config.sh')
+        assert 'dropbox-workspace-restored' in content, \
+            "apply-config.sh must reference the dropbox-workspace-restored marker"
+        assert 'rm -f /var/lib/init-status/dropbox-workspace-restored' in content, \
+            "apply-config.sh must remove the marker before running build-full-config.sh"
+
+    def test_apply_config_clears_marker_before_build(self):
+        """apply-config.sh should clear marker BEFORE calling build-full-config.sh."""
+        content = read_script('apply-config.sh')
+        rm_pos = content.find('rm -f /var/lib/init-status/dropbox-workspace-restored')
+        # Find the actual execution of build-full-config.sh (not header comments)
+        build_pos = content.find('/usr/local/sbin/build-full-config.sh')
+        assert rm_pos != -1, "apply-config.sh must have rm command for marker"
+        assert build_pos != -1, "apply-config.sh must call build-full-config.sh"
+        assert rm_pos < build_pos, \
+            "Marker removal must happen before build-full-config.sh is called"
+
+    def test_build_config_skips_tools_when_marker_present(self):
+        """build-full-config.sh should also skip global TOOLS.md when preserving Dropbox files."""
+        content = read_script('build-full-config.sh')
+        assert re.search(r'SKIP_WORKSPACE_FILES.*true.*TOOLS', content, re.DOTALL), \
+            "Global TOOLS.md generation should also check SKIP_WORKSPACE_FILES"
+
+
 class TestSafetyChecks:
     """Tests for safety features in sync/restore."""
 

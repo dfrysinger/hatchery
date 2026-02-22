@@ -129,6 +129,15 @@ TC=$(find "$H/.openclaw" -name '*.jsonl' 2>/dev/null | wc -l)
 WC=$(find "$H/clawd/agents" -maxdepth 2 -name '*.md' ! -type l 2>/dev/null | wc -l)
 echo "Restored $TC transcript files, $WC workspace files ($FAIL warnings)"
 
+# Mark that workspace files were restored from Dropbox so build-full-config.sh
+# preserves them instead of overwriting with config-generated versions.
+# This lets runtime agent modifications (SOUL.md edits etc.) persist across reboots.
+if [ "$WC" -gt 0 ]; then
+    mkdir -p /var/lib/init-status
+    touch /var/lib/init-status/dropbox-workspace-restored
+    echo "Marker set: dropbox-workspace-restored (workspace files will be preserved)"
+fi
+
 # Retry logic for failed restores
 if [ "$TC" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
     echo "RETRY: No transcripts restored, retrying in 5s..."

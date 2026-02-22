@@ -62,6 +62,10 @@ echo "parse-habitat.py complete"
 source /etc/habitat-parsed.env
 echo "Loaded updated /etc/habitat-parsed.env"
 
+# Clear Dropbox restore marker - explicit API config uploads should always
+# regenerate workspace files (they represent intentional user changes)
+rm -f /var/lib/init-status/dropbox-workspace-restored
+
 # Re-run build-full-config to regenerate OpenClaw config
 echo "Running build-full-config.sh..."
 /usr/local/sbin/build-full-config.sh

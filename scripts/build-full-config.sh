@@ -79,9 +79,20 @@ if [ -f /var/lib/init-status/safe-mode ]; then
 else
   cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
 fi
+# Check if Dropbox-restored workspace files should be preserved.
+# When restore-openclaw-state.sh successfully restores files, it sets this marker.
+# We skip regeneration so runtime agent modifications persist across reboots.
+# API config uploads (apply-config.sh) clear this marker so they always regenerate.
+SKIP_WORKSPACE_FILES=false
+if [ -f /var/lib/init-status/dropbox-workspace-restored ]; then
+  echo "Dropbox workspace files restored - preserving them (skipping regeneration)"
+  SKIP_WORKSPACE_FILES=true
+  rm -f /var/lib/init-status/dropbox-workspace-restored
+fi
 for i in $(seq 1 $AC); do
   AD="$H/clawd/agents/agent${i}"
   NV="AGENT${i}_NAME"; ANAME="${!NV}"
+  if [ "$SKIP_WORKSPACE_FILES" != "true" ]; then
   IDV="AGENT${i}_IDENTITY_B64"; AIDENT=$(d "${!IDV}")
   SV="AGENT${i}_SOUL_B64"; ASOUL=$(d "${!SV}")
   AGV="AGENT${i}_AGENTS_B64"; AAGENTS=$(d "${!AGV}")
@@ -205,6 +216,7 @@ BOOTMD
   { [ -n "$GU" ] && printf '%s\n' "$GU" || echo "- Name: (learn)"
     [ -n "$AUSER" ] && printf '\n%s\n' "$AUSER"
   } > "$AD/USER.md"
+  fi  # end SKIP_WORKSPACE_FILES check
   ln -sf "$H/clawd/TOOLS.md" "$AD/TOOLS.md" 2>/dev/null || true
   ln -sf "$H/clawd/HEARTBEAT.md" "$AD/HEARTBEAT.md" 2>/dev/null || true
   [ -n "$CGI" ] && ln -sf "$H/clawd/shared" "$AD/shared" 2>/dev/null || true
@@ -223,8 +235,8 @@ SHMD
   done
   chown -R $USERNAME:$USERNAME "$H/clawd/shared" 2>/dev/null || true
 fi
-# Create global TOOLS.md if provided
-if [ -n "$GTO" ]; then
+# Create global TOOLS.md if provided (skip if Dropbox files preserved)
+if [ -n "$GTO" ] && [ "$SKIP_WORKSPACE_FILES" != "true" ]; then
   printf '%s\n' "$GTO" > "$H/clawd/TOOLS.md"
   if type ensure_bot_file &>/dev/null; then
     ensure_bot_file "$H/clawd/TOOLS.md" 644
