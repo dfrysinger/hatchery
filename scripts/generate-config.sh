@@ -338,6 +338,9 @@ generate_full() {
           heartbeat: { every: "30m", session: "heartbeat" },
           models: {
             "openai/gpt-5.2": { params: { reasoning_effort: "high" } }
+          },
+          tools: {
+            exec: { security: "full", ask: "off" }
           }
         },
         list: $agents_list
@@ -393,7 +396,10 @@ generate_session() {
         defaults: {
           model: { primary: "anthropic/claude-opus-4-5" },
           maxConcurrent: 4,
-          workspace: $workspace
+          workspace: $workspace,
+          tools: {
+            exec: { security: "full", ask: "off" }
+          }
         },
         list: $agents_list
       },
@@ -480,7 +486,10 @@ generate_safe_mode() {
       agents: {
         defaults: {
           model: { primary: $model },
-          workspace: $defaults_workspace
+          workspace: $defaults_workspace,
+          tools: {
+            exec: { security: "full", ask: "off" }
+          }
         },
         list: [{
           id: "safe-mode",

@@ -227,6 +227,19 @@ else
   fail "safe-mode exec ask is not 'off' — bot will be blocked by confirmation prompts"
 fi
 
+# agents.defaults.tools.exec is where OpenClaw actually reads per-agent exec policy
+if echo "$SM_CONFIG" | jq -e '.agents.defaults.tools.exec' >/dev/null 2>&1; then
+  pass "safe-mode agents.defaults includes tools.exec"
+else
+  fail "safe-mode agents.defaults missing tools.exec — agent-level exec policy not set"
+fi
+
+if echo "$SM_CONFIG" | jq -r '.agents.defaults.tools.exec.security' 2>/dev/null | grep -q 'full'; then
+  pass "safe-mode agents.defaults exec security is 'full'"
+else
+  fail "safe-mode agents.defaults exec security is not 'full'"
+fi
+
 # =============================================================================
 # Bug 6: phase2-background.sh missing umask 022
 # npm install -g creates files as 700 on DO images (default umask 077)
