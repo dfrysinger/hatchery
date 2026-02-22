@@ -768,10 +768,32 @@ AUTHEOF
     esac
     
     if [ -n "$auth_profiles" ]; then
-      echo "$auth_profiles" > "${auth_dir}/auth-profiles.json"
-      chmod 600 "${auth_dir}/auth-profiles.json"
+      local auth_file="${auth_dir}/auth-profiles.json"
+      
+      # Merge with existing profiles instead of overwriting.
+      # This preserves OAuth tokens (like openai-codex) that were already configured.
+      if [ -f "$auth_file" ] && command -v jq &>/dev/null; then
+        local existing
+        existing=$(cat "$auth_file" 2>/dev/null)
+        if [ -n "$existing" ] && echo "$existing" | jq -e '.profiles' &>/dev/null; then
+          log_recovery "Merging with existing auth-profiles.json (preserving OAuth tokens)"
+          # Merge: existing profiles + new profile (new wins on conflict for the emergency provider)
+          local merged
+          merged=$(jq -s '.[0].profiles as $existing | .[1] | .profiles = ($existing + .profiles)' \
+            <(echo "$existing") <(echo "$auth_profiles") 2>/dev/null)
+          if [ -n "$merged" ] && echo "$merged" | jq -e '.profiles' &>/dev/null; then
+            auth_profiles="$merged"
+            log_recovery "  Preserved existing profiles, added emergency provider"
+          else
+            log_recovery "  Merge failed, using new profiles only (existing may be lost)"
+          fi
+        fi
+      fi
+      
+      echo "$auth_profiles" > "$auth_file"
+      chmod 600 "$auth_file"
       [ -n "${USERNAME:-}" ] && chown -R "${USERNAME}:${USERNAME}" "${state_dir}/agents" 2>/dev/null
-      log_recovery "Created auth-profiles.json at ${auth_dir}/auth-profiles.json"
+      log_recovery "Written auth-profiles.json at $auth_file"
     fi
 
     ensure_exec_approvals "$home"
