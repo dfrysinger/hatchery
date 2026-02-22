@@ -89,9 +89,7 @@ esac
 # Config Section Builders
 # =============================================================================
 
-# Exec policy — single definition used by both top-level tools and agents.defaults.
-# Top-level tools.exec = gateway policy; agents.defaults.tools.exec = agent policy.
-# Both must be set (OpenClaw reads different levels for different operations).
+# Exec policy — used for top-level tools.exec (gateway-wide policy).
 EXEC_POLICY='{"security":"full","ask":"off"}'
 
 # Build the gateway section (common to all modes)
@@ -344,8 +342,7 @@ generate_full() {
           heartbeat: { every: "30m", session: "heartbeat" },
           models: {
             "openai/gpt-5.2": { params: { reasoning_effort: "high" } }
-          },
-          tools: { exec: $exec_policy }
+          }
         },
         list: $agents_list
       },
@@ -394,15 +391,13 @@ generate_session() {
     --argjson dc "$dc_channel" \
     --argjson tg_enabled "$_tg_enabled" \
     --argjson dc_enabled "$_dc_enabled" \
-    --argjson exec_policy "$EXEC_POLICY" \
     --arg workspace "${HOME_DIR}/clawd" \
     '{
       agents: {
         defaults: {
           model: { primary: "anthropic/claude-opus-4-5" },
           maxConcurrent: 4,
-          workspace: $workspace,
-          tools: { exec: $exec_policy }
+          workspace: $workspace
         },
         list: $agents_list
       },
@@ -490,8 +485,7 @@ generate_safe_mode() {
       agents: {
         defaults: {
           model: { primary: $model },
-          workspace: $defaults_workspace,
-          tools: { exec: $exec_policy }
+          workspace: $defaults_workspace
         },
         list: [{
           id: "safe-mode",
