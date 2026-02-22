@@ -54,7 +54,7 @@ log "ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE, RECOVERY_ATTEMPTS=$RECOVERY_ATT
 if [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECOVERY_ATTEMPTS" ]; then
   log "CRITICAL: Already exhausted $MAX_RECOVERY_ATTEMPTS recovery attempts"
   touch /var/lib/init-status/gateway-failed${GROUP:+-$GROUP}
-  echo '13' > /var/lib/init-status/stage
+  set_stage 13
 
   # Try to notify even in critical state
   notify_find_token && notify_send_message "🔴 <b>[${HC_HABITAT_NAME}] CRITICAL FAILURE</b>
@@ -145,8 +145,7 @@ SAFEMD
 done
 
 # Update stages
-echo '12' > /var/lib/init-status/stage
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=12 DESC=safe-mode" >> /var/log/init-stages.log
+set_stage 12
 
 # Increment recovery counter
 echo "$((RECOVERY_ATTEMPTS + 1))" > "$HC_RECOVERY_COUNTER"
@@ -258,7 +257,7 @@ restart_and_verify() {
 
   log "CRITICAL: $target_service failed to start"
   touch "/var/lib/init-status/gateway-failed${GROUP:+-$GROUP}"
-  echo '13' > /var/lib/init-status/stage
+  set_stage 13
   return 1
 }
 

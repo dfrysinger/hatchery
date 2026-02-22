@@ -6,7 +6,7 @@ bootcmd:
   - [bash, -lc, "mkdir -p /var/lib/init-status;[ -f /var/lib/init-status/setup-complete ]&&exit 0;[ -f /var/lib/init-status/provision-complete ]&&exit 0;[ -f /var/lib/init-status/phase2-complete ]&&exit 0;echo 0>/var/lib/init-status/stage;echo 1>/var/lib/init-status/phase;echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=0 PHASE=1 DESC=init\">>/var/log/init-stages.log;systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades 2>/dev/null||true;systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null||true;killall -9 unattended-upgr apt apt-get dpkg 2>/dev/null||true"]
   - [bash, -lc, "[ -f /var/lib/init-status/phase2-complete ]&&exit 0;[ -f /var/lib/init-status/provision-complete ]&&exit 0;systemctl stop xrdp xrdp-sesman 2>/dev/null||true;systemctl mask xrdp xrdp-sesman 2>/dev/null||true"]
   - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&exit 0;[ -f /var/lib/init-status/provision-complete ]&&exit 0;mkdir -p /tmp/downloads;curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/downloads/node.tar.xz& echo $!>/tmp/downloads/node.pid;wget -q -O /tmp/downloads/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb& echo $!>/tmp/downloads/chrome.pid"]
-  - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&[ ! -f /var/lib/init-status/boot-complete ]&&{ echo 11>/var/lib/init-status/stage;echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=11 DESC=ready\">>/var/log/init-stages.log;touch /var/lib/init-status/boot-complete;}||true"]
+  - [bash, -lc, "[ -f /var/lib/init-status/setup-complete ]&&[ ! -f /var/lib/init-status/boot-complete ]&&{ /usr/local/bin/set-stage.sh 11 ready;touch /var/lib/init-status/boot-complete;}||true"]
 write_files:
   - path: /etc/hatchery-version
     content: "main"
@@ -56,7 +56,11 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/bash
-      echo "$1">/var/lib/init-status/stage
+      # Monotonic stage setter -- only advances, never goes backward
+      NEW="$1"
+      CUR=$(cat /var/lib/init-status/stage 2>/dev/null||echo 0)
+      [ "$NEW" -le "$CUR" ] 2>/dev/null && exit 0
+      echo "$NEW">/var/lib/init-status/stage
       echo "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) STAGE=$1 PHASE=$(cat /var/lib/init-status/phase 2>/dev/null||echo 1) DESC=$2">>/var/log/init-stages.log
   - path: /usr/local/bin/set-phase.sh
     permissions: "0755"

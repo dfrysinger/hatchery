@@ -48,9 +48,8 @@ if [ -f "$RECENTLY_RECOVERED" ]; then
   fi
 fi
 
-# Signal health-check stage to API server (stage 10)
-# (after skip check so we don't clobber stage 12 set by safe-mode-handler)
-echo '10' > /var/lib/init-status/stage 2>/dev/null || true
+# Signal health-check stage to API server
+set_stage 10
 
 log "============================================================"
 log "========== E2E HEALTH CHECK STARTING =========="
@@ -329,7 +328,7 @@ log "HEALTHY=$HEALTHY, ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE"
 if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
   log "DECISION: SAFE MODE STABLE — recovery config working"
   rm -f "$HC_UNHEALTHY_MARKER" "$HC_RECOVERY_COUNTER" "/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}" /var/lib/init-status/needs-post-boot-check
-  echo '11' > /var/lib/init-status/stage
+  set_stage 11
   touch /var/lib/init-status/setup-complete
   notify_send_safe_mode_intro
 
@@ -337,7 +336,7 @@ elif [ "$HEALTHY" = "true" ]; then
   log "DECISION: SUCCESS — all agents healthy"
   rm -f "$SAFE_MODE_FILE" "$HC_UNHEALTHY_MARKER" "$HC_RECOVERY_COUNTER" "/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}" /var/lib/init-status/needs-post-boot-check
   for si in $(seq 1 "$AC"); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
-  echo '11' > /var/lib/init-status/stage
+  set_stage 11
   touch /var/lib/init-status/setup-complete
 
   # Send agent intros (only on fresh boot, skipped on re-checks)

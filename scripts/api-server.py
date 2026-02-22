@@ -41,35 +41,15 @@ def check_service(name):
   except:return False
 
 def get_status():
-  # Check completion markers first to determine smart defaults
+  # Read completion markers (used for ready/rebooting flags, not stage logic)
+  setup_done=os.path.exists('/var/lib/init-status/setup-complete')
+  needs_check=os.path.exists('/var/lib/init-status/needs-post-boot-check')
   p1_done=os.path.exists('/var/lib/init-status/phase1-complete')
   p2_done=os.path.exists('/var/lib/init-status/phase2-complete')
   prov_done=os.path.exists('/var/lib/init-status/provision-complete')
-  setup_done=os.path.exists('/var/lib/init-status/setup-complete')
-  needs_check=os.path.exists('/var/lib/init-status/needs-post-boot-check')
   
-  # Smart defaults based on completion state (handles transient read failures during reboot)
-  # needs-post-boot-check exists during reboot until post-boot-check.sh completes
-  if setup_done and not needs_check:
-    s,p=11,2  # Ready state (fully booted)
-  elif setup_done and needs_check:
-    s,p=9,2   # Rebooting (setup done but post-boot-check pending)
-  elif prov_done or p2_done:
-    s,p=9,2   # Provisioning/phase2 done, rebooting for health checks
-  elif p1_done:
-    s,p=4,2   # Phase 1 done, starting phase 2
-  else:
-    s,p=0,1   # Initial state
-  
-  # Minimum stage implied by marker files (monotonic — stage must never go backward)
-  # Note: safe mode (12) and critical failure (13) are ABOVE ready (11),
-  # so setup_done floor of 11 won't prevent them from showing
-  min_stage=0
-  if p1_done:min_stage=4
-  if prov_done or p2_done:min_stage=9
-  if setup_done:min_stage=11
-  
-  # Try to read actual values (overrides defaults if file read succeeds)
+  # Stage file is the single source of truth (monotonic writes enforced by set_stage/set-stage.sh)
+  s,p=0,1
   try:
     with open('/var/lib/init-status/stage','r') as f:
       val=f.read().strip()
@@ -78,10 +58,7 @@ def get_status():
       val=f.read().strip()
       if val:p=int(val)
   except:pass
-  
-  # Enforce monotonic stage: never report lower than what markers prove
-  # (handles bootcmd resetting stage file to 0 during reboot)
-  if s<min_stage:s=min_stage
+  if s>=9:p=2
   
   # Check bot status based on isolation mode
   # Read isolation config from habitat-parsed.env

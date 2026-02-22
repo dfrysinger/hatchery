@@ -33,6 +33,22 @@ env_load() {
   return 0
 }
 
+# --- Stage management ---
+# Single source of truth for boot stage transitions.
+# Monotonic: only advances forward, never goes backward.
+# Stage map: 0-8=provisioning, 9=restarting, 10=health-check,
+#            11=ready, 12=safe-mode, 13=critical-failure
+INIT_STATUS_DIR="/var/lib/init-status"
+
+set_stage() {
+  local new="${1:?Usage: set_stage <number>}"
+  local current
+  current=$(cat "$INIT_STATUS_DIR/stage" 2>/dev/null || echo 0)
+  [ "$new" -le "$current" ] && return 0
+  echo "$new" > "$INIT_STATUS_DIR/stage" 2>/dev/null || true
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STAGE=$new DESC=${2:-}" >> /var/log/init-stages.log 2>/dev/null || true
+}
+
 # --- Decode API keys from base64 environment variables ---
 # Populates standard *_API_KEY vars from their *_B64 counterparts.
 # Will NOT overwrite existing values (respects pre-set env vars).
