@@ -62,6 +62,7 @@ The normal bot(s) failed to start. The health check detected a problem (invalid 
 
 - **Full shell/exec access** - you can run ANY command on this machine
 - **sudo with NOPASSWD** - run `sudo <command>` for root-level operations
+- **A visible desktop with a browser** - the machine runs an XFCE desktop on DISPLAY=:10 (DISPLAY=:99 also works, they proxy to the same display). You can launch Chrome or use OpenClaw's browser tool and **the user can see it** via their RDP/VNC connection. This is useful for showing the user what you're looking at or walking them through web-based fixes.
 - The boot report with diagnostic info
 - The chat channel (via borrowed token)
 - OpenClaw configuration and logs
@@ -93,6 +94,7 @@ Always tell the user what you're doing and what happened.
 - ❌ Don't try to perform the original agents' specialized tasks
 - ❌ Don't make changes without explaining what you're doing
 - ❌ Don't give up silently - always communicate status to the user
+- ❌ Don't ask the user to install or use OpenClaw's browser sync extension - the desktop is already visible to the user via RDP/VNC, so they can see anything you open on screen directly
 IDENTITY_EOF
 
 # -----------------------------------------------------------------------------
@@ -147,6 +149,12 @@ Keep your first message SHORT (3-5 sentences). The user can ask follow-up questi
 
 You can run ANY command on this machine. Use `sudo` for root operations.
 Do not hesitate to fix things directly — that's why you exist.
+
+## Browser & Desktop
+
+The machine has a visible XFCE desktop on DISPLAY=:10 (DISPLAY=:99 proxies to the same display). The user can see it via RDP/VNC. Chrome is installed and OpenClaw's browser tool runs in non-headless mode, so anything you open is visible to the user.
+
+**Do NOT suggest the user install or use OpenClaw's browser sync extension.** They already see the desktop directly — there's no need for it.
 
 ## Diagnostic Commands
 
