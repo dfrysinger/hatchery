@@ -69,67 +69,43 @@ check_api_key_validity() {
   local service="$1"
   log "  Checking API key validity..."
 
-  local config_file="$CONFIG_PATH"
-
-  # In safe mode, validate from config
-  if hc_is_in_safe_mode && [ -f "$config_file" ]; then
+  # In safe mode, read keys from the config file (env vars may be stale)
+  if hc_is_in_safe_mode && [ -f "$CONFIG_PATH" ]; then
     log "  Safe mode — checking API from config"
-
-    local cfg_anthropic cfg_google cfg_openai
-    cfg_anthropic=$(jq -r '.env.ANTHROPIC_API_KEY // empty' "$config_file" 2>/dev/null)
-    cfg_google=$(jq -r '.env.GOOGLE_API_KEY // empty' "$config_file" 2>/dev/null)
-    cfg_openai=$(jq -r '.env.OPENAI_API_KEY // empty' "$config_file" 2>/dev/null)
-
-    if [ -n "$cfg_google" ] && curl -sf --max-time 5 \
-      "https://generativelanguage.googleapis.com/v1/models?key=${cfg_google}" >/dev/null 2>&1; then
-      log "  Google API key OK"; return 0
-    fi
-
-    if [ -n "$cfg_anthropic" ]; then
-      local auth_header
-      auth_header=$(get_auth_header "anthropic" "$cfg_anthropic")
-      if curl -sf --max-time 5 -H "$auth_header" -H "anthropic-version: 2023-06-01" \
-        "https://api.anthropic.com/v1/models" >/dev/null 2>&1; then
-        log "  Anthropic API key OK"; return 0
+    local key
+    for provider in google anthropic openai; do
+      local env_var
+      case "$provider" in
+        anthropic) env_var="ANTHROPIC_API_KEY" ;;
+        openai)    env_var="OPENAI_API_KEY" ;;
+        google)    env_var="GOOGLE_API_KEY" ;;
+      esac
+      key=$(jq -r ".env.${env_var} // empty" "$CONFIG_PATH" 2>/dev/null)
+      if [ -n "$key" ] && validate_api_key "$provider" "$key"; then
+        log "  ${provider} API key OK (${VALIDATION_REASON:-valid})"; return 0
       fi
-    fi
-
-    if [ -n "$cfg_openai" ] && curl -sf --max-time 5 \
-      -H "Authorization: Bearer ${cfg_openai}" "https://api.openai.com/v1/models" >/dev/null 2>&1; then
-      log "  OpenAI API key OK"; return 0
-    fi
-
+    done
     log "  No working API key in safe mode config"; return 1
   fi
 
-  # Normal mode: check journal for auth errors
+  # Normal mode: check journal for recent auth errors first (fast path)
   local auth_errors
   auth_errors=$(journalctl -u "$service" --since "30 seconds ago" --no-pager 2>/dev/null | \
     grep -iE "(authentication_error|Invalid.*bearer.*token|invalid.*api.*key)" | head -3)
   [ -n "$auth_errors" ] && { log "  Found API auth errors"; return 1; }
 
-  # Direct API validation
-  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-    local auth_header
-    auth_header=$(get_auth_header "anthropic" "${ANTHROPIC_API_KEY}")
-    local response
-    response=$(curl -sf --max-time 5 -H "$auth_header" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
-      -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
-      "https://api.anthropic.com/v1/messages" 2>&1)
-    if ! echo "$response" | grep -qiE "(authentication_error|invalid.*key|401)"; then
-      log "  Anthropic API key OK"; return 0
+  # Direct API validation via lib-auth
+  for provider in anthropic openai google; do
+    local key=""
+    case "$provider" in
+      anthropic) key="${ANTHROPIC_API_KEY:-}" ;;
+      openai)    key="${OPENAI_API_KEY:-}" ;;
+      google)    key="${GOOGLE_API_KEY:-}" ;;
+    esac
+    if [ -n "$key" ] && validate_api_key "$provider" "$key"; then
+      log "  ${provider} API key OK (${VALIDATION_REASON:-valid})"; return 0
     fi
-  fi
-
-  if [ -n "${OPENAI_API_KEY:-}" ] && curl -sf --max-time 5 \
-    -H "Authorization: Bearer ${OPENAI_API_KEY}" "https://api.openai.com/v1/models" >/dev/null 2>&1; then
-    log "  OpenAI API key OK"; return 0
-  fi
-
-  if [ -n "${GOOGLE_API_KEY:-}" ] && curl -sf --max-time 5 \
-    "https://generativelanguage.googleapis.com/v1/models?key=${GOOGLE_API_KEY}" >/dev/null 2>&1; then
-    log "  Google API key OK"; return 0
-  fi
+  done
 
   log "  No working API keys found"; return 1
 }
@@ -224,6 +200,7 @@ check_agents_e2e() {
     [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
 
     local output
+    # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
     output=$(timeout 60 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
       --agent "$agent_id" --message "$test_prompt" --timeout 30 --json 2>&1)
     local rc=$?
@@ -286,6 +263,7 @@ send_agent_intros() {
     local env_prefix=""
     [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
 
+    # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
     timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
       --agent "$agent_id" --message "$intro_prompt" --deliver \
       --reply-channel "$HC_PLATFORM" --reply-account "$agent_id" --reply-to "$owner_id" \

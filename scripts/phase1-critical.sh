@@ -23,6 +23,8 @@
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 set -e
 set -a; source /etc/droplet.env; set +a
+# Legacy inline base64 decode — see lib-env.sh for canonical version.
+# Kept here because phase1 is a fallback when provision.sh doesn't exist.
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 if ! python3 /usr/local/bin/parse-habitat.py; then
   # Fallback: extract minimal config directly from HABITAT_B64 for safe-mode

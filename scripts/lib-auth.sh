@@ -22,6 +22,7 @@ type log &>/dev/null || log() { echo "[lib-auth] $*" >&2; }
 # Global result variables (avoid subshell issues with $())
 VALIDATION_REASON=""
 FOUND_TOKEN_RESULT=""
+# shellcheck disable=SC2034  # Read by callers after find_working_api_provider returns
 FOUND_API_PROVIDER=""
 
 # =============================================================================
@@ -87,8 +88,8 @@ validate_telegram_token() {
   fi
 
   local response
-  response=$(curl -sf --max-time 10 "https://api.telegram.org/bot${token}/getMe" 2>&1)
-  if [ $? -eq 0 ] && echo "$response" | jq -e '.ok == true' >/dev/null 2>&1; then
+  if response=$(curl -sf --max-time 10 "https://api.telegram.org/bot${token}/getMe" 2>&1) \
+     && echo "$response" | jq -e '.ok == true' >/dev/null 2>&1; then
     return 0
   fi
 
@@ -106,10 +107,10 @@ validate_discord_token() {
   fi
 
   local response
-  response=$(curl -sf --max-time 10 \
-    -H "Authorization: Bot ${token}" \
-    "https://discord.com/api/v10/users/@me" 2>&1)
-  if [ $? -eq 0 ] && echo "$response" | jq -e '.id' >/dev/null 2>&1; then
+  if response=$(curl -sf --max-time 10 \
+       -H "Authorization: Bot ${token}" \
+       "https://discord.com/api/v10/users/@me" 2>&1) \
+     && echo "$response" | jq -e '.id' >/dev/null 2>&1; then
     return 0
   fi
 
@@ -146,12 +147,11 @@ validate_api_key() {
 
   case "$provider" in
     anthropic)
+      # Use /v1/models endpoint — lightweight auth check, no model name needed
       response=$(curl -s --max-time 10 -w "\n%{http_code}" \
         -H "$auth_hdr" \
         -H "anthropic-version: 2023-06-01" \
-        -H "content-type: application/json" \
-        -d '{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
-        "https://api.anthropic.com/v1/messages" 2>/dev/null)
+        "https://api.anthropic.com/v1/models" 2>/dev/null)
       ;;
     openai)
       response=$(curl -s --max-time 10 -w "\n%{http_code}" \
@@ -172,11 +172,7 @@ validate_api_key() {
 
   case "$http_code" in
     200) VALIDATION_REASON="valid"; return 0 ;;
-    400)
-      # Anthropic returns 400 for bad request but auth OK
-      [ "$provider" = "anthropic" ] && { VALIDATION_REASON="valid"; return 0; }
-      VALIDATION_REASON="400 bad request"; return 1
-      ;;
+    400) VALIDATION_REASON="400 bad request"; return 1 ;;
     401) VALIDATION_REASON="401 unauthorized"; return 1 ;;
     403) VALIDATION_REASON="403 forbidden"; return 1 ;;
     429) VALIDATION_REASON="429 rate limited"; return 1 ;;
@@ -360,6 +356,7 @@ find_working_api_provider() {
 
     if validate_api_key "$provider" "$key"; then
       _diag "api:${provider}:✅:${VALIDATION_REASON:-valid}"
+      # shellcheck disable=SC2034  # Read by callers
       FOUND_API_PROVIDER="$provider"
       return 0
     else

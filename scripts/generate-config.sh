@@ -432,6 +432,7 @@ generate_safe_mode() {
   fi
 
   # Use explicitly passed model, or fall back to provider default
+  # NOTE: Keep in sync with get_default_model_for_provider() in lib-auth.sh
   local model="${SM_MODEL:-}"
   if [ -z "$model" ]; then
     case "$SM_PROVIDER" in

@@ -19,6 +19,8 @@ set -a; source /etc/droplet.env; set +a
 # (including the bot user) can't read/execute installed packages.
 umask 022
 
+# Legacy inline base64 decode — see lib-env.sh for canonical version.
+# Kept here because phase2 is a fallback when provision.sh doesn't exist.
 d() { [ -n "$1" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 S="/usr/local/bin/set-stage.sh"

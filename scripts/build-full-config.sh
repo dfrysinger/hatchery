@@ -238,6 +238,9 @@ if type ensure_bot_dir &>/dev/null; then
 else
   mkdir -p "$H/.openclaw/agents/main/agent"
 fi
+# NOTE: This file provides actual credentials for OpenClaw's auth resolution.
+# generate-config.sh also references auth.profiles in the JSON config (provider list only).
+# Both are generated from the same env vars, but keep them in sync if adding providers.
 cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
 {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","key":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"key\":\"${GK}\"}")}}
 APJ

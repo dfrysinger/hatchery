@@ -39,16 +39,21 @@ log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [provision] $*" | tee -a "$LOG"; }
 # Source permission utilities
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 
-# lib-env.sh may not be installed yet during early provisioning — inline fallback
+# lib-env.sh is deployed to /usr/local/sbin by hatch.yaml runcmd before
+# provision.sh runs, but we keep a fallback for robustness (e.g., if
+# bootstrap order changes or lib-env.sh fails to deploy).
 for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
   [ -f "$_lib_path/lib-env.sh" ] && { source "$_lib_path/lib-env.sh"; break; }
 done
 if ! type d &>/dev/null; then
-  # Inline fallback for first boot before lib-env.sh is deployed
   d() { [ -n "${1:-}" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 fi
 set -a; source /etc/droplet.env; set +a
 
+# Stage-setting: uses external script because lib-env.sh (which provides
+# set_stage()) may not be deployed yet during early provisioning.
+# Post-reboot scripts use set_stage() from lib-env.sh instead.
+# Both are monotonic (only advance forward) and write to /var/lib/init-status/stage.
 S="/usr/local/bin/set-stage.sh"
 
 # =============================================================================

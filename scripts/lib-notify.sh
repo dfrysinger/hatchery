@@ -75,7 +75,8 @@ notify_find_token() {
 
   local config_file="${HC_CONFIG_PATH:-}"
 
-  # First: try tokens from safe mode config
+  # Step 1: Try tokens from safe mode config file (notify-specific —
+  # these may differ from env vars if recovery swapped configs)
   if [ -f "${HC_SAFE_MODE_FILE:-}" ] && [ -f "$config_file" ]; then
     local tg_token dc_token
     tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.accounts.default.botToken // empty' "$config_file" 2>/dev/null)
@@ -98,57 +99,22 @@ notify_find_token() {
     fi
   fi
 
-  # Second: try habitat agent tokens
-  local platform="${HC_PLATFORM:-telegram}"
-  local count="${HC_AGENT_COUNT:-1}"
-
-  # Re-source to get AGENT{N} vars
+  # Steps 2+3: Delegate to lib-auth's find_working_platform_token()
+  # (single implementation for agent iteration + cross-platform fallback)
   [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  export PLATFORM="${HC_PLATFORM:-telegram}"
+  export AGENT_COUNT="${HC_AGENT_COUNT:-${AGENT_COUNT:-1}}"
 
-  for i in $(seq 1 "$count"); do
-    if [ "$platform" = "telegram" ] || [ "$platform" = "both" ]; then
-      local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-      local token="${!token_var:-}"
-      [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-      if [ -n "$token" ] && validate_telegram_token "$token"; then
-        NOTIFY_PLATFORM="telegram"; NOTIFY_TOKEN="$token"
-        NOTIFY_OWNER=$(get_owner_id_for_platform "telegram"); return 0
-      fi
-    fi
-    if [ "$platform" = "discord" ] || [ "$platform" = "both" ]; then
-      local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
-      local token="${!token_var:-}"
-      if [ -n "$token" ] && validate_discord_token "$token"; then
-        NOTIFY_PLATFORM="discord"; NOTIFY_TOKEN="$token"
-        NOTIFY_OWNER=$(get_owner_id_for_platform "discord" "with_prefix"); return 0
-      fi
-    fi
-  done
-
-  # Third: cross-platform fallback
-  local alt_platform
-  [ "$platform" = "telegram" ] && alt_platform="discord" || alt_platform="telegram"
-
-  for i in $(seq 1 "$count"); do
-    if [ "$alt_platform" = "telegram" ]; then
-      local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-      local token="${!token_var:-}"
-      [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-      if [ -n "$token" ] && validate_telegram_token "$token"; then
-        NOTIFY_PLATFORM="telegram"; NOTIFY_TOKEN="$token"
-        NOTIFY_OWNER=$(get_owner_id_for_platform "telegram")
-        log "  Cross-platform fallback to Telegram"; return 0
-      fi
-    elif [ "$alt_platform" = "discord" ]; then
-      local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
-      local token="${!token_var:-}"
-      if [ -n "$token" ] && validate_discord_token "$token"; then
-        NOTIFY_PLATFORM="discord"; NOTIFY_TOKEN="$token"
-        NOTIFY_OWNER=$(get_owner_id_for_platform "discord" "with_prefix")
-        log "  Cross-platform fallback to Discord"; return 0
-      fi
-    fi
-  done
+  if find_working_platform_token; then
+    # FOUND_TOKEN_RESULT format: "platform:agent_num:token"
+    NOTIFY_PLATFORM="${FOUND_TOKEN_RESULT%%:*}"
+    local rest="${FOUND_TOKEN_RESULT#*:}"
+    NOTIFY_TOKEN="${rest#*:}"
+    local prefix=""
+    [ "$NOTIFY_PLATFORM" = "discord" ] && prefix="with_prefix"
+    NOTIFY_OWNER=$(get_owner_id_for_platform "$NOTIFY_PLATFORM" "$prefix")
+    return 0
+  fi
 
   log "  No working notification token found"
   return 1
@@ -230,6 +196,7 @@ Read BOOT_REPORT.md and reply with: 1) Brief intro 2) What went wrong 3) Offer t
   log "  Command: openclaw agent --agent safe-mode --deliver --reply-channel $channel --reply-to $owner_id"
 
   local output exit_code
+  # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
   output=$(timeout 120 sudo -u "${HC_USERNAME:-bot}" env $env_prefix openclaw agent \
     --agent "safe-mode" --message "$prompt" --deliver \
     --reply-channel "$channel" --reply-account "safe-mode" --reply-to "$owner_id" \

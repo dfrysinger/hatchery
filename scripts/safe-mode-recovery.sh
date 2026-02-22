@@ -75,7 +75,9 @@ VALIDATE_API_KEY_FN="${VALIDATE_API_KEY_FN:-validate_api_key}"
 # =============================================================================
 
 # Global variables for function results (avoids subshell issues with $())
+# shellcheck disable=SC2034  # Read by callers after function returns
 VALIDATION_REASON=""
+# shellcheck disable=SC2034  # Read by callers after function returns
 FOUND_TOKEN_RESULT=""
 
 # find_working_telegram_token() — now in lib-auth.sh
@@ -92,10 +94,7 @@ FOUND_TOKEN_RESULT=""
 # Tries ALL tokens from preferred platform before moving to fallback
 # Sets: FOUND_TOKEN_RESULT with platform:agent_num:token (e.g., "telegram:2:abc123...")
 # Returns: 0 if found, 1 if not
-# find_working_platform_and_token() — delegates to lib-auth.sh
-find_working_platform_and_token() {
-  find_working_platform_token
-}
+# find_working_platform_token() — REMOVED, use find_working_platform_token() from lib-auth.sh
 
 # Get the model for a specific agent from habitat config
 # Falls back to provider default if not found
@@ -299,8 +298,7 @@ check_oauth_profile() {
     if [ "$is_expired" -eq 1 ]; then
       log_recovery "    Testing OAuth token with API call..."
       local test_result
-      test_result=$(test_oauth_token "$actual_provider" "$access_token")
-      if [ $? -eq 0 ]; then
+      if test_result=$(test_oauth_token "$actual_provider" "$access_token"); then
         log_recovery "    OAuth token WORKS (refresh succeeded or token still valid)"
         OAUTH_CHECK_RESULT="oauth:$actual_provider"
         return 0
@@ -334,11 +332,14 @@ check_oauth_profile() {
 
 
 # Global for API provider result
+# shellcheck disable=SC2034  # Read by callers after find_working_api_provider returns
 FOUND_API_PROVIDER=""
 
 # Global for OAuth check result (avoids subshell issues)
 OAUTH_CHECK_RESULT=""       # "oauth:<provider>" on success, empty on failure
+# shellcheck disable=SC2034  # Read by callers after check_oauth_profile returns
 OAUTH_CHECK_REASON=""       # failure reason for diagnostics
+# shellcheck disable=SC2034  # Read by callers after check_oauth_profile returns
 OAUTH_CHECK_PROVIDER=""     # actual provider name (e.g., openai-codex for openai)
 
 # Default log_recovery to no-op if not defined (allows function use outside run_smart_recovery)
@@ -350,8 +351,7 @@ type log_recovery &>/dev/null || log_recovery() { :; }
 # Get auth type for a provider (oauth or apikey)
 get_auth_type_for_provider() {
   local provider="$1"
-  check_oauth_profile "$provider" 2>/dev/null
-  if [ $? -eq 0 ] && [[ "$OAUTH_CHECK_RESULT" == oauth:* ]]; then
+  if check_oauth_profile "$provider" 2>/dev/null && [[ "$OAUTH_CHECK_RESULT" == oauth:* ]]; then
     echo "oauth"
   else
     echo "apikey"
@@ -506,47 +506,26 @@ clear_corrupted_state() {
 }
 
 # Try to notify user via any available channel
+# Emergency notification — delegates to lib-notify if available, falls back to raw curl
 notify_user_emergency() {
   local message="$1"
-  local tg_notify="${TG_NOTIFY:-/usr/local/bin/tg-notify.sh}"
-  
+
   if [ "${TEST_MODE:-}" = "1" ]; then
     echo "NOTIFY: $message"
     return 0
   fi
-  
-  # Try Telegram notification script
+
+  # Prefer lib-notify (single implementation of token discovery + send)
+  if type notify_send_message &>/dev/null; then
+    notify_send_message "$message" 2>/dev/null && return 0
+  fi
+
+  # Fallback: try tg-notify.sh script directly
+  local tg_notify="${TG_NOTIFY:-/usr/local/bin/tg-notify.sh}"
   if [ -x "$tg_notify" ]; then
     "$tg_notify" "$message" 2>/dev/null && return 0
   fi
-  
-  # Try curl to Telegram directly if we have owner ID and any bot token
-  local owner_id="${TELEGRAM_OWNER_ID:-}"
-  if [ -n "$owner_id" ]; then
-    for i in $(seq 1 "${AGENT_COUNT:-1}"); do
-      local token_var="AGENT${i}_TELEGRAM_BOT_TOKEN"
-      local token="${!token_var:-}"
-      [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-      
-      if [ -n "$token" ]; then
-        curl -sf --max-time 10 \
-          "https://api.telegram.org/bot${token}/sendMessage" \
-          -d "chat_id=${owner_id}" \
-          -d "text=${message}" \
-          -d "parse_mode=HTML" >/dev/null 2>&1 && return 0
-      fi
-    done
-  fi
-  
-  # Try Discord webhook if configured
-  local discord_webhook="${DISCORD_WEBHOOK_URL:-}"
-  if [ -n "$discord_webhook" ]; then
-    curl -sf --max-time 10 \
-      -H "Content-Type: application/json" \
-      -d "{\"content\": \"$message\"}" \
-      "$discord_webhook" >/dev/null 2>&1 && return 0
-  fi
-  
+
   return 1
 }
 
@@ -601,7 +580,7 @@ run_smart_recovery() {
   # Step 1: Find working platform and token
   log_recovery "Step 1: Searching for working bot token..."
   # Call directly (not in subshell) to preserve diagnostic array modifications
-  find_working_platform_and_token
+  find_working_platform_token
   local platform_token="$FOUND_TOKEN_RESULT"
   
   if [ -z "$platform_token" ]; then
@@ -614,7 +593,7 @@ run_smart_recovery() {
     fi
     
     # Retry after doctor
-    find_working_platform_and_token
+    find_working_platform_token
     platform_token="$FOUND_TOKEN_RESULT"
     if [ -z "$platform_token" ]; then
       log_recovery "ERROR: Still no working tokens after doctor --fix"
