@@ -202,13 +202,40 @@ jq '.some.field = "value"' ~/.openclaw/openclaw.json > /tmp/oc.json && mv /tmp/o
 sudo reboot
 ```
 
+## Re-authenticating OpenAI Codex OAuth
+
+When OpenAI OAuth tokens expire (stored in `auth-profiles.json` as the `openai-codex:default` profile), here's how to re-authenticate:
+
+**The correct command is:**
+```bash
+DISPLAY=:10 openclaw onboard --auth-choice openai-codex
+```
+
+**IMPORTANT:**
+- Do NOT use `openclaw models auth login --provider openai-codex` — it has a known bug that errors with "No provider plugins found"
+- There is NO "openai-codex auth plugin" to install. `openai-codex` is a built-in provider name, not a plugin
+- When the onboard wizard asks about the existing config, pick **Keep** or **Modify** — do NOT pick Reset
+
+**How it works on this machine:**
+1. Run the command above in a terminal on DISPLAY=:10 (the user can see the desktop)
+2. The onboard wizard will open a browser window for ChatGPT sign-in
+3. The user completes the sign-in directly on the visible desktop — no SSH tunnels or URL copy-pasting needed
+4. Once authenticated, restart OpenClaw: `sudo systemctl restart openclaw`
+
+**If running from your own terminal (not on :10):**
+```bash
+# Open a terminal on the visible desktop and run the command there
+DISPLAY=:10 xfce4-terminal --title "OpenAI Codex Login" -e "openclaw onboard --auth-choice openai-codex"
+```
+This way the user sees the terminal and browser on their RDP/VNC session and can interact with the login flow.
+
 ## Common Issues & Fixes
 
 | Issue | Diagnosis | Fix |
 |-------|-----------|-----|
 | Invalid bot token | getMe returns 404 | Get new token from BotFather/Discord |
 | API key invalid | 401 on API calls | Refresh key or re-authenticate |
-| OAuth expired | Check auth-profiles.json | Run `openclaw auth` |
+| OpenAI OAuth expired | Check `expires` in auth-profiles.json | See "Re-authenticating OpenAI Codex OAuth" above |
 | Config syntax error | jq fails to parse | Fix JSON syntax directly |
 | Wrong permissions | Permission denied errors | `sudo chown -R bot:bot /home/bot` |
 | Service won't start | Check journalctl | Fix config, then `sudo systemctl restart openclaw` |
