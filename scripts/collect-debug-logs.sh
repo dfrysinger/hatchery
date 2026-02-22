@@ -53,13 +53,17 @@ OUTPUT="${1:-/tmp/habitat-debug-$(date +%Y%m%d-%H%M%S).txt}"
   fi
   echo ""
 
-  # Safe mode diagnostics
-  echo "=== Safe Mode Diagnostics ==="
-  if [ -f /var/log/safe-mode-diagnostics.txt ]; then
-    cat /var/log/safe-mode-diagnostics.txt 2>/dev/null || echo "(could not read)"
-  else
-    echo "(not found)"
-  fi
+  # Auth diagnostics (from lib-auth.sh)
+  echo "=== Auth Diagnostics ==="
+  local diag_found=false
+  for df in /var/log/auth-diagnostics*.log; do
+    if [ -f "$df" ]; then
+      echo "--- $df ---"
+      cat "$df" 2>/dev/null || echo "(could not read)"
+      diag_found=true
+    fi
+  done
+  [ "$diag_found" = false ] && echo "(not found)"
   echo ""
 
   # Init stages

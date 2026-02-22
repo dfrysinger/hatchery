@@ -67,6 +67,12 @@ Check logs: <code>journalctl -u $HC_SERVICE_NAME -n 50</code>"
   exit 2
 fi
 
+# --- Set up diagnostics log ---
+
+export AUTH_DIAG_LOG="/var/log/auth-diagnostics${GROUP:+-$GROUP}.log"
+: > "$AUTH_DIAG_LOG" 2>/dev/null || true
+chmod 600 "$AUTH_DIAG_LOG" 2>/dev/null || true
+
 # --- Source recovery functions ---
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,10 +170,44 @@ fi
 
 # --- Generate boot report ---
 
-generate_boot_report() {
-  local report_path="$H/clawd/agents/safe-mode/BOOT_REPORT.md"
-  mkdir -p "$(dirname "$report_path")"
+# Format diagnostics from AUTH_DIAG_LOG into human-readable sections
+format_diagnostics() {
+  local diag_file="${AUTH_DIAG_LOG:-/var/log/auth-diagnostics.log}"
 
+  if [ ! -f "$diag_file" ] || [ ! -s "$diag_file" ]; then
+    echo "No diagnostics available"
+    return
+  fi
+
+  echo "🔍 Recovery diagnostics:"
+
+  local category label
+  for category in telegram discord api network doctor; do
+    case "$category" in
+      telegram) label="Telegram" ;;
+      discord)  label="Discord" ;;
+      api)      label="API Providers" ;;
+      network)  label="Network" ;;
+      doctor)   label="Doctor" ;;
+    esac
+
+    local entries
+    entries=$(grep "^${category}:" "$diag_file" 2>/dev/null || true)
+
+    if [ -n "$entries" ]; then
+      echo "  ${label}:"
+      while IFS=: read -r _cat name icon reason; do
+        if [ -n "$reason" ] && [ "$reason" != "valid" ] && [ "$reason" != "ok" ]; then
+          echo "    ${icon} ${name} (${reason})"
+        else
+          echo "    ${icon} ${name}"
+        fi
+      done <<< "$entries"
+    fi
+  done
+}
+
+generate_boot_report() {
   # Capture the actual errors from OpenClaw service logs (journalctl)
   local service_name="openclaw${GROUP:+-$GROUP}"
   local service_errors
@@ -176,17 +216,8 @@ generate_boot_report() {
     | grep -v "rename-bots" \
     | head -15 || echo "Could not read service logs")
 
-  # Capture errors from OpenClaw log file (JSON format)
-  local openclaw_log_errors=""
-  local log_file
-  log_file=$(ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1)
-  if [ -n "$log_file" ]; then
-    openclaw_log_errors=$(grep -o '"0":"[^"]*401[^"]*\|"0":"[^"]*error[^"]*\|"0":"[^"]*authentication[^"]*' "$log_file" 2>/dev/null \
-      | sed 's/"0":"//; s/"$//' \
-      | head -10 || true)
-  fi
-
-  cat > "$report_path" <<REPORT
+  local report
+  report=$(cat <<REPORT
 # Boot Report - Safe Mode Active
 
 ## What Happened
@@ -202,20 +233,46 @@ ${service_errors:-No service errors captured}
 $(grep -E "Recovery|recovery|SAFE MODE|token|API|provider|model" "$HC_LOG" 2>/dev/null | tail -20)
 
 ## Diagnostics
-$(cat /var/log/safe-mode-diagnostics.txt 2>/dev/null || echo "No diagnostics available")
+$(format_diagnostics)
 
 ## Next Steps
 1. Check the "Errors Detected" section above for the root cause (usually a 401/invalid API key)
 2. Fix the broken credential in your habitat config or iOS Shortcut
 3. Upload new config via API or recreate the droplet
 REPORT
+)
 
-  if type ensure_bot_file &>/dev/null; then
-    ensure_bot_file "$report_path" 644
-  else
-    chown "$HC_USERNAME:$HC_USERNAME" "$report_path" 2>/dev/null
-  fi
-  log "Generated BOOT_REPORT.md"
+  # Distribute to all agent workspaces + safe-mode + shared
+  distribute_boot_report "$report"
+  log "Generated and distributed BOOT_REPORT.md"
+}
+
+# Distribute boot report to all agent workspaces, safe-mode, and shared/
+distribute_boot_report() {
+  local report="$1"
+  local count="${AC:-${AGENT_COUNT:-1}}"
+
+  _write_report() {
+    local path="$1"
+    mkdir -p "$(dirname "$path")" 2>/dev/null || true
+    echo "$report" > "$path"
+    if type ensure_bot_file &>/dev/null; then
+      ensure_bot_file "$path" 644
+    else
+      chown "$HC_USERNAME:$HC_USERNAME" "$path" 2>/dev/null || true
+    fi
+  }
+
+  # Each agent workspace
+  for i in $(seq 1 "$count"); do
+    _write_report "$H/clawd/agents/agent${i}/BOOT_REPORT.md"
+  done
+
+  # Safe-mode workspace
+  _write_report "$H/clawd/agents/safe-mode/BOOT_REPORT.md"
+
+  # Shared folder
+  _write_report "$H/clawd/shared/BOOT_REPORT.md"
 }
 
 generate_boot_report

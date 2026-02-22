@@ -28,6 +28,10 @@ type validate_api_key &>/dev/null || { echo "FATAL: lib-auth.sh not found" >&2; 
 #   - Doctor fix: Run openclaw doctor --fix as last resort
 #   - State cleanup: Clear corrupted state if needed
 #
+# Diagnostics:
+#   Set AUTH_DIAG_LOG before sourcing this file to record diagnostics.
+#   lib-auth.sh handles token/API diagnostics; this file adds network/doctor.
+#
 # Usage:    source safe-mode-recovery.sh
 #           run_smart_recovery
 #
@@ -51,117 +55,11 @@ VALIDATE_API_KEY_FN="${VALIDATE_API_KEY_FN:-validate_api_key}"
 #   FOUND_TOKEN_RESULT    - Result of token hunting (platform:agent:token)
 #   FOUND_API_PROVIDER    - Result of API provider search
 #   OAUTH_CHECK_RESULT    - Result of OAuth profile check (oauth:provider)
-#   DIAG_*                - Diagnostic accumulator arrays
+#   AUTH_DIAG_LOG         - Diagnostic log file (set by caller, defaults /dev/null)
 #
 # Rule: Call these functions directly (not in subshells) when you need their
 # side effects. Use `local var; var=$(func)` only for pure return values.
 # =============================================================================
-
-# Diagnostics tracking - accumulates validation results for boot report
-declare -a DIAG_TELEGRAM_RESULTS=()
-declare -a DIAG_DISCORD_RESULTS=()
-declare -a DIAG_API_RESULTS=()
-DIAG_DOCTOR_RAN=""
-DIAG_DOCTOR_RESULT=""
-DIAG_NETWORK_OK=""
-
-# Add a diagnostic result
-# Usage: diag_add "telegram" "agent1" "✅" "valid"
-#        diag_add "api" "anthropic" "❌" "401 unauthorized"
-diag_add() {
-  local category="$1"
-  local name="$2"
-  local icon="$3"
-  local reason="$4"
-  local entry="${name}:${icon}:${reason}"
-  
-  case "$category" in
-    telegram) DIAG_TELEGRAM_RESULTS+=("$entry") ;;
-    discord)  DIAG_DISCORD_RESULTS+=("$entry") ;;
-    api)      DIAG_API_RESULTS+=("$entry") ;;
-  esac
-}
-
-# Write diagnostics summary to file for boot report
-write_diagnostics_summary() {
-  local output_file="${1:-/var/log/safe-mode-diagnostics.txt}"
-  
-  {
-    echo "🔍 Recovery diagnostics:"
-    
-    # Telegram tokens - one per line
-    echo "  Telegram:"
-    if [ ${#DIAG_TELEGRAM_RESULTS[@]} -gt 0 ]; then
-      for entry in "${DIAG_TELEGRAM_RESULTS[@]}"; do
-        local name="${entry%%:*}"
-        local rest="${entry#*:}"
-        local icon="${rest%%:*}"
-        local reason="${rest#*:}"
-        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
-          echo "    ${icon} ${name} (${reason})"
-        else
-          echo "    ${icon} ${name}"
-        fi
-      done
-    else
-      echo "    (none configured)"
-    fi
-    
-    # Discord tokens - one per line
-    echo "  Discord:"
-    if [ ${#DIAG_DISCORD_RESULTS[@]} -gt 0 ]; then
-      for entry in "${DIAG_DISCORD_RESULTS[@]}"; do
-        local name="${entry%%:*}"
-        local rest="${entry#*:}"
-        local icon="${rest%%:*}"
-        local reason="${rest#*:}"
-        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
-          echo "    ${icon} ${name} (${reason})"
-        else
-          echo "    ${icon} ${name}"
-        fi
-      done
-    else
-      echo "    (none configured)"
-    fi
-    
-    # API providers - one per line
-    echo "  API:"
-    if [ ${#DIAG_API_RESULTS[@]} -gt 0 ]; then
-      for entry in "${DIAG_API_RESULTS[@]}"; do
-        local name="${entry%%:*}"
-        local rest="${entry#*:}"
-        local icon="${rest%%:*}"
-        local reason="${rest#*:}"
-        if [ -n "$reason" ] && [ "$reason" != "valid" ]; then
-          echo "    ${icon} ${name} (${reason})"
-        else
-          echo "    ${icon} ${name}"
-        fi
-      done
-    else
-      echo "    (none found)"
-    fi
-    
-    # Doctor status
-    if [ -n "$DIAG_DOCTOR_RAN" ]; then
-      echo "  Doctor: ran (${DIAG_DOCTOR_RESULT:-no issues})"
-    fi
-    
-    # Network status
-    if [ -n "$DIAG_NETWORK_OK" ]; then
-      if [ "$DIAG_NETWORK_OK" = "yes" ]; then
-        echo "  Network: ✅ OK"
-      else
-        echo "  Network: ❌ Issues detected"
-      fi
-    fi
-    
-  } > "$output_file"
-  
-  # Also return for inline use
-  cat "$output_file"
-}
 
 # validate_telegram_token() — now in lib-auth.sh
 
@@ -672,13 +570,12 @@ run_smart_recovery() {
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$log"
   }
   
-  # Reset diagnostics arrays for this run
-  DIAG_TELEGRAM_RESULTS=()
-  DIAG_DISCORD_RESULTS=()
-  DIAG_API_RESULTS=()
-  DIAG_DOCTOR_RAN=""
-  DIAG_DOCTOR_RESULT=""
-  DIAG_NETWORK_OK=""
+  # Set up diagnostics — lib-auth.sh records token/API results here
+  local diag_file="${AUTH_DIAG_LOG:-/var/log/auth-diagnostics.log}"
+  [ "${TEST_MODE:-}" = "1" ] && diag_file="${TEST_TMPDIR:-/tmp}/auth-diagnostics.log"
+  export AUTH_DIAG_LOG="$diag_file"
+  : > "$AUTH_DIAG_LOG"  # Reset for this run
+  chmod 600 "$AUTH_DIAG_LOG" 2>/dev/null || true
   
   log_recovery "========== SMART RECOVERY STARTING =========="
   log_recovery "PID: $$ | HOME_DIR=${HOME_DIR:-unset} | USERNAME=${USERNAME:-unset}"
@@ -694,11 +591,11 @@ run_smart_recovery() {
   log_recovery "Step 0: Checking network connectivity..."
   if ! check_network; then
     log_recovery "WARNING: Network connectivity issues detected"
-    DIAG_NETWORK_OK="no"
+    _diag "network:connectivity:❌:unreachable"
     notify_user_emergency "⚠️ Safe Mode: Network connectivity issues. Recovery may fail."
   else
     log_recovery "Network OK"
-    DIAG_NETWORK_OK="yes"
+    _diag "network:connectivity:✅:ok"
   fi
   
   # Step 1: Find working platform and token
@@ -710,11 +607,10 @@ run_smart_recovery() {
   if [ -z "$platform_token" ]; then
     log_recovery "ERROR: No working bot tokens found"
     log_recovery "Attempting openclaw doctor --fix..."
-    DIAG_DOCTOR_RAN="yes"
     if run_doctor_fix >> "$log" 2>&1; then
-      DIAG_DOCTOR_RESULT="completed"
+      _diag "doctor:fix:✅:completed"
     else
-      DIAG_DOCTOR_RESULT="errors"
+      _diag "doctor:fix:❌:errors"
     fi
     
     # Retry after doctor
@@ -722,8 +618,6 @@ run_smart_recovery() {
     platform_token="$FOUND_TOKEN_RESULT"
     if [ -z "$platform_token" ]; then
       log_recovery "ERROR: Still no working tokens after doctor --fix"
-      # Write diagnostics before failing
-      write_diagnostics_summary "/var/log/safe-mode-diagnostics.txt" >/dev/null 2>&1
       notify_user_emergency "🚨 CRITICAL: Safe Mode failed - no working bot tokens found!"
       echo "ERROR: No working bot tokens found" >&2
       return 1
@@ -746,8 +640,6 @@ run_smart_recovery() {
   if [ -z "$provider" ]; then
     log_recovery "!!! WARNING: No working API providers found via validation !!!"
     log_recovery "!!! Falling back to anthropic (THIS MAY FAIL) !!!"
-    log_recovery "Diagnostic arrays at this point:"
-    log_recovery "  DIAG_API_RESULTS: ${DIAG_API_RESULTS[*]:-empty}"
     provider="anthropic"  # Fallback - let it fail at runtime rather than here
   else
     log_recovery "  Using provider: $provider"
@@ -910,12 +802,7 @@ AUTHEOF
   log_recovery "  Platform: $platform"
   log_recovery "  Provider: $provider (auth: $auth_type)"
   log_recovery "  Model: $(get_default_model_for_provider "$provider")"
-  
-  # Write diagnostics summary for boot report
-  local diag_file="/var/log/safe-mode-diagnostics.txt"
-  [ "${TEST_MODE:-}" = "1" ] && diag_file="${TEST_TMPDIR:-/tmp}/safe-mode-diagnostics.txt"
-  write_diagnostics_summary "$diag_file" >/dev/null 2>&1
-  log_recovery "Diagnostics written to $diag_file"
+  log_recovery "  Diagnostics: $AUTH_DIAG_LOG"
   
   # Note: Don't send celebratory notification here - the boot report flow
   # will send a proper safe mode notification with failure details.

@@ -25,6 +25,22 @@ FOUND_TOKEN_RESULT=""
 FOUND_API_PROVIDER=""
 
 # =============================================================================
+# Diagnostic Recording (opt-in)
+# =============================================================================
+# Set AUTH_DIAG_LOG to a file path to record validation results.
+# Default: /dev/null (no overhead when diagnostics aren't needed).
+# Format: category:name:icon:reason  (one line per validation attempt)
+#
+# Usage:
+#   export AUTH_DIAG_LOG="/var/log/auth-diagnostics.log"
+#   find_working_telegram_token   # results logged automatically
+#   cat "$AUTH_DIAG_LOG"          # telegram:agent1:✅:valid
+# =============================================================================
+AUTH_DIAG_LOG="${AUTH_DIAG_LOG:-/dev/null}"
+
+_diag() { echo "$*" >> "$AUTH_DIAG_LOG"; }
+
+# =============================================================================
 # Auth Header Construction
 # =============================================================================
 
@@ -231,11 +247,18 @@ find_working_telegram_token() {
     local token="${!token_var:-}"
     # Fallback to AGENT{N}_BOT_TOKEN
     [ -z "$token" ] && token_var="AGENT${i}_BOT_TOKEN" && token="${!token_var:-}"
-    [ -z "$token" ] && continue
+
+    if [ -z "$token" ]; then
+      _diag "telegram:agent${i}:⬚:no token"
+      continue
+    fi
 
     if validate_telegram_token "$token"; then
+      _diag "telegram:agent${i}:✅:valid"
       FOUND_TOKEN_RESULT="${i}:${token}"
       return 0
+    else
+      _diag "telegram:agent${i}:❌:invalid"
     fi
   done
 
@@ -258,11 +281,18 @@ find_working_discord_token() {
 
     local token_var="AGENT${i}_DISCORD_BOT_TOKEN"
     local token="${!token_var:-}"
-    [ -z "$token" ] && continue
+
+    if [ -z "$token" ]; then
+      _diag "discord:agent${i}:⬚:no token"
+      continue
+    fi
 
     if validate_discord_token "$token"; then
+      _diag "discord:agent${i}:✅:valid"
       FOUND_TOKEN_RESULT="${i}:${token}"
       return 0
+    else
+      _diag "discord:agent${i}:❌:invalid"
     fi
   done
 
@@ -323,9 +353,17 @@ find_working_api_provider() {
       google)    key="${GOOGLE_API_KEY:-}" ;;
     esac
 
-    if [ -n "$key" ] && validate_api_key "$provider" "$key"; then
+    if [ -z "$key" ]; then
+      _diag "api:${provider}:⬚:no key"
+      continue
+    fi
+
+    if validate_api_key "$provider" "$key"; then
+      _diag "api:${provider}:✅:${VALIDATION_REASON:-valid}"
       FOUND_API_PROVIDER="$provider"
       return 0
+    else
+      _diag "api:${provider}:❌:${VALIDATION_REASON:-failed}"
     fi
   done
 
