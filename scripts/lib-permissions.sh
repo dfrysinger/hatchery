@@ -207,8 +207,22 @@ fix_bot_permissions() {
   _perm_log "Permissions fixed"
 }
 
+# Ensure exec-approvals.json exists — without it OpenClaw may require
+# interactive approval for every exec command, causing 120s timeouts.
+# Usage: ensure_exec_approvals [home]
+ensure_exec_approvals() {
+  local home="${1:-$BOT_HOME}"
+  local path="$home/.openclaw/exec-approvals.json"
+  if [ ! -f "$path" ]; then
+    echo '{"version":1,"defaults":{"security":"full","ask":"off"}}' > "$path"
+    ensure_bot_file "$path" 600
+    _perm_log "Created exec-approvals.json (was missing)"
+  fi
+}
+
 # Export functions for use in other scripts
 export BOT_USER BOT_HOME
-export -f ensure_bot_dir ensure_bot_file 
+export -f ensure_bot_dir ensure_bot_file
 export -f fix_agent_workspace fix_workspace_permissions fix_state_permissions
 export -f fix_session_state fix_session_config_dir fix_bot_permissions
+export -f ensure_exec_approvals

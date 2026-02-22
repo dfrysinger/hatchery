@@ -773,6 +773,8 @@ AUTHEOF
       [ -n "${USERNAME:-}" ] && chown -R "${USERNAME}:${USERNAME}" "${state_dir}/agents" 2>/dev/null
       log_recovery "Created auth-profiles.json at ${auth_dir}/auth-profiles.json"
     fi
+
+    ensure_exec_approvals "$home"
   else
     log_recovery "DRY_RUN: Would write config to $config_path"
   fi

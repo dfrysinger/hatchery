@@ -71,6 +71,8 @@ else
   done
 fi
 
+ensure_exec_approvals "$H"
+
 echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
 # Copy full config to openclaw.json UNLESS safe mode is active
 # (safe mode recovery already wrote a working config - don't overwrite it)
@@ -79,9 +81,20 @@ if [ -f /var/lib/init-status/safe-mode ]; then
 else
   cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
 fi
+# Check if Dropbox-restored workspace files should be preserved.
+# When restore-openclaw-state.sh successfully restores files, it sets this marker.
+# We skip regeneration so runtime agent modifications persist across reboots.
+# API config uploads (apply-config.sh) clear this marker so they always regenerate.
+SKIP_WORKSPACE_FILES=false
+if [ -f /var/lib/init-status/dropbox-workspace-restored ]; then
+  echo "Dropbox workspace files restored - preserving them (skipping regeneration)"
+  SKIP_WORKSPACE_FILES=true
+  rm -f /var/lib/init-status/dropbox-workspace-restored
+fi
 for i in $(seq 1 $AC); do
   AD="$H/clawd/agents/agent${i}"
   NV="AGENT${i}_NAME"; ANAME="${!NV}"
+  if [ "$SKIP_WORKSPACE_FILES" != "true" ]; then
   IDV="AGENT${i}_IDENTITY_B64"; AIDENT=$(d "${!IDV}")
   SV="AGENT${i}_SOUL_B64"; ASOUL=$(d "${!SV}")
   AGV="AGENT${i}_AGENTS_B64"; AAGENTS=$(d "${!AGV}")
@@ -205,6 +218,7 @@ BOOTMD
   { [ -n "$GU" ] && printf '%s\n' "$GU" || echo "- Name: (learn)"
     [ -n "$AUSER" ] && printf '\n%s\n' "$AUSER"
   } > "$AD/USER.md"
+  fi  # end SKIP_WORKSPACE_FILES check
   ln -sf "$H/clawd/TOOLS.md" "$AD/TOOLS.md" 2>/dev/null || true
   ln -sf "$H/clawd/HEARTBEAT.md" "$AD/HEARTBEAT.md" 2>/dev/null || true
   [ -n "$CGI" ] && ln -sf "$H/clawd/shared" "$AD/shared" 2>/dev/null || true
@@ -223,8 +237,8 @@ SHMD
   done
   chown -R $USERNAME:$USERNAME "$H/clawd/shared" 2>/dev/null || true
 fi
-# Create global TOOLS.md if provided
-if [ -n "$GTO" ]; then
+# Create global TOOLS.md if provided (skip if Dropbox files preserved)
+if [ -n "$GTO" ] && [ "$SKIP_WORKSPACE_FILES" != "true" ]; then
   printf '%s\n' "$GTO" > "$H/clawd/TOOLS.md"
   if type ensure_bot_file &>/dev/null; then
     ensure_bot_file "$H/clawd/TOOLS.md" 644
@@ -273,9 +287,11 @@ The normal bot(s) failed to start. Check BOOT_REPORT.md in your workspace to see
 
 ## Your Mission
 1. Read BOOT_REPORT.md to understand what's broken
-2. Diagnose the problem using system tools  
-3. Attempt repair if possible
+2. Diagnose the problem - you have full shell access and sudo
+3. Fix it directly if possible (edit configs, restart services, fix permissions)
 4. Escalate to user with clear explanation if you can't fix it
+
+You have **full exec access** to this machine with sudo NOPASSWD. Fix things directly.
 
 You are NOT one of the originally configured agents - you're borrowing a working token to communicate.
 SMID

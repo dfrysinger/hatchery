@@ -189,6 +189,7 @@ echo "$GT" > "$H/.openclaw/gateway-token.txt"
 chown -R "$USERNAME:$USERNAME" "$H/.openclaw" "$H/clawd"
 chmod 700 "$H/.openclaw"
 chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
+ensure_exec_approvals "$H"
 
 # =============================================================================
 # Stage 4: Install desktop packages (apt)
