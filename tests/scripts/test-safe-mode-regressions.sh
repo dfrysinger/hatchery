@@ -12,6 +12,7 @@
 # 4. E2E check didn't validate HEALTH_CHECK_OK magic word (commit f0901e0)
 # 5. Emergency.json fallback removed (commit 34bbb46)
 # 6. phase2-background.sh missing umask 022 (commit 40e6bef)
+# 7. Safe mode bot had no exec access — couldn't run diagnostic/repair commands
 # =============================================================================
 
 set -uo pipefail
@@ -192,6 +193,38 @@ if grep -q 'openclaw\.emergency\.json' "$PHASE1" 2>/dev/null; then
   fail "phase1-critical.sh still generates emergency.json"
 else
   pass "phase1-critical.sh does not generate emergency.json"
+fi
+
+# =============================================================================
+# Bug 7: Safe mode bot had no exec access (couldn't run shell commands)
+# generate-config.sh safe-mode was missing tools.exec config
+# =============================================================================
+echo ""
+echo "=== Bug 7: Safe mode config includes exec access ==="
+
+# Generate a safe-mode config and check for tools.exec
+SM_CONFIG=$(AGENT_COUNT=1 AGENT1_NAME=Test AGENT1_MODEL=anthropic/claude-sonnet-4-5 \
+  AGENT1_BOT_TOKEN=fake PLATFORM=telegram TELEGRAM_OWNER_ID=123 \
+  "$GEN_CONFIG" --mode safe-mode --token "sk-test" --provider anthropic \
+  --platform telegram --bot-token "TESTBOT" --owner-id "123" \
+  --gateway-token "test-gw-token" 2>/dev/null)
+
+if echo "$SM_CONFIG" | jq -e '.tools.exec' >/dev/null 2>&1; then
+  pass "safe-mode config includes tools.exec"
+else
+  fail "safe-mode config missing tools.exec — bot cannot run shell commands"
+fi
+
+if echo "$SM_CONFIG" | jq -r '.tools.exec.security' 2>/dev/null | grep -q 'full'; then
+  pass "safe-mode exec security is 'full'"
+else
+  fail "safe-mode exec security is not 'full' — bot has restricted access"
+fi
+
+if echo "$SM_CONFIG" | jq -r '.tools.exec.ask' 2>/dev/null | grep -q 'off'; then
+  pass "safe-mode exec ask is 'off' (no confirmation prompts)"
+else
+  fail "safe-mode exec ask is not 'off' — bot will be blocked by confirmation prompts"
 fi
 
 # =============================================================================

@@ -468,6 +468,9 @@ generate_safe_mode() {
     --arg defaults_workspace "${HOME_DIR}/clawd" \
     '{
       env: $env,
+      tools: {
+        exec: { security: "full", ask: "off" }
+      },
       agents: {
         defaults: {
           model: { primary: $model },
