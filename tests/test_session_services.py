@@ -130,12 +130,12 @@ class TestSessionServicesConfig(unittest.TestCase):
         self.assertIn("bindings", config, "Config missing 'bindings' section")
         bindings = config["bindings"]
         
-        # Should have one binding per agent
-        self.assertEqual(len(bindings), 2, f"Expected 2 bindings, got {len(bindings)}")
+        # First agent is the default — no binding needed. Only non-default agents get bindings.
+        self.assertEqual(len(bindings), 1, f"Expected 1 binding (agent2 only; agent1 is default), got {len(bindings)}")
         
-        # Verify binding structure
+        # Verify binding structure — only agent2 (non-default) gets a binding
         agent_ids = {b["agentId"] for b in bindings}
-        self.assertIn("agent1", agent_ids, "Missing binding for agent1")
+        self.assertNotIn("agent1", agent_ids, "Default agent1 should NOT have a binding")
         self.assertIn("agent2", agent_ids, "Missing binding for agent2")
         
         for binding in bindings:

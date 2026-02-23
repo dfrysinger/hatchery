@@ -167,8 +167,11 @@ class TestBashScriptEnvSourcing:
             pytest.skip(f"{script_name} is deprecated")
         with open(path, "r") as f:
             content = f.read()
-        assert "source /etc/droplet.env" in content, (
-            f"{script_name} does not source /etc/droplet.env"
+        # Scripts can source /etc/droplet.env directly OR indirectly via lib-env.sh
+        sources_directly = "source /etc/droplet.env" in content
+        sources_via_lib = "lib-env.sh" in content
+        assert sources_directly or sources_via_lib, (
+            f"{script_name} does not source /etc/droplet.env (directly or via lib-env.sh)"
         )
 
     @pytest.mark.parametrize(

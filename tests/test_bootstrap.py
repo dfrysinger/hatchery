@@ -22,8 +22,8 @@ def test_retry_delays():
 
 
 def test_dev_mode_url():
-    """Dev mode fetches from archive/refs/heads/main."""
-    assert "archive/refs/heads/main" in SRC
+    """Dev mode fetches from archive/refs/heads/ (branch mode)."""
+    assert "archive/refs/heads/" in SRC
 
 
 def test_release_mode_url():

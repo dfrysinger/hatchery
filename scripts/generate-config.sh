@@ -83,6 +83,10 @@ case "$_platform" in
   telegram) _tg_enabled=true ;;
   discord)  _dc_enabled=true ;;
   both)     _tg_enabled=true; _dc_enabled=true ;;
+  *)
+    echo "Error: Invalid PLATFORM='${_platform}'. Valid values: telegram, discord, both" >&2
+    exit 1
+    ;;
 esac
 
 # =============================================================================
@@ -447,8 +451,6 @@ generate_safe_mode() {
     esac
   fi
 
-  # Build channel config
-  local tg_config dc_config
   # Build channel config — only include the active platform.
   # The plugins.entries section controls which providers actually load;
   # channels not present are simply ignored.

@@ -28,6 +28,8 @@ SBIN_SCRIPTS = {
     "lib-permissions.sh",
     "lib-health-check.sh",
     "lib-notify.sh",
+    "lib-env.sh",
+    "lib-auth.sh",
 }
 
 # Scripts that go to /usr/local/bin/ (everything else)

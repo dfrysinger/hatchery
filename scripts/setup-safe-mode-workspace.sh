@@ -25,6 +25,23 @@ SAFE_MODE_DIR="$HOME_DIR/clawd/agents/safe-mode"
 # Create directory structure
 mkdir -p "$SAFE_MODE_DIR/memory"
 
+# MEMORY.md — persistent notes across recovery attempts
+cat > "$SAFE_MODE_DIR/MEMORY.md" << 'MEMORY_EOF'
+# Recovery Log
+
+Record what you diagnosed, what you tried, and what worked or failed.
+This file persists across recovery attempts so you don't repeat yourself.
+
+## Attempts
+
+<!-- Add entries here as you work. Format:
+### Attempt N — YYYY-MM-DD HH:MM UTC
+- **Problem**: ...
+- **Tried**: ...
+- **Result**: ...
+-->
+MEMORY_EOF
+
 # -----------------------------------------------------------------------------
 # IDENTITY.md - Who is this bot?
 # -----------------------------------------------------------------------------
