@@ -131,15 +131,26 @@ fi
 # Mark safe mode
 touch "$SAFE_MODE_FILE"
 
-# Write SAFE_MODE.md for agents
+# Write SAFE_MODE.md ONLY for agents in the affected group
+# With session isolation, other groups should not be affected
 recovery_status="FAILED — manual intervention needed"
 [ "$SMART_RECOVERY_SUCCESS" = "true" ] && recovery_status="smart recovery"
 
 for si in $(seq 1 "$AC"); do
+  # If we're in session isolation and GROUP is set, only write to agents in THIS group
+  if [ -n "${GROUP:-}" ] && [ -n "${ISOLATION_DEFAULT:-}" ] && [ "$ISOLATION_DEFAULT" != "none" ]; then
+    agent_group_var="AGENT${si}_ISOLATION_GROUP"
+    agent_group="${!agent_group_var:-}"
+    if [ -n "$agent_group" ] && [ "$agent_group" != "$GROUP" ]; then
+      continue  # Skip agents in other groups
+    fi
+  fi
+
   cat > "$H/clawd/agents/agent${si}/SAFE_MODE.md" <<SAFEMD
 # SAFE MODE - Config failed health checks
 
 Recovery: **${recovery_status}**
+Group: **${GROUP:-global}**
 
 Check logs: cat /var/log/gateway-health-check${GROUP:+-$GROUP}.log
 SAFEMD
