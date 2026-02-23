@@ -401,6 +401,13 @@ fi
 systemctl enable openclaw.service 2>/dev/null || true
 systemctl daemon-reload
 
+# --- Initialize state machine (if controller is installed) ---
+if [ -x /usr/local/bin/openclaw-state.sh ]; then
+  mkdir -p /var/lib/openclaw
+  /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+  log "State machine initialized"
+fi
+
 # --- Fix permissions BEFORE starting services ---
 # This must happen before generate-session-services.sh starts the gateways,
 # otherwise the health check will fail with permission errors when agents
