@@ -449,17 +449,20 @@ generate_safe_mode() {
 
   # Build channel config
   local tg_config dc_config
+  # NOTE: Disabled channels MUST include "accounts": {} — without it OpenClaw
+  # doesn't initialize channel infrastructure and outbound delivery fails even
+  # for the enabled channel. Discovered on StateMachine-Test droplet.
   if [ "$SM_PLATFORM" = "telegram" ]; then
     tg_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, accounts: {"safe-mode": {botToken: $tok}}, dmPolicy: "allowlist", allowFrom: [$oid]}')
-    dc_config=$(jq -n '{enabled: false}')
+      '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {"safe-mode": {botToken: $tok}}}')
+    dc_config=$(jq -n '{enabled: false, accounts: {}}')
   elif [ "$SM_PLATFORM" = "discord" ]; then
-    tg_config=$(jq -n '{enabled: false}')
+    tg_config=$(jq -n '{enabled: false, accounts: {}}')
     dc_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, accounts: {"safe-mode": {token: $tok}}, dmPolicy: "allowlist", allowFrom: [$oid]}')
+      '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {"safe-mode": {token: $tok}}}')
   else
-    tg_config=$(jq -n '{enabled: false}')
-    dc_config=$(jq -n '{enabled: false}')
+    tg_config=$(jq -n '{enabled: false, accounts: {}}')
+    dc_config=$(jq -n '{enabled: false, accounts: {}}')
   fi
 
   jq -n \
