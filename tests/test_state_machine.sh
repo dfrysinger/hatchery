@@ -189,6 +189,16 @@ output=$(run history --limit 20)
 assert_contains "$output" "lock"
 echo ""
 
+echo "=== Test: Group isolation ==="
+# Create a separate group state
+GROUP="broken" run init >/dev/null
+GROUP="broken" run transition --to HEALTHY --reason "boot" --by "test" >/dev/null
+GROUP="broken" run report-health --status fail --failed-agents "agent2"
+GROUP="broken" assert_state "DEGRADED"
+# Original (global) state should be unchanged (TRANSITIONING from lock test)
+assert_state "TRANSITIONING"
+echo ""
+
 echo "=== Test: Generation monotonically increases ==="
 gen=$(run get --field generation)
 if [ "$gen" -gt 5 ]; then

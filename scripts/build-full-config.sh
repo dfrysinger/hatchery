@@ -404,7 +404,14 @@ systemctl daemon-reload
 # --- Initialize state machine (if controller is installed) ---
 if [ -x /usr/local/bin/openclaw-state.sh ]; then
   mkdir -p /var/lib/openclaw
+  # Init global state
   /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+  # Init per-group state for session isolation
+  if [ -n "${ISOLATION_GROUPS:-}" ]; then
+    for grp in $ISOLATION_GROUPS; do
+      GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+    done
+  fi
   log "State machine initialized"
 fi
 

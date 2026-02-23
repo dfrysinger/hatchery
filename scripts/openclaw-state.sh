@@ -26,9 +26,10 @@ set -euo pipefail
 
 # --- Configuration (can be overridden via env) ---
 STATE_DIR="${OPENCLAW_STATE_DIR:-/var/lib/openclaw}"
-STATE_FILE="${STATE_DIR}/state.json"
-LOCK_FILE="${STATE_DIR}/state.lock"
-EVENT_LOG="${OPENCLAW_STATE_LOG:-/var/log/openclaw-state-events.jsonl}"
+GROUP_SUFFIX="${GROUP:+-$GROUP}"
+STATE_FILE="${STATE_DIR}/state${GROUP_SUFFIX}.json"
+LOCK_FILE="${STATE_DIR}/state${GROUP_SUFFIX}.lock"
+EVENT_LOG="${OPENCLAW_STATE_LOG:-/var/log/openclaw-state-events${GROUP_SUFFIX}.jsonl}"
 
 # Thresholds (concrete defaults per review feedback)
 DEGRADE_AFTER=${OPENCLAW_DEGRADE_AFTER:-1}          # failures before DEGRADED
@@ -508,9 +509,9 @@ init_state() {
     }')
 
   echo "$state_json" | write_state
-  log_event "init" "initial_state=$initial_state bootstrapped_from=markers"
+  log_event "init" "initial_state=$initial_state bootstrapped_from=markers group=${GROUP:-global}"
 
-  echo "Initialized state machine: $initial_state"
+  echo "Initialized state machine: $initial_state (group=${GROUP:-global})"
   read_state | jq .
 }
 
