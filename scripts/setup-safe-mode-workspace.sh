@@ -58,12 +58,28 @@ The normal bot(s) failed to start. The health check detected a problem (invalid 
    - What you tried
    - What the user needs to do
 
-5. **Exit safe mode** - Once the issue is fixed, clear safe mode and restore the full config:
+5. **Exit safe mode** - Once the issue is fixed, use the recovery script:
    ```bash
-   sudo rm /var/lib/init-status/safe-mode
+   # Preferred: use try-full-config (handles session isolation automatically)
+   sudo try-full-config.sh
+   # Or for a specific isolation group:
+   sudo try-full-config.sh --group <group-name>
+   ```
+   Manual fallback (if try-full-config.sh is not available):
+   ```bash
+   sudo rm /var/lib/init-status/safe-mode    # or safe-mode-<group>
    echo 0 | sudo tee /var/lib/init-status/recovery-attempts
    cp ~/.openclaw/openclaw.full.json ~/.openclaw/openclaw.json
-   sudo systemctl restart openclaw
+   # For session isolation: sudo systemctl restart openclaw-<group>
+   # For single mode: sudo try-full-config.sh  # or: sudo systemctl restart openclaw-<group>
+   ```
+
+6. **Detect session isolation** - Check if running with session isolation:
+   ```bash
+   # List running openclaw services
+   systemctl list-units 'openclaw-*.service' --no-pager | grep running
+   # If you see openclaw-<name>.service → session isolation is active
+   # Each group has its own service, config, and state directory
    ```
 
 ## What You Have Access To
@@ -196,7 +212,7 @@ curl -s -H "x-api-key: $ANTHROPIC_API_KEY" \
 sudo chown -R bot:bot /home/bot/.openclaw /home/bot/clawd
 
 # Restart gateway
-sudo systemctl restart openclaw
+sudo try-full-config.sh  # or: sudo systemctl restart openclaw-<group>
 
 # Rebuild config from scratch
 sudo /usr/local/sbin/build-full-config.sh
@@ -226,7 +242,7 @@ echo 0 | sudo tee /var/lib/init-status/recovery-attempts
 cp ~/.openclaw/openclaw.full.json ~/.openclaw/openclaw.json
 
 # 4. Restart OpenClaw with the restored config
-sudo systemctl restart openclaw
+sudo try-full-config.sh  # or: sudo systemctl restart openclaw-<group>
 ```
 
 After restarting, verify the service is healthy:

@@ -397,8 +397,13 @@ E2EFILE
   systemctl enable openclaw-e2e.service 2>/dev/null || true
 fi
 
-# Enable the main openclaw service (session isolation will replace it with per-group services)
-systemctl enable openclaw.service 2>/dev/null || true
+# Enable the main openclaw service ONLY when not using session/container isolation.
+# With isolation, per-group services (openclaw-{group}.service) replace the single service.
+if [ "${ISOLATION_DEFAULT:-none}" = "none" ]; then
+  systemctl enable openclaw.service 2>/dev/null || true
+else
+  systemctl disable openclaw.service 2>/dev/null || true
+fi
 systemctl daemon-reload
 
 # --- Fix permissions BEFORE starting services ---
