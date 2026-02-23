@@ -465,11 +465,18 @@ generate_safe_mode() {
     dc_config=$(jq -n '{enabled: false, accounts: {}}')
   fi
 
+  # Determine which plugins to enable based on platform
+  local tg_plugin="false" dc_plugin="false"
+  [ "$SM_PLATFORM" = "telegram" ] && tg_plugin="true"
+  [ "$SM_PLATFORM" = "discord" ] && dc_plugin="true"
+
   jq -n \
     --argjson env "$env_json" \
     --argjson gateway "$(build_gateway)" \
     --argjson tg "$tg_config" \
     --argjson dc "$dc_config" \
+    --argjson tg_plugin "$tg_plugin" \
+    --argjson dc_plugin "$dc_plugin" \
     --argjson exec_policy "$EXEC_POLICY" \
     --arg model "$model" \
     --arg workspace "${HOME_DIR}/clawd/agents/safe-mode" \
@@ -498,7 +505,14 @@ generate_safe_mode() {
           workspace: $workspace
         }]
       },
+      bindings: [],
       gateway: $gateway,
+      plugins: {
+        entries: {
+          telegram: { enabled: $tg_plugin },
+          discord: { enabled: $dc_plugin }
+        }
+      },
       channels: {
         telegram: $tg,
         discord: $dc
