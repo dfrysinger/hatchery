@@ -401,21 +401,6 @@ fi
 systemctl enable openclaw.service 2>/dev/null || true
 systemctl daemon-reload
 
-# --- Initialize state machine (if controller is installed) ---
-if [ -x /usr/local/bin/openclaw-state.sh ]; then
-  ensure_bot_dir /var/lib/openclaw
-  # Init global state (as bot, since bot user runs the services)
-  sudo -u bot /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
-  # Init per-group state for session isolation (ISOLATION_GROUPS is comma-separated)
-  if [ -n "${ISOLATION_GROUPS:-}" ]; then
-    IFS=',' read -ra _groups <<< "$ISOLATION_GROUPS"
-    for grp in "${_groups[@]}"; do
-      sudo -u bot GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
-    done
-  fi
-  log "State machine initialized"
-fi
-
 # --- Fix permissions BEFORE starting services ---
 # This must happen before generate-session-services.sh starts the gateways,
 # otherwise the health check will fail with permission errors when agents
@@ -427,6 +412,18 @@ else
   chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
   chmod 700 $H/.openclaw
   chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json 2>/dev/null || true
+fi
+
+# --- Initialize state machine (after permissions are fixed) ---
+if [ -x /usr/local/bin/openclaw-state.sh ]; then
+  sudo -u bot /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+  if [ -n "${ISOLATION_GROUPS:-}" ]; then
+    IFS=',' read -ra _groups <<< "$ISOLATION_GROUPS"
+    for grp in "${_groups[@]}"; do
+      sudo -u bot GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+    done
+  fi
+  log "State machine initialized"
 fi
 
 # --- Agent Isolation: wire isolation scripts into pipeline ---
