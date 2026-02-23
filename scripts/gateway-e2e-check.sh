@@ -35,8 +35,44 @@ done
 
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 
+# Source state controller if available (Phase 2 integration)
+STATE_SCRIPT=""
+for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$lib_path/openclaw-state.sh" ] && { STATE_SCRIPT="$lib_path/openclaw-state.sh"; break; }
+done
+USE_STATE_MACHINE=false
+if [ -n "$STATE_SCRIPT" ] && [ -f "${OPENCLAW_STATE_DIR:-/var/lib/openclaw}/state.json" ]; then
+  USE_STATE_MACHINE=true
+  log "State machine available at $STATE_SCRIPT"
+fi
+
+# Helper: call state controller
+state_cmd() {
+  if [ "$USE_STATE_MACHINE" = "true" ]; then
+    bash "$STATE_SCRIPT" "$@" 2>&1
+  fi
+}
+
 hc_init_logging "${GROUP:-}"
 hc_load_environment || exit 0
+
+# --- Skip if state is TRANSITIONING or locked (someone is fixing things) ---
+if [ "$USE_STATE_MACHINE" = "true" ]; then
+  current_machine_state=$(state_cmd get --field state)
+  if [ "$current_machine_state" = "TRANSITIONING" ]; then
+    log "Skipping E2E — state machine is TRANSITIONING"
+    # Check transition timeout while we're here
+    state_cmd check-timeout || true
+    exit 0
+  fi
+  if state_cmd get --field lock.holder | grep -qv '^$'; then
+    lock_holder=$(state_cmd get --field lock.holder)
+    if [ -n "$lock_holder" ] && [ "$lock_holder" != "null" ]; then
+      log "Skipping E2E — state locked by '$lock_holder'"
+      exit 0
+    fi
+  fi
+fi
 
 # --- Skip if recently recovered (safe mode handler will restart + re-test) ---
 RECENTLY_RECOVERED="/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}"
@@ -217,6 +253,9 @@ check_agents_e2e() {
     fi
   done
 
+  # Export failed agents for state machine reporting
+  FAILED_AGENTS="${failed_agents## }"
+
   [ "$all_healthy" = "false" ] && { log "  RESULT: FAILED —${failed_agents}"; return 1; }
   log "  RESULT: All agents passed"
   log "========== E2E CHECK COMPLETE ==========="; return 0
@@ -281,6 +320,7 @@ send_agent_intros() {
 # =============================================================================
 
 HEALTHY=false
+FAILED_AGENTS=""
 
 if hc_is_in_safe_mode; then
   # Safe mode: verify safe-mode agent works (unified path)
@@ -303,6 +343,18 @@ fi
 log "========== E2E DECISION =========="
 log "HEALTHY=$HEALTHY, ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE"
 
+# --- Report to state machine (Phase 2) ---
+if [ "$USE_STATE_MACHINE" = "true" ]; then
+  if [ "$HEALTHY" = "true" ]; then
+    log "STATE MACHINE: reporting health pass"
+    state_cmd report-health --status pass || true
+  else
+    log "STATE MACHINE: reporting health fail (agents: ${FAILED_AGENTS:-unknown})"
+    state_cmd report-health --status fail --failed-agents "${FAILED_AGENTS:-unknown}" || true
+  fi
+fi
+
+# --- Legacy marker handling (kept for Phase 1 compatibility) ---
 if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
   log "DECISION: SAFE MODE STABLE — recovery config working"
   rm -f "$HC_UNHEALTHY_MARKER" "$HC_RECOVERY_COUNTER" "/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}" /var/lib/init-status/needs-post-boot-check
