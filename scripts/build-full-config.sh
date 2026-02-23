@@ -403,8 +403,7 @@ systemctl daemon-reload
 
 # --- Initialize state machine (if controller is installed) ---
 if [ -x /usr/local/bin/openclaw-state.sh ]; then
-  mkdir -p /var/lib/openclaw
-  chown bot:bot /var/lib/openclaw
+  ensure_bot_dir /var/lib/openclaw
   # Init global state (as bot, since bot user runs the services)
   sudo -u bot /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
   # Init per-group state for session isolation (ISOLATION_GROUPS is comma-separated)
