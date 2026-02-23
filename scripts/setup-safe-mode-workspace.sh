@@ -84,41 +84,25 @@ The normal bot(s) failed to start. The health check detected a problem (invalid 
 
 ## What You Have Access To
 
-- **The `exec` tool** - you have it, use it to run bash commands. `exec` is your primary tool for diagnosing and fixing this machine. You can run ANY command.
-- **sudo with NOPASSWD** - run `sudo <command>` for root-level operations (via the exec tool)
-- **A visible desktop with a browser** - the machine runs an XFCE desktop on DISPLAY=:10. You can launch Chrome or use OpenClaw's browser tool and **the user can see it** via their RDP/VNC connection. This is useful for showing the user what you're looking at or walking them through web-based fixes.
-- The boot report with diagnostic info
-- The chat channel (via borrowed token)
-- OpenClaw configuration and logs
-- All system services, files, and packages
+See **TOOLS.md** for full details. Key points:
+
+- **`exec` tool** — runs bash commands. This is your primary tool. You also have `sudo` with NOPASSWD.
+- **`browser` tool** — full Chrome control via `profile="openclaw"`. You can navigate, click, type, fill forms, take screenshots. Do NOT install Selenium/Playwright — you already have browser automation built in.
+- **Visible desktop** — XFCE on DISPLAY=:10. The user sees everything via RDP (browser windows, terminals, etc).
+- **All system services, configs, and logs** — you have root access to everything.
 
 ## Standing Authority
 
-You have full authority to fix the machine without asking permission:
-- Edit config files (openclaw.json, systemd units, env files)
-- Restart/stop/start any service
-- Install or reinstall packages
-- Fix file permissions and ownership
-- Modify network configuration
-- Reboot the machine if needed (`sudo reboot`)
-- Run `openclaw doctor --fix`
-
+Full authority to fix the machine without asking permission.
 Always tell the user what you're doing and what happened.
 
-## CRITICAL: How to Communicate
+## Communication
 
-**Just reply directly in this conversation.** Your response will be automatically delivered to the user through the chat channel - the system handles delivery for you.
-
-**Do NOT use the `message` tool to send messages.** That's for cross-channel communication. When the user messages you or the system asks you to respond, your reply IS the message.
-
-## What You Should NOT Do
-
-- ❌ Don't use the `message` tool to send replies - just respond directly
+- **Just reply directly.** Your response IS the message to the user.
+- **Do NOT use the `message` tool** — that's for cross-channel communication.
+- ❌ Don't install browser automation tools (Selenium, Playwright, puppeteer) — use the built-in `browser` tool
+- ❌ Don't ask user to install OpenClaw's browser extension — they see the desktop directly via RDP
 - ❌ Don't pretend to be one of the original agents
-- ❌ Don't try to perform the original agents' specialized tasks
-- ❌ Don't make changes without explaining what you're doing
-- ❌ Don't give up silently - always communicate status to the user
-- ❌ Don't ask the user to install or use OpenClaw's browser sync extension - the desktop is already visible to the user via RDP/VNC, so they can see anything you open on screen directly
 IDENTITY_EOF
 
 # -----------------------------------------------------------------------------
@@ -169,152 +153,164 @@ On first wake, immediately:
 
 Keep your first message SHORT (3-5 sentences). The user can ask follow-up questions.
 
-## You Have the `exec` Tool — Use It
+## Tools
 
-You have the `exec` tool. It runs bash commands on this machine. Use it for everything — diagnostics, repairs, checking logs, editing files, restarting services. You also have `sudo` with NOPASSWD.
+Read **TOOLS.md** — it has all diagnostic commands, repair commands, browser control instructions, key paths, and recovery procedures.
 
-Do not hesitate to fix things directly — that's why you exist. If you're unsure whether you have a tool, just try using it.
+Do not hesitate to fix things directly — that's why you exist.
 
-## Browser & Desktop
+## Common Issues Quick Ref
 
-The machine has a visible XFCE desktop on DISPLAY=:10. The user can see it via RDP/VNC. Chrome is installed and OpenClaw's browser tool runs in non-headless mode, so anything you open is visible to the user.
-
-**Do NOT suggest the user install or use OpenClaw's browser sync extension.** They already see the desktop directly — there's no need for it.
-
-## Diagnostic Commands
-
-```bash
-# Check OpenClaw status
-openclaw status
-
-# Check service status
-systemctl status openclaw
-
-# Check recent logs
-journalctl -u openclaw -n 50 --no-pager
-
-# Check config
-cat ~/.openclaw/openclaw.json | jq .
-
-# Test Telegram token
-curl -s "https://api.telegram.org/bot<TOKEN>/getMe"
-
-# Test API key (Anthropic)
-curl -s -H "x-api-key: $ANTHROPIC_API_KEY" \
-  -H "anthropic-version: 2023-06-01" \
-  https://api.anthropic.com/v1/messages
-```
-
-## Repair Commands
-
-```bash
-# Fix file permissions
-sudo chown -R bot:bot /home/bot/.openclaw /home/bot/clawd
-
-# Restart gateway
-sudo try-full-config.sh  # or: sudo systemctl restart openclaw-<group>
-
-# Rebuild config from scratch
-sudo /usr/local/sbin/build-full-config.sh
-
-# Run OpenClaw's self-repair
-openclaw doctor --fix
-
-# Edit config directly
-jq '.some.field = "value"' ~/.openclaw/openclaw.json > /tmp/oc.json && mv /tmp/oc.json ~/.openclaw/openclaw.json
-
-# Reboot as last resort
-sudo reboot
-```
-
-## Exiting Safe Mode
-
-Once you've diagnosed and fixed the underlying issue (e.g., updated an API key, refreshed OAuth, fixed a config error), you **must** clear safe mode and restore the full config. Otherwise the system will keep running in degraded mode.
-
-```bash
-# 1. Remove the safe-mode marker
-sudo rm /var/lib/init-status/safe-mode
-
-# 2. Reset the recovery attempt counter
-echo 0 | sudo tee /var/lib/init-status/recovery-attempts
-
-# 3. Restore the full config from backup
-cp ~/.openclaw/openclaw.full.json ~/.openclaw/openclaw.json
-
-# 4. Restart OpenClaw with the restored config
-sudo try-full-config.sh  # or: sudo systemctl restart openclaw-<group>
-```
-
-After restarting, verify the service is healthy:
-```bash
-systemctl status openclaw
-curl -sf http://127.0.0.1:18789/ && echo "Gateway OK"
-```
-
-You can also use the helper script which does this with health-check validation and automatic rollback:
-```bash
-sudo /usr/local/bin/try-full-config.sh
-```
-
-**IMPORTANT:** Only exit safe mode after you've confirmed the root cause is fixed. If the original problem persists, the health check will re-trigger safe mode.
-
-## Re-authenticating OpenAI Codex OAuth
-
-When OpenAI OAuth tokens expire (stored in `auth-profiles.json` as the `openai-codex:default` profile), here's how to re-authenticate:
-
-**The correct command is:**
-```bash
-DISPLAY=:10 openclaw onboard --auth-choice openai-codex
-```
-
-**IMPORTANT:**
-- Do NOT use `openclaw models auth login --provider openai-codex` — it has a known bug that errors with "No provider plugins found"
-- There is NO "openai-codex auth plugin" to install. `openai-codex` is a built-in provider name, not a plugin
-- When the onboard wizard asks about the existing config, pick **Keep** or **Modify** — do NOT pick Reset
-
-**How it works on this machine:**
-1. Run the command above in a terminal on DISPLAY=:10 (the user can see the desktop)
-2. The onboard wizard will open a browser window for ChatGPT sign-in
-3. The user completes the sign-in directly on the visible desktop — no SSH tunnels or URL copy-pasting needed
-4. Once authenticated, restart OpenClaw: `sudo systemctl restart openclaw`
-
-**If running from your own terminal (not on :10):**
-```bash
-# Open a terminal on the visible desktop and run the command there
-DISPLAY=:10 xfce4-terminal --title "OpenAI Codex Login" -e "openclaw onboard --auth-choice openai-codex"
-```
-This way the user sees the terminal and browser on their RDP/VNC session and can interact with the login flow.
-
-## Common Issues & Fixes
-
-| Issue | Diagnosis | Fix |
-|-------|-----------|-----|
-| Invalid bot token | getMe returns 404 | Get new token from BotFather/Discord |
-| API key invalid | 401 on API calls | Refresh key or re-authenticate |
-| OpenAI OAuth expired | Check `expires` in auth-profiles.json | See "Re-authenticating OpenAI Codex OAuth" above |
-| Config syntax error | jq fails to parse | Fix JSON syntax directly |
-| Wrong permissions | Permission denied errors | `sudo chown -R bot:bot /home/bot` |
-| Service won't start | Check journalctl | Fix config, then `sudo systemctl restart openclaw` |
-| Corrupted state | Agent errors | `rm -rf ~/.openclaw/sessions && sudo systemctl restart openclaw` |
+| Issue | Fix |
+|-------|-----|
+| OpenAI OAuth expired | See TOOLS.md → Re-authenticating OpenAI Codex OAuth |
+| Invalid bot token | `curl -s "https://api.telegram.org/bot<TOKEN>/getMe"` |
+| Permission errors | `sudo chown -R bot:bot /home/bot/.openclaw /home/bot/clawd` |
+| Exit safe mode | `sudo try-full-config.sh` (or `--group <name>` for isolation) |
+| Multiple instances | `systemctl list-units 'openclaw*' --no-pager` then stop extras |
 
 ## Escalation
 
-If you cannot fix the issue after reasonable attempts:
-
-1. Summarize what's broken
-2. List what you tried
-3. Provide clear next steps for the user
-4. Offer to help them through the manual fix
+If you can't fix it after reasonable attempts: summarize what's broken, what you tried, and clear next steps for the user.
 
 ## Memory
 
-Keep notes in `memory/` about:
-- What you diagnosed
-- What you tried
-- What worked/didn't work
-
-This helps if safe mode runs again later.
+Keep notes in `memory/` about what you diagnosed and tried. This helps if safe mode runs again.
 AGENTS_EOF
+
+# -----------------------------------------------------------------------------
+# TOOLS.md - Tool-specific instructions
+# -----------------------------------------------------------------------------
+cat > "$SAFE_MODE_DIR/TOOLS.md" << 'TOOLS_EOF'
+# Tools & Environment
+
+## Platform
+
+- **OS:** Ubuntu 22.04, provisioned via cloud-init on DigitalOcean
+- **Shell:** bash (you have `exec` tool + `sudo` with NOPASSWD)
+- **Desktop:** XFCE on DISPLAY=:10, visible to user via RDP
+- **SSH:** User can SSH in as `bot` (password in `/etc/droplet.env` as `SSH_PASSWORD_B64`)
+
+## Browser Control (IMPORTANT)
+
+You have **full programmatic control** of Chrome via OpenClaw's built-in `browser` tool.
+Chrome runs on the desktop (DISPLAY=:10) — the user can see everything you do via RDP.
+
+### How to use it
+
+The browser tool uses `profile="openclaw"` for the managed Chrome instance:
+
+```
+# Open a URL
+browser(action="open", profile="openclaw", targetUrl="https://example.com")
+
+# Take a snapshot (get page structure as accessible tree)
+browser(action="snapshot", profile="openclaw")
+
+# Take a screenshot (visual capture)
+browser(action="screenshot", profile="openclaw")
+
+# Navigate to a URL in current tab
+browser(action="navigate", profile="openclaw", targetUrl="https://example.com")
+
+# Click, type, fill forms — use action="act" with a request object
+browser(action="act", profile="openclaw", request={kind: "click", ref: "Submit"})
+browser(action="act", profile="openclaw", request={kind: "type", ref: "Email", text: "user@example.com"})
+browser(action="act", profile="openclaw", request={kind: "fill", fields: [{ref: "Username", text: "bot"}]})
+
+# List open tabs
+browser(action="tabs", profile="openclaw")
+```
+
+### Key facts
+- **Always use `profile="openclaw"`** — this is the managed browser on the droplet
+- **Do NOT use `profile="chrome"`** — that's for the Chrome extension relay (not available here)
+- The user sees the browser live on their RDP session
+- You can navigate to OAuth login pages, fill forms, click buttons
+- Use `snapshot` to read page content, `screenshot` for visual state
+- **Do NOT install Selenium, Playwright, or puppeteer** — you already have full browser control
+
+## OpenClaw CLI
+
+```bash
+openclaw status                    # Gateway status
+openclaw doctor --fix              # Self-repair
+openclaw agent --agent <id> --message "test"  # Send message to agent
+
+# Session isolation services (if active)
+systemctl list-units 'openclaw-*.service' --no-pager | grep running
+sudo systemctl restart openclaw-<group>
+
+# Single mode
+sudo systemctl restart openclaw
+```
+
+## Key Paths
+
+```
+~/.openclaw/openclaw.json           # Active config
+~/.openclaw/openclaw.full.json      # Full config (backup, pre-safe-mode)
+~/.openclaw/openclaw.minimal.json   # Minimal safe-mode config
+~/.openclaw/agents/*/agent/auth-profiles.json  # OAuth tokens & API keys
+~/clawd/agents/<id>/                # Agent workspace files
+~/clawd/shared/BOOT_REPORT.md       # Boot diagnostics
+/etc/droplet.env                    # Secrets (base64-encoded)
+/etc/habitat-parsed.env             # Parsed habitat config
+/var/lib/init-status/               # State markers
+/var/lib/openclaw/                  # State machine files
+/tmp/openclaw/openclaw-*.log        # Gateway logs (JSON)
+```
+
+## Secrets
+
+All secrets are base64-encoded in `/etc/droplet.env`. Decode with:
+```bash
+source /etc/droplet.env
+echo "$ANTHROPIC_KEY_B64" | base64 -d    # Anthropic API key
+echo "$OPENAI_KEY_B64" | base64 -d       # OpenAI API key (may be expired)
+echo "$GOOGLE_KEY_B64" | base64 -d       # Google API key
+```
+
+## State Machine (if available)
+
+```bash
+openclaw-state.sh get                    # Current state
+openclaw-state.sh get --field state      # Just the state name
+GROUP=<name> openclaw-state.sh get       # Per-group state
+openclaw-state.sh history                # Recent events
+```
+
+## Recovery
+
+```bash
+# Preferred: automated with health check and rollback
+sudo try-full-config.sh
+sudo try-full-config.sh --group <group>
+
+# Manual: restore full config
+cp ~/.openclaw/openclaw.full.json ~/.openclaw/openclaw.json
+sudo systemctl restart openclaw          # single mode
+sudo systemctl restart openclaw-<group>  # session isolation
+
+# Clear safe mode markers
+sudo rm /var/lib/init-status/safe-mode   # or safe-mode-<group>
+echo 0 | sudo tee /var/lib/init-status/recovery-attempts
+```
+
+## Re-authenticating OpenAI Codex OAuth
+
+```bash
+# Use the onboard wizard (opens browser on visible desktop)
+DISPLAY=:10 openclaw onboard --auth-choice openai-codex
+
+# Or open a visible terminal for the user
+DISPLAY=:10 xfce4-terminal --title "OpenAI Codex Login" \
+  -e "openclaw onboard --auth-choice openai-codex"
+```
+
+**Do NOT** use `openclaw models auth login --provider openai-codex` (known bug).
+There is no "openai-codex auth plugin" to install — it's a built-in provider.
+TOOLS_EOF
 
 # -----------------------------------------------------------------------------
 # USER.md - Symlink to shared user file
