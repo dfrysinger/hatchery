@@ -299,17 +299,80 @@ echo 0 | sudo tee /var/lib/init-status/recovery-attempts
 
 ## Re-authenticating OpenAI Codex OAuth
 
+When OpenAI Codex OAuth tokens expire, you need to run the onboard wizard so the
+user can log in via Chrome. **This is an interactive process that requires the user.**
+
+### CRITICAL: Both terminal AND Chrome MUST be on DISPLAY=:10
+
+The onboard wizard starts a local HTTP server, then opens Chrome for login.
+After login, Chrome redirects back to localhost and the terminal receives the token.
+
+**If you run the command via your `exec` tool directly, it runs in a hidden session.**
+Chrome may open on :10 but the callback goes to your invisible terminal — they can't
+talk to each other. The auth will hang or fail silently.
+
+**The fix:** Launch a visible terminal window on :10 that runs the onboard command.
+The user sees the terminal AND Chrome on their RDP session, and the callback works
+because both are on the same display.
+
+### Step-by-step
+
+1. **Launch visible terminal with the onboard command:**
+   ```bash
+   DISPLAY=:10 xfce4-terminal \
+     --title "OpenAI Codex Re-Auth" \
+     --hold \
+     -e "openclaw onboard --auth-choice openai-codex"
+   ```
+   Use `--hold` so the terminal stays open after completion (user can see success/failure).
+
+2. **Tell the user:**
+   > "I've opened a terminal on your RDP desktop. It will open Chrome for you to
+   > sign in to ChatGPT. Complete the login in Chrome — the terminal will confirm
+   > when the token is saved."
+
+3. **Wait for the user to confirm they've completed login.** Do NOT try to automate
+   the ChatGPT login flow — it has CAPTCHAs and 2FA that require human interaction.
+
+4. **After login succeeds, verify the token:**
+   ```bash
+   # Check token expiry
+   jq '.profiles[] | select(.provider == "openai-codex") | {provider, expires: .expires, has_refresh: (.cred.refreshToken != null)}' \
+     ~/.openclaw/agents/main/agent/auth-profiles.json
+   ```
+
+5. **Exit safe mode:**
+   ```bash
+   sudo try-full-config.sh
+   ```
+
+### What NOT to do
+
+- ❌ Do NOT run `openclaw onboard` via your exec tool directly — the callback will fail
+- ❌ Do NOT use `openclaw models auth login --provider openai-codex` — known bug
+- ❌ Do NOT try to automate the ChatGPT login (CAPTCHAs, 2FA)
+- ❌ Do NOT install any "openai-codex auth plugin" — it's a built-in provider
+- ❌ Do NOT ask user to copy-paste URLs or use SSH tunnels — RDP is already there
+
+### Checking token status without re-auth
+
 ```bash
-# Use the onboard wizard (opens browser on visible desktop)
-DISPLAY=:10 openclaw onboard --auth-choice openai-codex
-
-# Or open a visible terminal for the user
-DISPLAY=:10 xfce4-terminal --title "OpenAI Codex Login" \
-  -e "openclaw onboard --auth-choice openai-codex"
+# Quick check: is the token expired?
+python3 -c "
+import json, datetime
+p = json.load(open('$HOME/.openclaw/agents/main/agent/auth-profiles.json'))
+for prof in p.get('profiles', []):
+    if prof.get('provider') == 'openai-codex':
+        exp = prof.get('expires', 'unknown')
+        print(f'Provider: {prof[\"provider\"]}')
+        print(f'Expires:  {exp}')
+        print(f'Has refresh token: {bool(prof.get(\"cred\", {}).get(\"refreshToken\"))}')
+        if exp != 'unknown':
+            from datetime import datetime as dt
+            is_expired = dt.fromisoformat(exp.replace('Z','+00:00')) < dt.now(tz=__import__(\"datetime\").timezone.utc)
+            print(f'Expired:  {is_expired}')
+"
 ```
-
-**Do NOT** use `openclaw models auth login --provider openai-codex` (known bug).
-There is no "openai-codex auth plugin" to install — it's a built-in provider.
 TOOLS_EOF
 
 # -----------------------------------------------------------------------------
