@@ -404,12 +404,14 @@ systemctl daemon-reload
 # --- Initialize state machine (if controller is installed) ---
 if [ -x /usr/local/bin/openclaw-state.sh ]; then
   mkdir -p /var/lib/openclaw
-  # Init global state
-  /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
-  # Init per-group state for session isolation
+  chown bot:bot /var/lib/openclaw
+  # Init global state (as bot, since bot user runs the services)
+  sudo -u bot /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+  # Init per-group state for session isolation (ISOLATION_GROUPS is comma-separated)
   if [ -n "${ISOLATION_GROUPS:-}" ]; then
-    for grp in $ISOLATION_GROUPS; do
-      GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+    IFS=',' read -ra _groups <<< "$ISOLATION_GROUPS"
+    for grp in "${_groups[@]}"; do
+      sudo -u bot GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
     done
   fi
   log "State machine initialized"

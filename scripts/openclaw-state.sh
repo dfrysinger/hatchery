@@ -29,7 +29,7 @@ STATE_DIR="${OPENCLAW_STATE_DIR:-/var/lib/openclaw}"
 GROUP_SUFFIX="${GROUP:+-$GROUP}"
 STATE_FILE="${STATE_DIR}/state${GROUP_SUFFIX}.json"
 LOCK_FILE="${STATE_DIR}/state${GROUP_SUFFIX}.lock"
-EVENT_LOG="${OPENCLAW_STATE_LOG:-/var/log/openclaw-state-events${GROUP_SUFFIX}.jsonl}"
+EVENT_LOG="${OPENCLAW_STATE_LOG:-${STATE_DIR}/events${GROUP_SUFFIX}.jsonl}"
 
 # Thresholds (concrete defaults per review feedback)
 DEGRADE_AFTER=${OPENCLAW_DEGRADE_AFTER:-1}          # failures before DEGRADED
