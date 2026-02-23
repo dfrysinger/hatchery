@@ -449,34 +449,42 @@ generate_safe_mode() {
 
   # Build channel config
   local tg_config dc_config
-  # NOTE: Disabled channels MUST include "accounts": {} — without it OpenClaw
-  # doesn't initialize channel infrastructure and outbound delivery fails even
-  # for the enabled channel. Discovered on StateMachine-Test droplet.
+  # Build channel config — only include the active platform.
+  # The plugins.entries section controls which providers actually load;
+  # channels not present are simply ignored.
+  local tg_config="null" dc_config="null"
   if [ "$SM_PLATFORM" = "telegram" ]; then
     tg_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
       '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {"safe-mode": {botToken: $tok}}}')
-    dc_config=$(jq -n '{enabled: false, accounts: {}}')
   elif [ "$SM_PLATFORM" = "discord" ]; then
-    tg_config=$(jq -n '{enabled: false, accounts: {}}')
     dc_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
       '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {"safe-mode": {token: $tok}}}')
-  else
-    tg_config=$(jq -n '{enabled: false, accounts: {}}')
-    dc_config=$(jq -n '{enabled: false, accounts: {}}')
   fi
 
-  # Determine which plugins to enable based on platform
-  local tg_plugin="false" dc_plugin="false"
-  [ "$SM_PLATFORM" = "telegram" ] && tg_plugin="true"
-  [ "$SM_PLATFORM" = "discord" ] && dc_plugin="true"
+  # Build plugins — only enable the active platform's provider
+  local plugins_config
+  if [ "$SM_PLATFORM" = "telegram" ]; then
+    plugins_config='{"entries":{"telegram":{"enabled":true}}}'
+  elif [ "$SM_PLATFORM" = "discord" ]; then
+    plugins_config='{"entries":{"discord":{"enabled":true}}}'
+  else
+    plugins_config='{"entries":{}}'
+  fi
+
+  # Build channels object — only include the active platform
+  local channels_config
+  channels_config=$(jq -n \
+    --argjson tg "$tg_config" \
+    --argjson dc "$dc_config" \
+    '{}
+     | if $tg != null then . + {telegram: $tg} else . end
+     | if $dc != null then . + {discord: $dc} else . end')
 
   jq -n \
     --argjson env "$env_json" \
     --argjson gateway "$(build_gateway)" \
-    --argjson tg "$tg_config" \
-    --argjson dc "$dc_config" \
-    --argjson tg_plugin "$tg_plugin" \
-    --argjson dc_plugin "$dc_plugin" \
+    --argjson channels "$channels_config" \
+    --argjson plugins "$plugins_config" \
     --argjson exec_policy "$EXEC_POLICY" \
     --arg model "$model" \
     --arg workspace "${HOME_DIR}/clawd/agents/safe-mode" \
@@ -505,18 +513,9 @@ generate_safe_mode() {
           workspace: $workspace
         }]
       },
-      bindings: [],
       gateway: $gateway,
-      plugins: {
-        entries: {
-          telegram: { enabled: $tg_plugin },
-          discord: { enabled: $dc_plugin }
-        }
-      },
-      channels: {
-        telegram: $tg,
-        discord: $dc
-      }
+      plugins: $plugins,
+      channels: $channels
     }'
 }
 
