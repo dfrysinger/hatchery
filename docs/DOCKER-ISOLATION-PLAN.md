@@ -1525,3 +1525,62 @@ Live droplet tests at Phase 5 and Phase 7.
 ├── generate-docker-compose.sh                # SLIMMED: compose + systemd unit only
 └── build-full-config.sh                      # EXPANDED: orchestrates all per-group setup
 ```
+
+---
+
+## Implementation Progress
+
+Track implementation status here. Updated as work proceeds.
+
+### Phase 1: Shared Foundation
+- [ ] Create `scripts/lib-isolation.sh` with all shared functions
+- [ ] Write `tests/test_lib_isolation.py` (RED)
+- [ ] Make tests pass (GREEN)
+- [ ] Refactor `scripts/build-full-config.sh` to use lib-isolation.sh
+- [ ] Slim `scripts/generate-session-services.sh` (remove duplicated logic)
+- [ ] Slim `scripts/generate-docker-compose.sh` (remove duplicated logic)
+- [ ] `bash -n` passes on all modified scripts
+- [ ] Commit + push
+
+### Phase 2: Fix Compose Generator
+- [ ] Rewrite `scripts/generate-docker-compose.sh` for Option A
+- [ ] Write `tests/test_docker_compose.py` (RED — Option A tests)
+- [ ] Make tests pass (GREEN)
+- [ ] Create container systemd unit template
+- [ ] `bash -n` passes
+- [ ] Commit + push
+
+### Phase 3: Dockerfile + Docker Install
+- [ ] Create `Dockerfile`
+- [ ] Add Docker install to `scripts/provision.sh`
+- [ ] Add Docker log rotation config
+- [ ] Commit + push
+
+### Phase 4: Health Check Abstraction
+- [ ] Add `hc_*` functions to `scripts/lib-health-check.sh`
+- [ ] Update `scripts/safe-mode-handler.sh` to use abstractions
+- [ ] Update `scripts/gateway-e2e-check.sh` for container mode
+- [ ] Write tests
+- [ ] `bash -n` passes on all modified scripts
+- [ ] Commit + push
+
+### Phase 5: Tests
+- [ ] All new tests pass
+- [ ] All existing tests still pass (regression)
+- [ ] `bash -n` passes on all scripts in scripts/
+
+### Phase 6: Network Isolation
+- [ ] Compose generator handles `host` and `isolated` network modes
+- [ ] Tests for network mode generation
+- [ ] Commit + push
+
+### Phase 7: Security Hardening
+- [ ] Compose generator adds cap_drop, security_opt, read_only, tmpfs
+- [ ] Compose generator adds mem_limit, cpus, pids_limit from resources
+- [ ] Tests for security options
+- [ ] Commit + push
+
+### Current Status
+**Phase**: Not started
+**Last updated**: 2026-02-24 08:55 UTC
+**Next step**: Create lib-isolation.sh
