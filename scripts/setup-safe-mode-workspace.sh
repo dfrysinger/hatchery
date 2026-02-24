@@ -369,41 +369,54 @@ because both are on the same display.
 
 ### Step-by-step
 
-1. **Launch visible terminal with the onboard command:**
+1. **Launch the onboard wizard in a tmux session on DISPLAY=:10:**
    ```bash
-   DISPLAY=:10 xfce4-terminal \
-     --title "OpenAI Codex Re-Auth" \
-     --hold \
-     -e "openclaw onboard --auth-choice openai-codex"
+   # Start tmux session with visible terminal on the desktop
+   DISPLAY=:10 xfce4-terminal --title "OpenAI Codex Re-Auth" --hold \
+     -e "tmux new-session -s onboard 'openclaw onboard --auth-choice openai-codex'" &
    ```
-   Use `--hold` so the terminal stays open after completion (user can see success/failure).
 
-2. **Tell the user:**
-   > "I've opened a terminal on your RDP desktop. It will open Chrome for you to
-   > sign in to ChatGPT. Complete the login in Chrome — the terminal will confirm
-   > when the token is saved."
-
-3. **Wait for the user to confirm they've completed login.** Do NOT try to automate
-   the ChatGPT login flow — it has CAPTCHAs and 2FA that require human interaction.
-
-4. **After login succeeds, verify the token:**
+2. **Navigate the onboard TUI wizard using tmux keystrokes:**
    ```bash
-   # Check token expiry
+   # Read current screen
+   tmux capture-pane -t onboard -p | tail -20
+
+   # Send keystrokes (arrow keys, Enter, etc.)
+   tmux send-keys -t onboard Enter
+   tmux send-keys -t onboard Down Enter
+   tmux send-keys -t onboard Left Enter
+
+   # Type text
+   tmux send-keys -t onboard "yes" Enter
+   ```
+   The wizard has interactive menus — use tmux to navigate them until Chrome opens
+   for the user to log in.
+
+3. **Tell the user to complete the Chrome login:**
+   > "Chrome will open on your RDP desktop for ChatGPT login. Complete the sign-in
+   > (it may ask for 2FA) — the terminal will confirm when the token is saved."
+
+4. **Wait for the user to confirm login.** Do NOT automate the ChatGPT login — it
+   has CAPTCHAs and 2FA that require human interaction.
+
+5. **After login succeeds, verify the token:**
+   ```bash
    jq '.profiles[] | select(.provider == "openai-codex") | {provider, expires: .expires, has_refresh: (.cred.refreshToken != null)}' \
      ~/.openclaw/agents/main/agent/auth-profiles.json
    ```
 
-5. **Exit safe mode:**
+6. **Exit safe mode** (see "Recovery Will Kill You" in AGENTS.md — write memory + farewell FIRST):
    ```bash
    sudo try-full-config.sh
    ```
 
 ### What NOT to do
 
+- ❌ Do NOT use `xdotool` — it is not installed and not reliable
 - ❌ Do NOT run `openclaw onboard` via your exec tool directly — the callback will fail
 - ❌ Do NOT use `openclaw models auth login --provider openai-codex` — known bug
 - ❌ Do NOT try to automate the ChatGPT login (CAPTCHAs, 2FA)
-- ❌ Do NOT install any "openai-codex auth plugin" — it's a built-in provider
+- ❌ Do NOT install Selenium, Playwright, puppeteer, or xdotool
 - ❌ Do NOT ask user to copy-paste URLs or use SSH tunnels — RDP is already there
 
 ### Checking token status without re-auth
