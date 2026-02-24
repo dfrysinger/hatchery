@@ -82,7 +82,8 @@ get_group_network() {
     esac
 }
 
-# Get resource limits for a group: "memory cpu" (empty strings if unset).
+# Get resource limits for a group: "memory|cpu" (pipe-delimited, empty strings if unset).
+# Usage: IFS='|' read -r mem cpu <<< "$(get_group_resources "sandbox")"
 get_group_resources() {
     local group="$1"
     local mem="" cpu=""
@@ -96,7 +97,7 @@ get_group_resources() {
             [ -z "$cpu" ] && cpu="${!cpu_var:-}"
         fi
     done
-    echo "$mem $cpu"
+    echo "${mem}|${cpu}"
 }
 
 # Get groups filtered by isolation type.
@@ -211,6 +212,13 @@ generate_groups_manifest() {
         local agents_json
         agents_json=$(echo "$agents_csv" | tr ',' '\n' | jq -R . | jq -sc .)
 
+        # Get resource limits for this group
+        local resources
+        resources=$(get_group_resources "$group")
+        local res_mem res_cpu
+        res_mem=$(echo "$resources" | awk '{print $1}')
+        res_cpu=$(echo "$resources" | awk '{print $2}')
+
         manifest_json=$(echo "$manifest_json" | jq \
             --arg g "$group" \
             --arg iso "$isolation" \
@@ -222,6 +230,8 @@ generate_groups_manifest() {
             --arg envFile "${CONFIG_BASE}/${group}/group.env" \
             --arg svcName "$service_name" \
             --arg composePath "$compose_path" \
+            --arg resMem "$res_mem" \
+            --arg resCpu "$res_cpu" \
             '.groups[$g] = {
                 isolation: $iso,
                 port: $port,
@@ -231,7 +241,10 @@ generate_groups_manifest() {
                 statePath: $statePath,
                 envFile: $envFile,
                 serviceName: $svcName,
-                composePath: (if $composePath == "" then null else $composePath end)
+                composePath: (if $composePath == "" then null else $composePath end),
+                resources: (if ($resMem == "" and $resCpu == "") then null
+                           else {memory: (if $resMem == "" then null else $resMem end),
+                                 cpu: (if $resCpu == "" then null else $resCpu end)} end)
             }')
     done
 
