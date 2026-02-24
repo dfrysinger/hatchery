@@ -21,6 +21,12 @@ AC="${AGENT_COUNT:-1}"
 H="/home/${USERNAME:-bot}"
 ISOLATION="${ISOLATION_DEFAULT:-none}"
 STATE_CMD="/usr/local/bin/openclaw-state.sh"
+MANIFEST="${MANIFEST:-/etc/openclaw-groups.json}"
+
+# Source lib-isolation if available (for hc_* functions)
+for _lp in /usr/local/sbin /usr/local/bin; do
+  [ -f "$_lp/lib-health-check.sh" ] && source "$_lp/lib-health-check.sh" && break
+done
 
 # Parse args
 TARGET_GROUP=""
@@ -46,17 +52,32 @@ fi
 
 # --- Determine which services to restart ---
 restart_services() {
-  if [ "$ISOLATION" = "session" ]; then
+  if [ "$ISOLATION" = "session" ] || [ "$ISOLATION" = "container" ]; then
     if [ -n "$TARGET_GROUP" ]; then
-      log "Restarting openclaw-${TARGET_GROUP}.service"
-      systemctl restart "openclaw-${TARGET_GROUP}.service"
+      log "Restarting group ${TARGET_GROUP} (${ISOLATION})"
+      if type hc_restart_service &>/dev/null; then
+        ISOLATION="$ISOLATION" hc_restart_service "$TARGET_GROUP"
+      else
+        # Fallback: use manifest serviceName
+        local svc_name
+        svc_name=$(jq -r --arg g "$TARGET_GROUP" '.groups[$g].serviceName // empty' "$MANIFEST" 2>/dev/null)
+        [ -n "$svc_name" ] && systemctl restart "${svc_name}.service"
+      fi
     else
       # Restart all isolation groups
       local groups="${ISOLATION_GROUPS:-}"
       IFS=',' read -ra _groups <<< "$groups"
       for grp in "${_groups[@]}"; do
-        log "Restarting openclaw-${grp}.service"
-        systemctl restart "openclaw-${grp}.service"
+        log "Restarting group ${grp}"
+        if type hc_restart_service &>/dev/null; then
+          local grp_iso
+          grp_iso=$(jq -r --arg g "$grp" '.groups[$g].isolation // "session"' "$MANIFEST" 2>/dev/null)
+          ISOLATION="$grp_iso" hc_restart_service "$grp"
+        else
+          local svc_name
+          svc_name=$(jq -r --arg g "$grp" '.groups[$g].serviceName // empty' "$MANIFEST" 2>/dev/null)
+          [ -n "$svc_name" ] && systemctl restart "${svc_name}.service"
+        fi
       done
     fi
   else
@@ -65,23 +86,38 @@ restart_services() {
   fi
 }
 
+# --- Read port from manifest (SSOT) ---
+get_port() {
+  local grp="$1"
+  if [ -f "$MANIFEST" ]; then
+    jq -r --arg g "$grp" '.groups[$g].port // empty' "$MANIFEST" 2>/dev/null
+  fi
+}
+
 # --- Determine health check port(s) ---
 check_health() {
-  if [ "$ISOLATION" = "session" ]; then
+  if [ "$ISOLATION" = "session" ] || [ "$ISOLATION" = "container" ]; then
     if [ -n "$TARGET_GROUP" ]; then
-      # Check just the target group's port
-      local port_file="/home/${USERNAME}/.openclaw/configs/${TARGET_GROUP}/openclaw.session.json"
       local port
-      port=$(python3 -c "import json; print(json.load(open('$port_file')).get('port', 18789))" 2>/dev/null || echo 18789)
-      curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1
+      port=$(get_port "$TARGET_GROUP")
+      port="${port:-18789}"
+      if type hc_curl_gateway &>/dev/null; then
+        local grp_iso
+        grp_iso=$(jq -r --arg g "$TARGET_GROUP" '.groups[$g].isolation // "session"' "$MANIFEST" 2>/dev/null)
+        local grp_net
+        grp_net=$(jq -r --arg g "$TARGET_GROUP" '.groups[$g].network // "host"' "$MANIFEST" 2>/dev/null)
+        ISOLATION="$grp_iso" NETWORK_MODE="$grp_net" GROUP_PORT="$port" \
+          hc_curl_gateway "$TARGET_GROUP" "/" >/dev/null 2>&1
+      else
+        curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1
+      fi
     else
-      # Check all groups
       local groups="${ISOLATION_GROUPS:-}"
       IFS=',' read -ra _groups <<< "$groups"
       for grp in "${_groups[@]}"; do
-        local port_file="/home/${USERNAME}/.openclaw/configs/${grp}/openclaw.session.json"
         local port
-        port=$(python3 -c "import json; print(json.load(open('$port_file')).get('port', 18789))" 2>/dev/null || echo 18789)
+        port=$(get_port "$grp")
+        port="${port:-18789}"
         if ! curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
           return 1
         fi
@@ -105,8 +141,9 @@ else
   cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
   chown "${USERNAME}:${USERNAME}" "$H/.openclaw/openclaw.json"
   chmod 600 "$H/.openclaw/openclaw.json"
-  # Also regenerate session configs if in isolation mode
+  # Also regenerate isolation configs if in isolation mode
   [ "$ISOLATION" = "session" ] && bash /usr/local/sbin/generate-session-services.sh 2>/dev/null || true
+  [ "$ISOLATION" = "container" ] && bash /usr/local/sbin/generate-docker-compose.sh 2>/dev/null || true
 fi
 
 restart_services

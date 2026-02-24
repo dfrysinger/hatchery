@@ -41,9 +41,16 @@ for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0
   [ -f "$lib_path/openclaw-state.sh" ] && { STATE_SCRIPT="$lib_path/openclaw-state.sh"; break; }
 done
 USE_STATE_MACHINE=false
-if [ -n "$STATE_SCRIPT" ] && [ -f "${OPENCLAW_STATE_DIR:-/var/lib/openclaw}/state.json" ]; then
+# State machine lives in controller state dir (/var/lib/openclaw), NOT in OPENCLAW_STATE_DIR
+# (which points to per-group runtime state for the OpenClaw gateway process)
+_state_root="/var/lib/openclaw"
+_state_file="${_state_root}/state.json"
+[ -n "${GROUP:-}" ] && _state_file="${_state_root}/state-${GROUP}.json"
+hc_init_logging "${GROUP:-}"
+
+if [ -n "$STATE_SCRIPT" ] && [ -f "$_state_file" ]; then
   USE_STATE_MACHINE=true
-  log "State machine available at $STATE_SCRIPT"
+  log "State machine available at $STATE_SCRIPT (${_state_file})"
 fi
 
 # Helper: call state controller
@@ -52,8 +59,6 @@ state_cmd() {
     bash "$STATE_SCRIPT" "$@" 2>&1
   fi
 }
-
-hc_init_logging "${GROUP:-}"
 hc_load_environment || exit 0
 
 # --- Skip if state is TRANSITIONING or locked (someone is fixing things) ---
@@ -101,50 +106,6 @@ log "ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE, RECOVERY_ATTEMPTS=$RECOVERY_ATT
 # E2E Check Functions
 # =============================================================================
 
-check_api_key_validity() {
-  local service="$1"
-  log "  Checking API key validity..."
-
-  # In safe mode, read keys from the config file (env vars may be stale)
-  if hc_is_in_safe_mode && [ -f "$CONFIG_PATH" ]; then
-    log "  Safe mode — checking API from config"
-    local key
-    for provider in google anthropic openai; do
-      local env_var
-      case "$provider" in
-        anthropic) env_var="ANTHROPIC_API_KEY" ;;
-        openai)    env_var="OPENAI_API_KEY" ;;
-        google)    env_var="GOOGLE_API_KEY" ;;
-      esac
-      key=$(jq -r ".env.${env_var} // empty" "$CONFIG_PATH" 2>/dev/null)
-      if [ -n "$key" ] && validate_api_key "$provider" "$key"; then
-        log "  ${provider} API key OK (${VALIDATION_REASON:-valid})"; return 0
-      fi
-    done
-    log "  No working API key in safe mode config"; return 1
-  fi
-
-  # Normal mode: check journal for recent auth errors first (fast path)
-  local auth_errors
-  auth_errors=$(journalctl -u "$service" --since "30 seconds ago" --no-pager 2>/dev/null | \
-    grep -iE "(authentication_error|Invalid.*bearer.*token|invalid.*api.*key)" | head -3)
-  [ -n "$auth_errors" ] && { log "  Found API auth errors"; return 1; }
-
-  # Direct API validation via lib-auth
-  for provider in anthropic openai google; do
-    local key=""
-    case "$provider" in
-      anthropic) key="${ANTHROPIC_API_KEY:-}" ;;
-      openai)    key="${OPENAI_API_KEY:-}" ;;
-      google)    key="${GOOGLE_API_KEY:-}" ;;
-    esac
-    if [ -n "$key" ] && validate_api_key "$provider" "$key"; then
-      log "  ${provider} API key OK (${VALIDATION_REASON:-valid})"; return 0
-    fi
-  done
-
-  log "  No working API keys found"; return 1
-}
 
 check_channel_connectivity() {
   log "  Checking channel connectivity..."
@@ -191,11 +152,11 @@ check_channel_connectivity() {
     fi
 
     if [ "$agent_valid" = "false" ]; then
-      all_valid=false; failed_agents="${failed_agents} agent${i}"
+      all_valid=false; failed_agents="${failed_agents:+${failed_agents},}agent${i}"
     fi
   done
 
-  [ "$all_valid" = "false" ] && { log "  Channel check FAILED:${failed_agents}"; return 1; }
+  [ "$all_valid" = "false" ] && { log "  Channel check FAILED: ${failed_agents}"; return 1; }
   log "  All $AC agents have valid tokens"; return 0
 }
 
@@ -249,14 +210,14 @@ check_agents_e2e() {
       [ $rc -eq 0 ] && ! echo "$output" | grep -q "HEALTH_CHECK_OK" && reason="missing HEALTH_CHECK_OK (LLM error?)"
       log "  ✗ $agent_id FAILED ($reason, ${dur}s)"
       echo "$output" | while IFS= read -r line; do log "    | $line"; done
-      all_healthy=false; failed_agents="${failed_agents} ${agent_id}"
+      all_healthy=false; failed_agents="${failed_agents:+${failed_agents},}${agent_id}"
     fi
   done
 
   # Export failed agents for state machine reporting
-  FAILED_AGENTS="${failed_agents## }"
+  FAILED_AGENTS="${failed_agents}"
 
-  [ "$all_healthy" = "false" ] && { log "  RESULT: FAILED —${failed_agents}"; return 1; }
+  [ "$all_healthy" = "false" ] && { log "  RESULT: FAILED — ${failed_agents}"; return 1; }
   log "  RESULT: All agents passed"
   log "========== E2E CHECK COMPLETE ==========="; return 0
 }

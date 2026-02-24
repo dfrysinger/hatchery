@@ -421,11 +421,11 @@ fi
 
 # --- Initialize state machine (after permissions are fixed) ---
 if [ -x /usr/local/bin/openclaw-state.sh ]; then
-  sudo -u bot /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+  sudo -u "${USERNAME:-bot}" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
   if [ -n "${ISOLATION_GROUPS:-}" ]; then
     IFS=',' read -ra _groups <<< "$ISOLATION_GROUPS"
     for grp in "${_groups[@]}"; do
-      sudo -u bot GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+      sudo -u "${USERNAME:-bot}" GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
     done
   fi
   log "State machine initialized"
