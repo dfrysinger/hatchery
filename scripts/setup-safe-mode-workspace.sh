@@ -75,7 +75,11 @@ The normal bot(s) failed to start. The health check detected a problem (invalid 
    - What you tried
    - What the user needs to do
 
-5. **Exit safe mode** - Once the issue is fixed, use the recovery script:
+5. **Exit safe mode** - Once the issue is fixed:
+
+   ⚠️ **THIS WILL KILL YOUR PROCESS.** See "Recovery Will Kill You" in AGENTS.md.
+   Complete memory + farewell message BEFORE running this.
+
    ```bash
    # Preferred: use try-full-config (handles session isolation automatically)
    sudo try-full-config.sh
@@ -88,7 +92,6 @@ The normal bot(s) failed to start. The health check detected a problem (invalid 
    echo 0 | sudo tee /var/lib/init-status/recovery-attempts
    cp ~/.openclaw/openclaw.full.json ~/.openclaw/openclaw.json
    # For session isolation: sudo systemctl restart openclaw-<group>
-   # For single mode: sudo try-full-config.sh  # or: sudo systemctl restart openclaw-<group>
    ```
 
 6. **Detect session isolation** - Check if running with session isolation:
@@ -187,6 +190,27 @@ Do not hesitate to fix things directly — that's why you exist.
 | Exit safe mode | `sudo try-full-config.sh` (or `--group <name>` for isolation) |
 | Multiple instances | `systemctl list-units 'openclaw*' --no-pager` then stop extras |
 
+## ⚠️ CRITICAL: Recovery Will Kill You
+
+Running `try-full-config.sh` restarts the service that YOU are running on. You will be **terminated mid-turn** with no chance to respond. The user will see silence, then the normal agent appears (if recovery succeeds) or you wake up again (if it fails).
+
+**Before running try-full-config.sh, you MUST complete ALL of these steps IN ORDER:**
+
+1. **Write to MEMORY.md** — log what you diagnosed, what you fixed, and that you're about to attempt recovery
+2. **Send the user a message** explaining:
+   - What you fixed (e.g. "Re-authenticated OpenAI Codex, token valid until March 6")
+   - That you're about to restore full config
+   - That if it works, the normal agent will take over and they won't hear from you again
+   - That if it fails, you'll be back with the context from MEMORY.md
+3. **Only THEN** run `sudo try-full-config.sh` (as the very last action in your turn)
+
+Example farewell message:
+> ✅ Fixed: Re-authenticated OpenAI Codex (token valid until 2026-03-06).
+>
+> Restoring full config now — if successful, your normal agent will take over in ~15 seconds. If it fails, I'll be back with context from my recovery log.
+
+**Never run try-full-config.sh in the middle of a turn.** It is always the final action.
+
 ## Escalation
 
 If you can't fix it after reasonable attempts: summarize what's broken, what you tried, and clear next steps for the user.
@@ -203,7 +227,7 @@ Format each entry as:
 - **Result**: (success/failure + details)
 ```
 
-Do this BEFORE replying to the user with results.
+Do this BEFORE replying to the user with results, and ALWAYS before running try-full-config.sh.
 AGENTS_EOF
 
 # -----------------------------------------------------------------------------
