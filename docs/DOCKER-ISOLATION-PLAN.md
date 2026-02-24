@@ -7,6 +7,7 @@
 > v5 by ClaudeBot (2026-02-24) — integrated ChatGPT cross-mode audit (6 fixes + manifest).
 > v6 by ClaudeBot (2026-02-24) — integrated ChatGPT final audit (5 new fixes).
 > v7 by ClaudeBot (2026-02-24) — delta review: single manifest, secrets policy, self-sufficient examples.
+> v8 by ClaudeBot (2026-02-24) — final cleanup: terminology table, reader contract, last stale refs.
 
 ---
 
@@ -146,10 +147,10 @@ build-full-config.sh (orchestrator — single entry point)
   │     └── generate_safeguard_units(group)  → .path + .service + E2E (ALL modes)
   │
   ├── generate-session-services.sh           → THIN: systemd unit files only
-  │     (reads port from /etc/openclaw-ports.env, config/auth already exist)
+  │     (reads port from manifest, config/auth already exist)
   │
   └── generate-docker-compose.sh             → THIN: compose + container systemd unit only
-        (reads port from /etc/openclaw-ports.env, config/auth already exist)
+        (reads port from manifest, config/auth already exist)
 ```
 
 **Runtime manifest:** `build-full-config.sh` also writes `/etc/openclaw-groups.json` — the runtime source of truth for all group topology. Scripts that need to know "what groups exist, what ports, what isolation type" read this file instead of re-parsing env vars.
@@ -718,7 +719,7 @@ New tests for `lib-isolation.sh`:
 Updated tests for generators:
 - Session generator only creates `.service` file (no config, no auth, no safeguard)
 - Container generator only creates `docker-compose.yaml` + `.service` file
-- Both read ports from `/etc/openclaw-ports.env` (not computed)
+- Both read ports from manifest (not computed)
 
 ### Acceptance Criteria
 
@@ -1411,6 +1412,30 @@ docker exec -it openclaw-council bash
 7. **Container restart vs recreate** — `restart` keeps container (config reload). `up --force-recreate` makes new container (image update). Documented in Config Hot-Reload.
 
 ---
+
+## Terminology
+
+| Term | Meaning |
+|------|---------|
+| Isolation type `none` | Backend concept: single shared OpenClaw process, no per-group services. Default when no isolation is configured. |
+| Isolation type `session` | Per-group systemd service running OpenClaw gateway directly. |
+| Isolation type `container` | Per-group Docker container running OpenClaw gateway, managed by compose + systemd wrapper. |
+| Network mode `host` | Container uses host network stack (`network_mode: host`). Default for containers. |
+| Network mode `isolated` | Container on a bridge network with `internal: true` (no egress). For code sandboxes. |
+| ~~Network mode `none`/`internal`~~ | **Deprecated.** Both map to `isolated` with a warning. Never use Docker's `network_mode: none` (kills loopback). |
+
+## Reader Contract
+
+Which scripts read which files — prevents re-introduction of topology re-parsing.
+
+| File | Written by | Read by | Contains |
+|------|-----------|---------|----------|
+| `/etc/openclaw-groups.json` | `build-full-config.sh` | `lib-health-check.sh`, `safe-mode-handler.sh`, `sync-openclaw-state.sh`, debugging commands | Group topology: isolation type, ports, paths, service names, agents |
+| `configs/{group}/group.env` | `build-full-config.sh` | systemd `EnvironmentFile=`, compose `env_file:` | Runtime process env: API keys, group name, port, isolation, config/state paths |
+| `configs/{group}/openclaw.session.json` | `generate-config.sh` (called by orchestrator) | OpenClaw gateway (inside container or systemd service) | OpenClaw app config: agents, channels, plugins, auth |
+| `/etc/habitat-parsed.env` | `parse-habitat.py` | `build-full-config.sh`, generators | Raw habitat config as env vars (input to the pipeline) |
+
+**Rule:** Scripts that need to know "what groups exist" or "what port does group X use" read the manifest. Scripts that need to inject env vars into a process use `group.env`. No script should re-derive topology from `/etc/habitat-parsed.env` after `build-full-config.sh` has run.
 
 ## Cross-Mode Success Criteria
 
