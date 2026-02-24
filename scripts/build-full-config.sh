@@ -431,15 +431,68 @@ if [ -x /usr/local/bin/openclaw-state.sh ]; then
   log "State machine initialized"
 fi
 
-# --- Agent Isolation: wire isolation scripts into pipeline ---
-if [ "$ISOLATION_DEFAULT" = "session" ]; then
-  # Export API keys for session services
+# --- Agent Isolation: centralized per-group setup + thin generator dispatch ---
+# Source lib-isolation.sh for shared group management functions
+for _iso_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_iso_path/lib-isolation.sh" ] && { source "$_iso_path/lib-isolation.sh"; break; }
+done
+
+if [ -n "${ISOLATION_GROUPS:-}" ] && type generate_groups_manifest &>/dev/null; then
+  # Export decoded secrets for group.env files and generator env
   export ANTHROPIC_API_KEY="$AK"
   export GOOGLE_API_KEY="$GK"
-  export BRAVE_API_KEY="$BK"
-  bash /usr/local/sbin/generate-session-services.sh || { echo "FATAL: session isolation setup failed" >&2; exit 1; }
-elif [ "$ISOLATION_DEFAULT" = "container" ]; then
-  bash /usr/local/sbin/generate-docker-compose.sh || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
+  export BRAVE_API_KEY="${BK:-}"
+
+  # 1. Generate runtime manifest (single source of truth for group topology + ports)
+  generate_groups_manifest
+  echo "Generated groups manifest: $MANIFEST"
+
+  # 2. Validate group consistency (fail fast on mixed isolation/network within a group)
+  IFS=',' read -ra ALL_GROUPS <<< "$ISOLATION_GROUPS"
+  for group in "${ALL_GROUPS[@]}"; do
+    validate_group_consistency "$group" || exit 1
+  done
+
+  # 3. Per-group setup (dirs, env, config, auth, tokens, safeguard/E2E units)
+  for group in "${ALL_GROUPS[@]}"; do
+    port=$(get_group_port "$group")
+    isolation=$(get_group_isolation "$group")
+
+    setup_group_directories "$group"
+    generate_group_env "$group"
+    generate_group_config "$group"
+    setup_group_auth_profiles "$group"
+    generate_safeguard_units "$group" "$port" "$isolation"
+    generate_e2e_unit "$group" "$port" "$isolation"
+
+    echo "  [${group}] isolation=${isolation} port=${port} → configured"
+  done
+
+  # 4. Dispatch to mode-specific generators (thin — service definitions only)
+  session_groups=$(get_groups_by_type "session")
+  container_groups=$(get_groups_by_type "container")
+
+  if [ -n "$session_groups" ]; then
+    ISOLATION_GROUPS="$(echo "$session_groups" | tr ' ' ',')" \
+        bash /usr/local/sbin/generate-session-services.sh \
+        || { echo "FATAL: session isolation setup failed" >&2; exit 1; }
+  fi
+  if [ -n "$container_groups" ]; then
+    ISOLATION_GROUPS="$(echo "$container_groups" | tr ' ' ',')" \
+        bash /usr/local/sbin/generate-docker-compose.sh \
+        || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
+  fi
+elif [ -n "${ISOLATION_GROUPS:-}" ]; then
+  # Fallback: lib-isolation.sh not available, use legacy dispatch
+  echo "WARNING: lib-isolation.sh not found, using legacy isolation dispatch" >&2
+  export ANTHROPIC_API_KEY="$AK"
+  export GOOGLE_API_KEY="$GK"
+  export BRAVE_API_KEY="${BK:-}"
+  if [ "$ISOLATION_DEFAULT" = "session" ]; then
+    bash /usr/local/sbin/generate-session-services.sh || { echo "FATAL: session isolation setup failed" >&2; exit 1; }
+  elif [ "$ISOLATION_DEFAULT" = "container" ]; then
+    bash /usr/local/sbin/generate-docker-compose.sh || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
+  fi
 fi
 if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
   R=$(printf "%.5f" "$(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc)")
