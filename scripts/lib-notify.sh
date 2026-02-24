@@ -191,7 +191,9 @@ notify_send_safe_mode_intro() {
 
 IMPORTANT: Just reply directly - your response will be automatically delivered. Do NOT use the message tool.
 
-Read BOOT_REPORT.md and reply with: 1) Brief intro 2) What went wrong 3) Offer to help. Keep it to 3-5 sentences."
+NOTE: You may have PRIOR CONVERSATION HISTORY from a previous safe mode session (check your context window — scroll up). If you see earlier messages, you have already diagnosed this issue before. Read MEMORY.md first for your own notes.
+
+Read BOOT_REPORT.md and MEMORY.md, then reply with: 1) Brief intro 2) What went wrong 3) Whether you've seen this before (from prior context) 4) Offer to help. Keep it to 3-5 sentences."
 
   log "  Command: openclaw agent --agent safe-mode --deliver --reply-channel $channel --reply-to $owner_id"
 
