@@ -127,6 +127,87 @@ get_owner_id_for_platform() {
   esac
 }
 
+# --- Isolation-aware service management ---
+# All health check consumers use these functions — never direct systemctl/docker calls.
+# ${USERNAME} comes from env_load() (lib-env.sh), sourced at script startup.
+# ${ISOLATION} comes from EnvironmentFile= in the calling systemd unit.
+
+hc_restart_service() {
+  local group="${1:?Usage: hc_restart_service <group>}"
+  local iso="${ISOLATION:-session}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" restart 2>&1 ;;
+    *)
+      systemctl restart "openclaw-${group}" 2>&1 ;;
+  esac
+}
+
+hc_is_service_active() {
+  local group="${1:?Usage: hc_is_service_active <group>}"
+  local iso="${ISOLATION:-session}"
+  case "$iso" in
+    container)
+      # Check compose health status, not just .State.Running.
+      # "healthy" means the HEALTHCHECK (HTTP probe) is passing.
+      local status
+      status=$(docker inspect --format='{{.State.Health.Status}}' "openclaw-${group}" 2>/dev/null)
+      [ "$status" = "healthy" ] ;;
+    *)
+      systemctl is-active --quiet "openclaw-${group}" ;;
+  esac
+}
+
+hc_service_logs() {
+  local group="${1:?Usage: hc_service_logs <group>}"
+  local lines="${2:-50}"
+  local iso="${ISOLATION:-session}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" logs --tail="$lines" 2>/dev/null ;;
+    *)
+      journalctl -u "openclaw-${group}" --no-pager -n "$lines" 2>/dev/null ;;
+  esac
+}
+
+hc_stop_service() {
+  local group="${1:?Usage: hc_stop_service <group>}"
+  local iso="${ISOLATION:-session}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" down 2>&1 ;;
+    *)
+      systemctl stop "openclaw-${group}" 2>&1 ;;
+  esac
+}
+
+# Reach the gateway — handles isolated network containers via docker exec
+hc_curl_gateway() {
+  local group="${1:?Usage: hc_curl_gateway <group>}"
+  local path="${2:-/}"
+  local port="${GROUP_PORT:-18789}"
+  local iso="${ISOLATION:-session}"
+  local net="${NETWORK_MODE:-host}"
+
+  if [ "$iso" = "container" ] && [ "$net" != "host" ]; then
+    # Isolated network: reach via docker exec
+    docker exec "openclaw-${group}" \
+      curl -sf "http://127.0.0.1:${port}${path}" 2>/dev/null
+  else
+    # Host network or session mode: direct curl
+    curl -sf "http://127.0.0.1:${port}${path}" 2>/dev/null
+  fi
+}
+
 # --- State helpers ---
 
 hc_is_in_safe_mode() {
