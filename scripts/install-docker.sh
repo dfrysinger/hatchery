@@ -67,7 +67,7 @@ $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
     > /etc/apt/sources.list.d/docker.list
 
 apt-get update -qq
-apt-get install -y -qq \
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     docker-ce \
     docker-ce-cli \
     containerd.io \

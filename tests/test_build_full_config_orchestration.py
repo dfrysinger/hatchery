@@ -199,7 +199,7 @@ token2=$(generate_group_token "browser")
 generate_groups_manifest
 port=$(get_group_port "browser")
 iso=$(get_group_isolation "browser")
-generate_safeguard_units "browser" "$port" "$iso" "{output_dir}"
+generate_safeguard_units "browser" "{output_dir}"
 cat "{output_dir}/openclaw-safeguard-browser.service"
 """
         result = run_orchestration_snippet(code, env)
@@ -214,7 +214,7 @@ cat "{output_dir}/openclaw-safeguard-browser.service"
 generate_groups_manifest
 port=$(get_group_port "browser")
 iso=$(get_group_isolation "browser")
-generate_e2e_unit "browser" "$port" "$iso" "{output_dir}"
+generate_e2e_unit "browser" "{output_dir}"
 cat "{output_dir}/openclaw-e2e-browser.service"
 """
         result = run_orchestration_snippet(code, env)

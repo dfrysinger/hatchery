@@ -462,8 +462,8 @@ if [ -n "${ISOLATION_GROUPS:-}" ] && type generate_groups_manifest &>/dev/null; 
     generate_group_env "$group"
     generate_group_config "$group"
     setup_group_auth_profiles "$group"
-    generate_safeguard_units "$group" "$port" "$isolation"
-    generate_e2e_unit "$group" "$port" "$isolation"
+    generate_safeguard_units "$group"
+    generate_e2e_unit "$group"
 
     echo "  [${group}] isolation=${isolation} port=${port} → configured"
   done

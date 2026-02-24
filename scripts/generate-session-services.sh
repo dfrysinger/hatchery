@@ -91,7 +91,7 @@ Type=simple
 User=${SVC_USER}
 WorkingDirectory=${HOME_DIR}
 ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port ${port}
-ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
+ExecStartPost=+/bin/bash -c 'source ${env_file} && RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 Restart=always
 RestartSec=10
 RestartPreventExitStatus=2

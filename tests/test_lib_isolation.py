@@ -2,7 +2,6 @@
 import subprocess
 import json
 import os
-import tempfile
 import pytest
 
 SCRIPT_DIR = os.path.join(os.path.dirname(__file__), '..', 'scripts')
@@ -387,7 +386,7 @@ class TestUnitGeneration:
         os.makedirs(out_dir, exist_ok=True)
         
         run_bash(
-            f'generate_safeguard_units "council" "18790" "session" "{out_dir}"',
+            f'generate_safeguard_units "council" "{out_dir}"',
             env=env
         )
         
@@ -405,7 +404,7 @@ class TestUnitGeneration:
         os.makedirs(out_dir, exist_ok=True)
         
         run_bash(
-            f'generate_safeguard_units "council" "18790" "session" "{out_dir}"',
+            f'generate_safeguard_units "council" "{out_dir}"',
             env=env
         )
         
@@ -425,7 +424,7 @@ class TestUnitGeneration:
         os.makedirs(out_dir, exist_ok=True)
         
         run_bash(
-            f'generate_e2e_unit "sandbox" "18791" "container" "{out_dir}"',
+            f'generate_e2e_unit "sandbox" "{out_dir}"',
             env=env
         )
         

@@ -18,6 +18,7 @@ MANIFEST="${MANIFEST:-/etc/openclaw-groups.json}"
 CONFIG_BASE="${CONFIG_BASE:-${HOME_DIR:-/home/bot}/.openclaw/configs}"
 STATE_BASE="${STATE_BASE:-${HOME_DIR:-/home/bot}/.openclaw-sessions}"
 COMPOSE_BASE="${COMPOSE_BASE:-${HOME_DIR:-/home/bot}/.openclaw/compose}"
+LIB_SVC_USER="${SVC_USER:-bot}"
 
 # =========================================================================
 # Group/Agent Queries
@@ -177,7 +178,7 @@ get_group_port() {
 # Write /etc/openclaw-groups.json — the runtime source of truth.
 generate_groups_manifest() {
     local home_dir="${HOME_DIR:-/home/bot}"
-    local svc_user="${SVC_USER:-bot}"
+    local svc_user="$LIB_SVC_USER"
 
     # Sort groups alphabetically for deterministic port assignment
     local groups_unsorted groups
@@ -216,8 +217,7 @@ generate_groups_manifest() {
         local resources
         resources=$(get_group_resources "$group")
         local res_mem res_cpu
-        res_mem=$(echo "$resources" | awk '{print $1}')
-        res_cpu=$(echo "$resources" | awk '{print $2}')
+        IFS='|' read -r res_mem res_cpu <<< "$resources"
 
         manifest_json=$(echo "$manifest_json" | jq \
             --arg g "$group" \
@@ -324,7 +324,7 @@ generate_group_token() {
     local group="$1"
     local config_dir="${CONFIG_BASE}/${group}"
     local token_file="${config_dir}/gateway-token.txt"
-    local svc_user="${SVC_USER:-bot}"
+    local svc_user="$LIB_SVC_USER"
 
     if [ ! -f "$token_file" ]; then
         openssl rand -hex 16 > "$token_file"
@@ -339,7 +339,7 @@ generate_group_token() {
 generate_group_env() {
     local group="$1"
     local config_dir="${CONFIG_BASE}/${group}"
-    local svc_user="${SVC_USER:-bot}"
+    local svc_user="$LIB_SVC_USER"
 
     local port isolation network
     port=$(get_group_port "$group")
@@ -371,7 +371,7 @@ ENVFILE
 generate_group_config() {
     local group="$1"
     local config_dir="${CONFIG_BASE}/${group}"
-    local svc_user="${SVC_USER:-bot}"
+    local svc_user="$LIB_SVC_USER"
 
     local port token agents
     port=$(get_group_port "$group")
@@ -404,9 +404,7 @@ generate_group_config() {
 # These run on the host regardless of isolation mode.
 generate_safeguard_units() {
     local group="$1"
-    local port="$2"
-    local isolation="$3"
-    local output_dir="${4:-/etc/systemd/system}"
+    local output_dir="${2:-/etc/systemd/system}"
     local config_dir="${CONFIG_BASE}/${group}"
 
     # .path unit — watches for unhealthy marker (identical for all modes)
@@ -438,9 +436,7 @@ SGFILE
 # Generate E2E check service for any group.
 generate_e2e_unit() {
     local group="$1"
-    local port="$2"
-    local isolation="$3"
-    local output_dir="${4:-/etc/systemd/system}"
+    local output_dir="${2:-/etc/systemd/system}"
     local config_dir="${CONFIG_BASE}/${group}"
 
     cat > "${output_dir}/openclaw-e2e-${group}.service" <<E2EFILE

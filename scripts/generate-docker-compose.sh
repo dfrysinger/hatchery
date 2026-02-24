@@ -150,6 +150,8 @@ networks:
     tmpfs:
       - /tmp:size=256M
       - /run:size=64M
+      - /home/bot/.npm:size=64M
+      - /home/bot/.cache:size=64M
     pids_limit: 256"
 
     # --- Write docker-compose.yaml ---
