@@ -5,6 +5,7 @@
 > v3 by ClaudeBot (2026-02-24) — comprehensive rewrite with full implementation details.
 > v4 by ClaudeBot (2026-02-24) — SSOT audit, shared code architecture, revised phases.
 > v5 by ClaudeBot (2026-02-24) — integrated ChatGPT cross-mode audit (6 fixes + manifest).
+> v6 by ClaudeBot (2026-02-24) — integrated ChatGPT final audit (5 new fixes).
 
 ---
 
@@ -264,17 +265,26 @@ get_group_isolation() {
 }
 
 # Get network mode for a group (first agent with a setting, default "host").
+# Maps deprecated "none"/"internal" to "isolated".
 get_group_network() {
     local group="$1"
+    local raw=""
     for i in $(seq 1 "${AGENT_COUNT}"); do
         local ag_var="AGENT${i}_ISOLATION_GROUP"
         local net_var="AGENT${i}_NETWORK"
         if [ "${!ag_var:-}" = "$group" ] && [ -n "${!net_var:-}" ]; then
-            echo "${!net_var}"
-            return
+            raw="${!net_var}"
+            break
         fi
     done
-    echo "host"
+    raw="${raw:-host}"
+    # Normalize: both "internal" and "none" map to "isolated"
+    case "$raw" in
+        internal|none)
+            echo "WARNING: network '$raw' deprecated, use 'isolated'" >&2
+            echo "isolated" ;;
+        *) echo "$raw" ;;
+    esac
 }
 
 # Get resource limits for a group: "memory cpu" (empty strings if unset).
@@ -812,7 +822,7 @@ One compose file per group in a dedicated directory:
 
 Each uses `COMPOSE_PROJECT_NAME=openclaw-{group}`. The compose command:
 ```bash
-docker compose -f ~/.openclaw/compose/${group}/docker-compose.yaml -p openclaw-${group} up -d
+docker compose -f /home/${USERNAME}/.openclaw/compose/${group}/docker-compose.yaml -p openclaw-${group} up -d
 ```
 
 ### 2.6 Container Systemd Unit Template
@@ -851,6 +861,12 @@ Key differences from session mode unit:
 - `ExecStop` runs `docker compose down`
 - `--wait` blocks until containers are healthy
 
+**Liveness ownership:** systemd does NOT supervise the long-lived gateway process inside the container. Liveness is a two-layer responsibility:
+1. **Docker layer:** `restart: on-failure` in compose restarts crashed containers automatically. The compose `HEALTHCHECK` marks containers unhealthy after 3 failed HTTP probes.
+2. **Host layer:** `gateway-health-check.sh` (ExecStartPost) verifies initial readiness. The `openclaw-e2e-{group}.service` does the magic-word test. The `openclaw-safeguard-{group}.path` watches for unhealthy markers and triggers safe mode recovery.
+
+This is intentional — Docker handles transient crashes (process restarts), the host handles persistent failures (safe mode). Same split as session mode where systemd's `Restart=always` handles transient crashes and the safeguard `.path` handles persistent failures.
+
 ### Tests
 
 Rewrite `test_docker_compose.py` for Option A:
@@ -865,7 +881,7 @@ Rewrite `test_docker_compose.py` for Option A:
 
 ### Acceptance Criteria
 
-- [ ] `docker compose -f ~/.openclaw/compose/{group}/docker-compose.yaml config` validates
+- [ ] `docker compose -f /home/${USERNAME}/.openclaw/compose/{group}/docker-compose.yaml config` validates
 - [ ] Container systemd unit starts/stops cleanly
 - [ ] No host scripts, state dirs, or log dirs mounted inside container
 - [ ] `docker inspect` shows only the expected mounts
@@ -875,7 +891,7 @@ Rewrite `test_docker_compose.py` for Option A:
 
 ```bash
 git checkout HEAD~1 -- scripts/generate-docker-compose.sh
-rm -rf ~/.openclaw/compose/
+rm -rf /home/bot/.openclaw/compose/
 rm -f /etc/systemd/system/openclaw-container-*.service
 systemctl daemon-reload
 ```
@@ -1012,7 +1028,11 @@ hc_is_service_active() {
     local isolation="${ISOLATION:-session}"
     case "$isolation" in
         container)
-            docker inspect --format='{{.State.Running}}' "openclaw-${group}" 2>/dev/null | grep -q 'true' ;;
+            # Check compose health status, not just .State.Running (which only means process started).
+            # "healthy" means the HEALTHCHECK (HTTP probe) is passing.
+            local status
+            status=$(docker inspect --format='{{.State.Health.Status}}' "openclaw-${group}" 2>/dev/null)
+            [ "$status" = "healthy" ] ;;
         *)  systemctl is-active --quiet "openclaw-${group}" ;;
     esac
 }
@@ -1136,13 +1156,16 @@ Full rollback procedure in [Rollback Procedures](#rollback-procedures).
 
 ### Network Mode Definitions
 
+Simplified to two modes. The original three-mode design (`host`/`internal`/`none`) had overlapping semantics — both `internal` and `none` created isolated bridges with no egress. Collapsed to two clearly distinct modes:
+
 | Mode | Docker Implementation | Egress | LLM APIs | Loopback | Use Case |
 |------|----------------------|--------|----------|----------|----------|
 | `host` | `network_mode: host` | Full | Yes | Yes | Default — same as session mode |
-| `internal` | Custom bridge, `internal: true` | None | No | Yes | Code sandbox with shared FS IPC |
-| `none` | Custom bridge, no IP masquerade | Blocked | No | Yes | Maximum isolation, shared FS only |
+| `isolated` | Bridge with `internal: true` | None | No | Yes | Code sandbox, shared FS IPC only |
 
-**Critical:** `none` is NOT Docker's `network_mode: none` (kills loopback). It's an isolated bridge with egress blocked.
+**`isolated` replaces both `internal` and `none`.** Both map to the same implementation. If `none` is specified in habitat config, treat it as `isolated` (with a deprecation warning).
+
+**Critical:** We never use Docker's `network_mode: none` (kills loopback entirely, gateway can't bind).
 
 ### Implementation
 
@@ -1151,41 +1174,29 @@ Full rollback procedure in [Rollback Procedures](#rollback-procedures).
 services:
   council:
     network_mode: host
+    # No port mapping — gateway binds directly on host
 
-# internal mode:
+# isolated mode:
 services:
   sandbox:
-    networks: [isolated-sandbox]
+    networks: [isolated-${GROUP}]
     ports: ["${GROUP_PORT}:${GROUP_PORT}"]  # Expose to host for health checks
+    dns: []                                  # No DNS resolution
 
 networks:
-  isolated-sandbox:
+  isolated-${GROUP}:
     driver: bridge
     internal: true
-
-# none mode:
-services:
-  lockdown:
-    networks: [blocked-lockdown]
-    ports: ["${GROUP_PORT}:${GROUP_PORT}"]
-    dns: []
-
-networks:
-  blocked-lockdown:
-    driver: bridge
-    internal: true
-    driver_opts:
-      com.docker.network.bridge.enable_ip_masquerade: "false"
 ```
 
-For `internal`/`none`: gateway port explicitly mapped so host health check can reach it.
+For `isolated` mode: gateway port explicitly mapped so host health check can reach it via `localhost:${GROUP_PORT}`.
 
 ### Acceptance Criteria
 
-- [ ] `host`: container reaches external APIs
-- [ ] `internal`: no external access, loopback works, health check works from host
-- [ ] `none`: no external access, loopback works, health check works from host
-- [ ] `internal`/`none` agents fail gracefully on LLM calls (error, not crash)
+- [ ] `host`: container reaches external APIs, health check works
+- [ ] `isolated`: no external access, loopback works, health check works from host via port mapping
+- [ ] `isolated` agents fail gracefully on LLM calls (error, not crash)
+- [ ] `none` in habitat config maps to `isolated` with deprecation warning
 
 ### Rollback
 
@@ -1217,18 +1228,18 @@ tmpfs:
 
 ### 7.2 Resource Limits
 
-From habitat config:
+`deploy.resources` only works in Docker Swarm mode. For standalone `docker compose`, use top-level service keys:
 
 ```yaml
-deploy:
-  resources:
-    limits:
-      memory: ${RESOURCES_MEMORY}
-      cpus: "${RESOURCES_CPU}"
-    reservations:
-      memory: ${RESOURCES_MEMORY_HALF}
-      cpus: "${RESOURCES_CPU_HALF}"
+services:
+  sandbox:
+    mem_limit: ${RESOURCES_MEMORY}      # e.g., "512m"
+    cpus: ${RESOURCES_CPU}              # e.g., "0.5"
+    memswap_limit: ${RESOURCES_MEMORY}  # Prevent swap (match mem_limit)
+    pids_limit: 256                     # Prevent fork bombs
 ```
+
+These are the Docker Compose v2 runtime constraint fields that work without Swarm. The generator reads `AGENT{N}_RESOURCES_MEMORY` and `AGENT{N}_RESOURCES_CPU` from `get_group_resources()` in `lib-isolation.sh`.
 
 ### 7.3 Browser Variant (Future)
 
@@ -1291,7 +1302,7 @@ done
 systemctl daemon-reload
 
 # 2. Remove compose files
-rm -rf ~/.openclaw/compose/
+rm -rf /home/bot/.openclaw/compose/
 
 # 3. Convert container groups to session in habitat config
 # Edit habitat JSON: isolation: "container" → isolation: "session"
@@ -1320,7 +1331,7 @@ docker build \
 
 # Rolling restart (force-recreate for image update)
 for group in $(get_groups_by_type "container"); do
-    docker compose -f "~/.openclaw/compose/${group}/docker-compose.yaml" \
+    docker compose -f "/home/${USERNAME}/.openclaw/compose/${group}/docker-compose.yaml" \
         -p "openclaw-${group}" up -d --force-recreate
     sleep 10  # Allow health check before next group
 done
@@ -1396,6 +1407,8 @@ These must hold true after Phase 1:
 - All group metadata resolvable from `/etc/openclaw-groups.json` (no env var re-parsing)
 - All secrets injected via `group.env` (no per-script B64 decoding)
 - Hyphenated group names work everywhere (port file, systemd units, compose projects)
+
+---
 
 ---
 
