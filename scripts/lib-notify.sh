@@ -191,9 +191,9 @@ notify_send_safe_mode_intro() {
 
 IMPORTANT: Just reply directly - your response will be automatically delivered. Do NOT use the message tool.
 
-NOTE: You may have PRIOR CONVERSATION HISTORY from a previous safe mode session (check your context window — scroll up). If you see earlier messages, you have already diagnosed this issue before. Read MEMORY.md first for your own notes.
+NOTE: Your chat session PERSISTS across restarts. If you were running before (e.g. you tried a recovery that failed), your earlier messages are still in this conversation above — look for them. The raw transcript is at ~/.openclaw-sessions/\$GROUP/agents/safe-mode/sessions/*.jsonl if you need it. Also read MEMORY.md for your own recovery notes from prior attempts.
 
-Read BOOT_REPORT.md and MEMORY.md, then reply with: 1) Brief intro 2) What went wrong 3) Whether you've seen this before (from prior context) 4) Offer to help. Keep it to 3-5 sentences."
+Read MEMORY.md and BOOT_REPORT.md, then reply with: 1) Brief intro 2) What went wrong 3) What you already tried (if anything — check above) 4) Offer to help. Keep it to 3-5 sentences."
 
   log "  Command: openclaw agent --agent safe-mode --deliver --reply-channel $channel --reply-to $owner_id"
 
