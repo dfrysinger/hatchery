@@ -163,15 +163,14 @@ class TestGetGroupResources:
             {'group': 'sandbox', 'isolation': 'container', 'memory': '512m', 'cpu': '0.5'},
         ])
         r = run_bash('get_group_resources "sandbox"', env=env)
-        assert r.stdout.strip() == '512m 0.5'
+        assert r.stdout.strip() == '512m|0.5'
 
     def test_returns_empty_when_unset(self):
         env = make_agent_env([
             {'group': 'sandbox', 'isolation': 'container'},
         ])
         r = run_bash('get_group_resources "sandbox"', env=env)
-        # Two spaces (empty mem + empty cpu)
-        assert r.stdout.strip() == ''
+        assert r.stdout.strip() == '|'
 
     def test_uses_first_agent_values(self):
         env = make_agent_env([
@@ -179,7 +178,7 @@ class TestGetGroupResources:
             {'group': 'sandbox', 'isolation': 'container', 'memory': '1g', 'cpu': '1.0'},
         ])
         r = run_bash('get_group_resources "sandbox"', env=env)
-        assert r.stdout.strip() == '512m 0.5'
+        assert r.stdout.strip() == '512m|0.5'
 
 
 # =========================================================================
