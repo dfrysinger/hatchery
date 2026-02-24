@@ -230,6 +230,48 @@ DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-instal
   >> "$LOG" 2>&1
 
 # =============================================================================
+# Stage 5b: Install Docker (if container isolation is configured)
+# =============================================================================
+if [ "${ISOLATION_DEFAULT:-none}" = "container" ] || echo "${ISOLATION_GROUPS:-}" | grep -q "container"; then
+  log "Stage 5b: Installing Docker for container isolation..."
+  # Official apt repo with GPG key pinning (no curl|sh per AGENTS.md rules)
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+    https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    > /etc/apt/sources.list.d/docker.list
+  apt-get update >> "$LOG" 2>&1
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    docker-ce docker-ce-cli containerd.io docker-compose-plugin >> "$LOG" 2>&1
+
+  usermod -aG docker "$USERNAME"
+  systemctl enable docker && systemctl start docker
+
+  # Log rotation — prevent container logs from filling disk
+  mkdir -p /etc/docker
+  cat > /etc/docker/daemon.json <<'DAEMON'
+{
+    "log-driver": "json-file",
+    "log-opts": { "max-size": "50m", "max-file": "3" }
+}
+DAEMON
+  systemctl restart docker >> "$LOG" 2>&1
+
+  # Build base agent image
+  if [ -f /opt/hatchery/Dockerfile ]; then
+    docker build \
+      --build-arg BOT_UID="$(id -u "$USERNAME")" \
+      --build-arg OPENCLAW_VERSION="$(openclaw --version 2>/dev/null || echo latest)" \
+      -t hatchery/agent:latest \
+      -f /opt/hatchery/Dockerfile /opt/hatchery/ >> "$LOG" 2>&1
+    log "Docker base image built: hatchery/agent:latest"
+  fi
+else
+  log "Stage 5b: Skipping Docker (no container isolation configured)"
+fi
+
+# =============================================================================
 # Stage 6: Install Chrome, pip packages & helper scripts
 # =============================================================================
 $S 6 "installing-extras"
