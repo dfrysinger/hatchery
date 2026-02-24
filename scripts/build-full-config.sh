@@ -30,7 +30,8 @@ done
 type d &>/dev/null || { echo "FATAL: lib-env.sh not found" >&2; exit 1; }
 env_load
 
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+# Export habitat vars so child processes (generators, install-docker) can see them
+[ -f /etc/habitat-parsed.env ] && { set -a; source /etc/habitat-parsed.env; set +a; }
 H="/home/$USERNAME"
 # Decode secrets needed for auth-profiles.json (workspace code below)
 AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "${BRAVE_KEY_B64:-}")

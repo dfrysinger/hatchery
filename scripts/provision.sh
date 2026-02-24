@@ -97,7 +97,7 @@ if tg_owner:
 FALLBACK_PY
 fi
 
-source /etc/habitat-parsed.env
+set -a; source /etc/habitat-parsed.env; set +a
 
 # Install Node (parallel download started in bootcmd)
 log "Installing Node.js..."
