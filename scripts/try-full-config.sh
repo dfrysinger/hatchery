@@ -46,14 +46,26 @@ done
 
 log "Attempting full config switch (isolation=$ISOLATION, group=${TARGET_GROUP:-all})"
 
+# Guard: session/container modes require groups to be defined
+if [ "$ISOLATION" = "session" ] || [ "$ISOLATION" = "container" ]; then
+  if [ -z "$TARGET_GROUP" ] && [ -z "${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}" ]; then
+    log "FATAL: isolation=$ISOLATION but no groups defined (ISOLATION_GROUPS empty)"
+    exit 1
+  fi
+fi
+
 # --- State machine: lock and transition ---
 if [ -x "$STATE_CMD" ]; then
   if [ -n "$TARGET_GROUP" ]; then
-    GROUP="$TARGET_GROUP" "$STATE_CMD" lock --holder "try-full-config" --ttl 300 2>/dev/null || true
-    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config" 2>/dev/null || true
+    GROUP="$TARGET_GROUP" "$STATE_CMD" lock --holder "try-full-config" --ttl 300 2>/dev/null \
+      || log "WARNING: state lock acquisition failed (group=$TARGET_GROUP)"
+    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config" 2>/dev/null \
+      || log "WARNING: state transition to TRANSITIONING failed (group=$TARGET_GROUP)"
   else
-    "$STATE_CMD" lock --holder "try-full-config" --ttl 300 2>/dev/null || true
-    "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config" 2>/dev/null || true
+    "$STATE_CMD" lock --holder "try-full-config" --ttl 300 2>/dev/null \
+      || log "WARNING: state lock acquisition failed"
+    "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config" 2>/dev/null \
+      || log "WARNING: state transition to TRANSITIONING failed"
   fi
 fi
 
@@ -159,11 +171,15 @@ state_transition() {
   local state="$1" reason="$2"
   [ -x "$STATE_CMD" ] || return 0
   if [ -n "$TARGET_GROUP" ]; then
-    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config" 2>/dev/null || true
-    GROUP="$TARGET_GROUP" "$STATE_CMD" unlock 2>/dev/null || true
+    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config" 2>/dev/null \
+      || log "WARNING: state transition to $state failed (group=$TARGET_GROUP)"
+    GROUP="$TARGET_GROUP" "$STATE_CMD" unlock 2>/dev/null \
+      || log "WARNING: state unlock failed (group=$TARGET_GROUP)"
   else
-    "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config" 2>/dev/null || true
-    "$STATE_CMD" unlock 2>/dev/null || true
+    "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config" 2>/dev/null \
+      || log "WARNING: state transition to $state failed"
+    "$STATE_CMD" unlock 2>/dev/null \
+      || log "WARNING: state unlock failed"
   fi
 }
 
@@ -196,8 +212,6 @@ else
 
   state_transition "SAFE_MODE" "full-config-failed"
 
-  local svc_name
-  svc_name=$(_hc_service_name "${TARGET_GROUP:-}")
   log "Check logs: hc_service_logs '${TARGET_GROUP:-}' 50"
   exit 1
 fi

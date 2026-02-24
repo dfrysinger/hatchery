@@ -36,7 +36,7 @@ type get_group_port &>/dev/null || { echo "FATAL: lib-isolation.sh not found" >&
 # --- Configuration ---
 ISOLATION="${ISOLATION_DEFAULT:-none}"
 ISO_GROUPS="${ISOLATION_GROUPS:-}"
-SVC_USER="${USERNAME:-bot}"
+SVC_USER="${SVC_USER:-${USERNAME:-bot}}"
 HOME_DIR="${HOME_DIR:-/home/${SVC_USER}}"
 HABITAT="${HABITAT_NAME:-default}"
 OUTPUT_DIR="${SESSION_OUTPUT_DIR:-/etc/systemd/system}"
