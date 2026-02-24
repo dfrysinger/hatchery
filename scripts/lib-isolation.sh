@@ -337,6 +337,12 @@ generate_group_token() {
 
 # Write per-group environment file with decoded secrets and group metadata.
 # Consumed by systemd EnvironmentFile= and compose env_file:.
+#
+# Note: GROUP, GROUP_PORT, ISOLATION, NETWORK_MODE are intentionally duplicated
+# from the manifest into group.env. Systemd EnvironmentFile= cannot read JSON,
+# and consumer scripts (health check, safe-mode-handler) need these values at
+# runtime without parsing the manifest. The manifest remains SSOT for generation;
+# group.env is the runtime delivery mechanism.
 generate_group_env() {
     local group="$1"
     local config_dir="${CONFIG_BASE}/${group}"

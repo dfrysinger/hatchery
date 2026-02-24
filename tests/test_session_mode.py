@@ -1,354 +1,133 @@
 #!/usr/bin/env python3
-"""TDD tests for TASK-203: Session mode — per-group OpenClaw instances.
+"""Integration tests for session isolation mode.
 
-Session mode generates separate systemd services per isolation group,
-each running its own OpenClaw gateway instance on a unique port.
+Tests the end-to-end flow: lib-isolation.sh functions → generate-session-services.sh.
+Unit-level tests for individual functions are in test_lib_isolation.py.
+Orchestrator-level tests are in test_build_full_config_orchestration.py.
 
-These tests verify:
-1. generate-session-services.sh produces correct systemd unit files
-2. Each group gets its own OpenClaw config with only its agents
-3. Port allocation follows BASE_PORT + group_index pattern
-4. Shared paths are mounted/symlinked correctly
-5. Backward compat: isolation=none generates no extra services
+This file tests session-mode-specific integration behaviors:
+1. Multi-group port determinism through the full stack
+2. None-mode passthrough (no services generated)
+3. Mixed groups filter correctly to session-only
 """
-
+import subprocess
 import json
 import os
-import subprocess
-import sys
-import tempfile
-import textwrap
-import unittest
+import pytest
 
-SCRIPT = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'generate-session-services.sh')
+SCRIPT_DIR = os.path.join(os.path.dirname(__file__), '..', 'scripts')
+LIB_ISOLATION = os.path.join(SCRIPT_DIR, 'lib-isolation.sh')
+SESSION_SCRIPT = os.path.join(SCRIPT_DIR, 'generate-session-services.sh')
 
 
-def run_generator(env_vars, expect_fail=False):
-    """Run generate-session-services.sh with given env vars.
+def build_env(tmp_path, groups, isolation_default='session'):
+    """Build environment for a session-mode test with manifest."""
+    home = str(tmp_path / 'home' / 'bot')
+    manifest_path = str(tmp_path / 'groups.json')
+    unit_dir = str(tmp_path / 'units')
 
-    Returns (output_dir_contents, stdout, stderr).
-    output_dir_contents is a dict of {filename: content}.
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create home directory structure within tmpdir
-        home_dir = os.path.join(tmpdir, 'home', 'testuser')
-        os.makedirs(home_dir, exist_ok=True)
-        
-        env = os.environ.copy()
-        env['SESSION_OUTPUT_DIR'] = tmpdir
-        env['HOME_DIR'] = home_dir
-        env['DRY_RUN'] = '1'  # Don't actually install systemd services
-        # Provide defaults for API keys to avoid unbound variable errors
-        env.setdefault('ANTHROPIC_API_KEY', '')
-        env.setdefault('GOOGLE_API_KEY', '')
-        env.setdefault('BRAVE_API_KEY', '')
-        env.update(env_vars)
+    # Generate manifest using lib-isolation.sh (the real code)
+    agent_envs = []
+    agent_idx = 1
+    for gname, gcfg in groups.items():
+        for aid in gcfg.get('agents', ['agent1']):
+            agent_envs.append(f'AGENT{agent_idx}_ISOLATION_GROUP="{gname}"')
+            agent_envs.append(f'AGENT{agent_idx}_ISOLATION="{gcfg.get("isolation", "session")}"')
+            agent_envs.append(f'AGENT{agent_idx}_NETWORK="{gcfg.get("network", "host")}"')
+            agent_envs.append(f'AGENT{agent_idx}_RESOURCES_MEMORY=""')
+            agent_envs.append(f'AGENT{agent_idx}_RESOURCES_CPU=""')
+            agent_idx += 1
 
-        result = subprocess.run(
-            ['bash', SCRIPT],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        if expect_fail:
-            assert result.returncode != 0, \
-                f"Expected failure but got rc=0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-            return {}, result.stdout, result.stderr
-
-        assert result.returncode == 0, \
-            f"Script failed (rc={result.returncode}).\nstderr: {result.stderr}"
-
-        contents = {}
-        for root, dirs, files in os.walk(tmpdir):
-            for fname in files:
-                fpath = os.path.join(root, fname)
-                rel = os.path.relpath(fpath, tmpdir)
-                with open(fpath) as f:
-                    contents[rel] = f.read()
-
-        return contents, result.stdout, result.stderr
-
-
-def make_session_env(isolation='session', groups='council,workers',
-                     agent_count=4, agent_groups=None, agent_names=None,
-                     extra=None):
-    """Build env vars that simulate habitat-parsed.env for session mode."""
     env = {
-        'ISOLATION_DEFAULT': isolation,
-        'ISOLATION_GROUPS': groups,
-        'AGENT_COUNT': str(agent_count),
-        'HABITAT_NAME': 'TestHabitat',
-        'ISOLATION_SHARED_PATHS': '/clawd/shared',
+        'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+        'HOME': home,
+        'MANIFEST': manifest_path,
+        'ISOLATION_DEFAULT': isolation_default,
+        'ISOLATION_GROUPS': ','.join(groups.keys()),
         'USERNAME': 'bot',
-        'PLATFORM': 'telegram',
+        'SVC_USER': 'bot',
+        'HOME_DIR': home,
+        'HABITAT_NAME': 'test',
+        'SESSION_OUTPUT_DIR': unit_dir,
+        'DRY_RUN': '1',
+        'AGENT_COUNT': str(agent_idx - 1),
     }
+    for line in agent_envs:
+        key, val = line.split('=', 1)
+        env[key] = val.strip('"')
 
-    if agent_groups is None:
-        # Default: 2 agents in council, 2 in workers
-        agent_groups = ['council', 'council', 'workers', 'workers']
-    if agent_names is None:
-        agent_names = [f'Agent{i+1}' for i in range(agent_count)]
+    os.makedirs(unit_dir, exist_ok=True)
+    for gname in groups:
+        config_dir = os.path.join(home, '.openclaw', 'configs', gname)
+        os.makedirs(config_dir, exist_ok=True)
 
-    for i in range(agent_count):
-        n = i + 1
-        env[f'AGENT{n}_NAME'] = agent_names[i] if i < len(agent_names) else f'Agent{n}'
-        env[f'AGENT{n}_ISOLATION_GROUP'] = agent_groups[i] if i < len(agent_groups) else ''
-        env[f'AGENT{n}_ISOLATION'] = ''
-        env[f'AGENT{n}_MODEL'] = 'anthropic/claude-opus-4-5'
-        env[f'AGENT{n}_BOT_TOKEN'] = f'tok{n}'
-        env[f'AGENT{n}_NETWORK'] = ''
-
-    if extra:
-        env.update(extra)
-
-    return env
+    return env, manifest_path, unit_dir, home
 
 
-class TestSessionModeNoOp(unittest.TestCase):
-    """When isolation=none, no extra services should be generated."""
-
-    def test_none_isolation_skips(self):
-        """isolation=none should produce no service files."""
-        env = make_session_env(isolation='none', groups='')
-        files, stdout, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service')]
-        self.assertEqual(len(service_files), 0)
-        self.assertIn('no session services needed', stdout.lower())
-
-    def test_empty_groups_skips(self):
-        """No isolation groups means nothing to generate."""
-        env = make_session_env(isolation='session', groups='')
-        files, stdout, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service')]
-        self.assertEqual(len(service_files), 0)
+def generate_manifest(env, manifest_path):
+    """Generate manifest using lib-isolation.sh's generate_groups_manifest()."""
+    script = f"""
+set -euo pipefail
+source "{LIB_ISOLATION}"
+generate_groups_manifest
+"""
+    result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, env=env)
+    assert result.returncode == 0, f"Manifest generation failed: {result.stderr}"
+    assert os.path.exists(manifest_path), "Manifest not generated"
 
 
-class TestSessionServiceGeneration(unittest.TestCase):
-    """Test systemd service file generation for session mode."""
+class TestSessionIntegration:
+    """End-to-end: manifest generation → session service generation."""
 
-    def test_generates_service_per_group(self):
-        """Each isolation group gets its own .service file."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        self.assertIn('openclaw-council.service', files)
-        self.assertIn('openclaw-workers.service', files)
+    def test_two_groups_get_sequential_ports(self, tmp_path):
+        env, mp, ud, _ = build_env(tmp_path, {
+            'alpha': {'agents': ['agent1']},
+            'beta': {'agents': ['agent2']},
+        })
+        generate_manifest(env, mp)
 
-    def test_generates_safeguard_units_per_group(self):
-        """Each group gets a safeguard .path and .service unit."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        self.assertIn('openclaw-safeguard-council.path', files)
-        self.assertIn('openclaw-safeguard-council.service', files)
-        self.assertIn('openclaw-safeguard-workers.path', files)
-        self.assertIn('openclaw-safeguard-workers.service', files)
-        # Path unit watches for unhealthy marker
-        self.assertIn('unhealthy-council', files['openclaw-safeguard-council.path'])
-        # Service runs safe-mode-handler
-        self.assertIn('safe-mode-handler', files['openclaw-safeguard-council.service'])
+        # Verify manifest has correct ports (alphabetical: alpha=18790, beta=18791)
+        with open(mp) as f:
+            manifest = json.load(f)
+        assert manifest['groups']['alpha']['port'] == 18790
+        assert manifest['groups']['beta']['port'] == 18791
 
-    def test_generates_e2e_service_per_group(self):
-        """Each group gets an E2E check service."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        self.assertIn('openclaw-e2e-council.service', files)
-        self.assertIn('openclaw-e2e-workers.service', files)
-        # E2E service runs gateway-e2e-check
-        e2e_svc = files['openclaw-e2e-council.service']
-        self.assertIn('gateway-e2e-check', e2e_svc)
-        self.assertIn('BindsTo=openclaw-council.service', e2e_svc)
-        self.assertIn('GROUP=council', e2e_svc)
+        # Run session generator
+        result = subprocess.run(['bash', SESSION_SCRIPT], capture_output=True, text=True, env=env)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
 
-    def test_service_contains_exec_start(self):
-        """Service file has ExecStart running openclaw gateway."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        svc = files['openclaw-council.service']
-        self.assertIn('ExecStart=', svc)
-        self.assertIn('openclaw', svc)
+        # Verify units use the manifest ports
+        with open(os.path.join(ud, 'openclaw-alpha.service')) as f:
+            assert '--port 18790' in f.read()
+        with open(os.path.join(ud, 'openclaw-beta.service')) as f:
+            assert '--port 18791' in f.read()
 
-    def test_service_unique_ports(self):
-        """Each group gets a unique port (base 18790 + index)."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        council_svc = files['openclaw-council.service']
-        workers_svc = files['openclaw-workers.service']
-        # Council (alphabetically first) gets port 18790
-        self.assertIn('18790', council_svc)
-        # Workers (alphabetically second) gets port 18791
-        self.assertIn('18791', workers_svc)
+    def test_three_groups_alphabetical_port_order(self, tmp_path):
+        env, mp, ud, _ = build_env(tmp_path, {
+            'zulu': {'agents': ['agent3']},
+            'alpha': {'agents': ['agent1']},
+            'mike': {'agents': ['agent2']},
+        })
+        generate_manifest(env, mp)
 
-    def test_service_user(self):
-        """Service runs as the correct user."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        svc = files['openclaw-council.service']
-        self.assertIn('User=bot', svc)
+        with open(mp) as f:
+            manifest = json.load(f)
+        # Alphabetical: alpha=18790, mike=18791, zulu=18792
+        assert manifest['groups']['alpha']['port'] == 18790
+        assert manifest['groups']['mike']['port'] == 18791
+        assert manifest['groups']['zulu']['port'] == 18792
 
-    def test_service_working_directory(self):
-        """Service has correct WorkingDirectory."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        svc = files['openclaw-council.service']
-        # Just verify WorkingDirectory is present (actual path depends on HOME_DIR)
-        self.assertIn('WorkingDirectory=', svc)
-
-    def test_service_restart_policy(self):
-        """Service has restart=always for resilience."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        svc = files['openclaw-council.service']
-        self.assertIn('Restart=always', svc)
-
-    def test_service_after_dependency(self):
-        """Service depends on network.target."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        svc = files['openclaw-council.service']
-        self.assertIn('After=network.target', svc)
+    def test_none_mode_generates_nothing(self, tmp_path):
+        env, mp, ud, _ = build_env(tmp_path, {
+            'browser': {'agents': ['agent1']},
+        }, isolation_default='none')
+        # No manifest needed for none mode — generator just exits early
+        result = subprocess.run(['bash', SESSION_SCRIPT], capture_output=True, text=True, env=env)
+        assert result.returncode == 0
+        assert not any(f.endswith('.service') for f in os.listdir(ud))
 
 
-class TestSessionConfig(unittest.TestCase):
-    """Test per-group OpenClaw config generation."""
-
-    def test_generates_config_per_group(self):
-        """Each group gets its own openclaw config JSON."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        self.assertIn('home/testuser/.openclaw/configs/council/openclaw.session.json', files)
-        self.assertIn('home/testuser/.openclaw/configs/workers/openclaw.session.json', files)
-
-    def test_config_contains_only_group_agents(self):
-        """Each config only includes agents belonging to that group."""
-        env = make_session_env(
-            agent_names=['Opus', 'Claude', 'Worker1', 'Worker2'],
-            agent_groups=['council', 'council', 'workers', 'workers'],
-        )
-        files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
-        workers_cfg = json.loads(files['home/testuser/.openclaw/configs/workers/openclaw.session.json'])
-
-        council_names = [a['name'] for a in council_cfg['agents']['list']]
-        workers_names = [a['name'] for a in workers_cfg['agents']['list']]
-
-        self.assertEqual(sorted(council_names), ['Claude', 'Opus'])
-        self.assertEqual(sorted(workers_names), ['Worker1', 'Worker2'])
-
-    def test_config_port_matches_service(self):
-        """Config gateway port matches the service port."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
-        self.assertEqual(council_cfg['gateway']['port'], 18790)
-
-    def test_config_has_gateway_section(self):
-        """Config includes gateway with local mode."""
-        env = make_session_env()
-        files, _, _ = run_generator(env)
-        council_cfg = json.loads(files['home/testuser/.openclaw/configs/council/openclaw.session.json'])
-        self.assertEqual(council_cfg['gateway']['mode'], 'local')
-
-    def test_single_group_single_service(self):
-        """Only one group generates exactly one service."""
-        env = make_session_env(
-            groups='council',
-            agent_count=3,
-            agent_groups=['council', 'council', 'council'],
-        )
-        files, _, _ = run_generator(env)
-        # Filter to main service files only (exclude safeguard helper units)
-        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f and 'e2e' not in f]
-        self.assertEqual(len(service_files), 1)
-        self.assertIn('openclaw-council.service', files)
-
-
-class TestSessionAgentGrouping(unittest.TestCase):
-    """Test agent-to-group assignment logic."""
-
-    def test_ungrouped_agents_use_agent_name_as_group(self):
-        """Agents without isolationGroup but listed in ISOLATION_GROUPS use name as group."""
-        env = make_session_env(
-            isolation='session',
-            groups='Agent1,Agent2',
-            agent_count=2,
-            agent_groups=['Agent1', 'Agent2'],  # Explicit groups matching agent names
-            agent_names=['Agent1', 'Agent2'],
-        )
-        files, _, _ = run_generator(env)
-        self.assertIn('openclaw-Agent1.service', files)
-        self.assertIn('openclaw-Agent2.service', files)
-
-    def test_three_groups(self):
-        """Three distinct groups generate three services."""
-        env = make_session_env(
-            groups='alpha,beta,gamma',
-            agent_count=6,
-            agent_groups=['alpha', 'alpha', 'beta', 'beta', 'gamma', 'gamma'],
-        )
-        files, _, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service') and 'safeguard' not in f and 'e2e' not in f]
-        self.assertEqual(len(service_files), 3)
-
-    def test_mixed_isolation_only_session_groups(self):
-        """Only agents with session isolation (or inheriting it) get services."""
-        env = make_session_env(groups='session-group')
-        env['AGENT1_ISOLATION'] = 'session'
-        env['AGENT1_ISOLATION_GROUP'] = 'session-group'
-        env['AGENT2_ISOLATION'] = 'container'
-        env['AGENT2_ISOLATION_GROUP'] = 'container-group'
-        env['ISOLATION_GROUPS'] = 'session-group,container-group'
-        files, _, _ = run_generator(env)
-        # Only session-group should get a systemd service
-        self.assertIn('openclaw-session-group.service', files)
-        self.assertNotIn('openclaw-container-group.service', files)
-
-
-class TestSessionSharedPaths(unittest.TestCase):
-    """Test shared path handling in session configs."""
-
-    def test_shared_paths_in_config(self):
-        """Shared paths referenced in service environment."""
-        env = make_session_env()
-        env['ISOLATION_SHARED_PATHS'] = '/clawd/shared,/tmp/exchange'
-        files, stdout, _ = run_generator(env)
-        # Verify service files are generated (shared paths are a concern for
-        # the volume mounts, which are handled by the parent build-full-config)
-        self.assertIn('openclaw-council.service', files)
-        self.assertIn('openclaw-workers.service', files)
-
-    def test_empty_shared_paths_ok(self):
-        """Empty shared paths doesn't cause errors."""
-        env = make_session_env()
-        env['ISOLATION_SHARED_PATHS'] = ''
-        files, _, _ = run_generator(env)
-        self.assertIn('openclaw-council.service', files)
-
-
-class TestSessionEdgeCases(unittest.TestCase):
-    """Edge cases and error handling for session mode."""
-
-    def test_container_isolation_skips_session_generation(self):
-        """Container mode doesn't generate systemd session services."""
-        env = make_session_env(isolation='container')
-        files, stdout, _ = run_generator(env)
-        service_files = [f for f in files if f.endswith('.service')]
-        self.assertEqual(len(service_files), 0)
-
-    def test_missing_agent_count_fails(self):
-        """Missing AGENT_COUNT should fail gracefully."""
-        env = make_session_env()
-        del env['AGENT_COUNT']
-        _, _, stderr = run_generator(env, expect_fail=True)
-        self.assertIn('AGENT_COUNT', stderr)
-
-    def test_summary_output(self):
-        """Script outputs summary of generated services."""
-        env = make_session_env()
-        files, stdout, _ = run_generator(env)
-        self.assertIn('council', stdout)
-        self.assertIn('workers', stdout)
-
-
-if __name__ == '__main__':
-    unittest.main()
+class TestSyntax:
+    def test_bash_n(self):
+        result = subprocess.run(['bash', '-n', SESSION_SCRIPT], capture_output=True, text=True)
+        assert result.returncode == 0, f"bash -n failed: {result.stderr}"

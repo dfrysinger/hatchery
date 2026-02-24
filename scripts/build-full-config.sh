@@ -33,7 +33,7 @@ env_load
 [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
 H="/home/$USERNAME"
 # Decode secrets needed for auth-profiles.json (workspace code below)
-AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64")
+AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "${BRAVE_KEY_B64:-}")
 OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 HN="${HABITAT_NAME:-default}"

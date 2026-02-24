@@ -50,10 +50,10 @@ log "Attempting full config switch (isolation=$ISOLATION, group=${TARGET_GROUP:-
 if [ -x "$STATE_CMD" ]; then
   if [ -n "$TARGET_GROUP" ]; then
     GROUP="$TARGET_GROUP" "$STATE_CMD" lock --holder "try-full-config" --ttl 300 2>/dev/null || true
-    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "operator" 2>/dev/null || true
+    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config" 2>/dev/null || true
   else
     "$STATE_CMD" lock --holder "try-full-config" --ttl 300 2>/dev/null || true
-    "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "operator" 2>/dev/null || true
+    "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config" 2>/dev/null || true
   fi
 fi
 
