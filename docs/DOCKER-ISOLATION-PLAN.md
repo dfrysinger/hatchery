@@ -1045,6 +1045,180 @@ This gives 150MB of logs per container (3 × 50MB rotation), consistent with the
 
 ---
 
+## Architecture Review: Single Source of Truth
+
+### Current SSOT Violations (must fix)
+
+The codebase has **6 duplicated concerns** across isolation types that the plan must consolidate:
+
+#### 1. Agent-per-group filtering (duplicated 3×)
+
+The pattern "iterate `AGENT{N}_ISOLATION_GROUP`, match against group name, check `AGENT{N}_ISOLATION`" is implemented independently in:
+- `generate-session-services.sh` (lines 85-96)
+- `generate-docker-compose.sh` (lines 68-82)
+- `generate-docker-compose.sh` again in `get_group_network()`, `get_group_memory()`, `get_group_cpu()`, `get_group_agent_names()` (lines 110-170)
+
+**Fix:** Create `lib-isolation.sh` with shared functions:
+```bash
+# Get agent IDs belonging to a group
+get_group_agents() { local group="$1"; ... }
+# Get first network mode for a group
+get_group_network() { local group="$1"; ... }
+# Get resource limits for a group
+get_group_resources() { local group="$1"; ... }
+# Filter groups by isolation type
+get_groups_by_type() { local type="$1"; ... }  # "session" or "container"
+```
+
+Both generators source `lib-isolation.sh` instead of reimplementing filtering.
+
+#### 2. OpenClaw config generation (should be shared, currently session-only)
+
+`generate-session-services.sh` calls `generate-config.sh --mode session` to produce `openclaw.session.json`. `generate-docker-compose.sh` **doesn't generate a config at all** — it just mounts a `./config/${group}` directory and hopes something else fills it.
+
+**Fix:** `build-full-config.sh` generates `openclaw.session.json` for **all** groups regardless of isolation type, before dispatching to mode-specific generators. The container generator simply references the already-generated config. This makes `generate-config.sh --mode session` the single source of truth for per-group configs, used by both modes.
+
+```bash
+# In build-full-config.sh — unified config generation
+for group in "${ALL_GROUPS[@]}"; do
+    generate-config.sh --mode session \
+        --group "$group" \
+        --agents "$(get_group_agents "$group")" \
+        --port "$(get_group_port "$group")" \
+        --gateway-token "$(generate_group_token "$group")" \
+        > "${CONFIG_BASE}/${group}/openclaw.session.json"
+done
+
+# THEN dispatch to mode-specific generators (which only create service definitions)
+generate-session-services.sh   # → systemd units only
+generate-docker-compose.sh     # → compose files only
+```
+
+#### 3. Auth-profiles handling (duplicated 3×)
+
+Auth-profiles are created/managed in three places:
+- `build-full-config.sh` creates `agents/main/agent/auth-profiles.json` then symlinks to `agents/agent{N}/agent/`
+- `generate-session-services.sh` copies auth-profiles into `${state_dir}/agents/agent{N}/agent/`
+- The plan has container mode bind-mounting auth-profiles from `configs/{group}/`
+
+**Fix:** `build-full-config.sh` writes auth-profiles to the canonical location for each group:
+```bash
+# Single auth-profiles write function
+setup_group_auth_profiles() {
+    local group="$1"
+    local config_dir="${CONFIG_BASE}/${group}"
+    # Auth-profiles are per-agent within each group's config dir
+    for agent_id in $(get_group_agents "$group"); do
+        local auth_dir="${config_dir}/agents/${agent_id}/agent"
+        ensure_bot_dir "$auth_dir" 700
+        # Symlink to master auth-profiles (single source)
+        ln -sf "${HOME_DIR}/.openclaw/agents/main/agent/auth-profiles.json" \
+            "${auth_dir}/auth-profiles.json"
+    done
+}
+```
+
+Both session services and container compose reference the same `configs/{group}/` directory. Session mode uses `OPENCLAW_STATE_DIR` pointed at it. Container mode bind-mounts it.
+
+#### 4. Port assignment (duplicated 2×, different base ports)
+
+- `generate-session-services.sh`: `BASE_PORT=18790`, offset by group index within session groups
+- `generate-docker-compose.sh`: `18789 + offset` within container groups
+- Different base ports, different ordering = guaranteed collision in mixed mode
+
+**Fix:** Already in the plan (Phase 4) — centralized port allocator in `build-full-config.sh` writing `/etc/openclaw-ports.env`. Both generators read from this file. **Neither generator computes ports.** Move this to Phase 0/pre-implementation since it's needed by both generators.
+
+#### 5. Safeguard and E2E unit generation (session-only, needs both)
+
+`generate-session-services.sh` generates 3 units per group:
+- `openclaw-{group}.service` (main service)
+- `openclaw-safeguard-{group}.path` + `.service` (safe mode watcher)
+- `openclaw-e2e-{group}.service` (E2E health check)
+
+Container mode needs the same safeguard and E2E units (they run on the host). Only the main service unit differs between modes.
+
+**Fix:** Extract safeguard/E2E unit generation into shared functions in `lib-isolation.sh`:
+```bash
+# Generates safeguard .path + .service for any group (mode-agnostic)
+generate_safeguard_units() {
+    local group="$1" port="$2" isolation="$3" output_dir="$4"
+    # .path unit is identical for both modes (watches marker file on host)
+    # .service unit passes ISOLATION=$isolation so hc_ functions dispatch correctly
+    ...
+}
+
+# Generates E2E check service for any group (mode-agnostic)
+generate_e2e_unit() {
+    local group="$1" port="$2" isolation="$3" output_dir="$4"
+    ...
+}
+```
+
+Both generators call these shared functions. The main service unit is the only mode-specific artifact.
+
+#### 6. Directory structure setup (duplicated 3×)
+
+Directory creation is scattered across:
+- `build-full-config.sh` — creates `~/.openclaw/agents/`, `~/clawd/agents/`, `~/clawd/shared/`
+- `generate-session-services.sh` — creates `${state_dir}`, `${config_dir}`, per-agent subdirs
+- Container mode (planned) — creates compose directories
+
+**Fix:** Centralize in `build-full-config.sh`:
+```bash
+# Single function creates all directories for a group
+setup_group_directories() {
+    local group="$1"
+    ensure_bot_dir "${CONFIG_BASE}/${group}" 700
+    ensure_bot_dir "${STATE_BASE}/${group}" 700
+    ensure_bot_dir "${COMPOSE_BASE}/${group}" 755  # Only for container groups
+    for agent_id in $(get_group_agents "$group"); do
+        ensure_bot_dir "${STATE_BASE}/${group}/agents/${agent_id}/agent" 700
+    done
+}
+```
+
+### Proposed Architecture: Clean Separation
+
+```
+build-full-config.sh (orchestrator)
+  ├── lib-isolation.sh (shared group/agent/port queries)
+  ├── generate-config.sh --mode session (per-group OpenClaw config — used by ALL modes)
+  ├── setup_group_directories() (all dirs for all groups)
+  ├── setup_group_auth_profiles() (auth for all groups)
+  ├── allocate_ports() → /etc/openclaw-ports.env
+  │
+  ├── generate-session-services.sh (THIN — only generates systemd unit file)
+  │   └── calls generate_safeguard_units() from lib-isolation.sh
+  │   └── calls generate_e2e_unit() from lib-isolation.sh
+  │
+  └── generate-docker-compose.sh (THIN — only generates compose file + container systemd unit)
+      └── calls generate_safeguard_units() from lib-isolation.sh
+      └── calls generate_e2e_unit() from lib-isolation.sh
+```
+
+**Impact on plan phases:**
+- Phase 1 should create `lib-isolation.sh` first, then refactor both generators to use it
+- Port allocator moves from Phase 4 to Phase 1 (dependency)
+- Config generation happens in `build-full-config.sh`, not in individual generators
+- This makes Phase 3 (health check abstraction) cleaner because `ISOLATION` is always in the environment
+
+### Revised Phase Order
+
+| Phase | Content | Rationale |
+|-------|---------|-----------|
+| **Phase 1** | `lib-isolation.sh` + port allocator + refactor generators to be thin | Foundation — everything else depends on shared code |
+| **Phase 2** | Fix compose generator (Option A mounts, entrypoint, env vars) | Can now reuse `lib-isolation.sh` |
+| **Phase 3** | Dockerfile + Docker install | Depends on Phase 2 |
+| **Phase 4** | Health check abstraction | Depends on `ISOLATION` being in all units |
+| **Phase 5** | First live test | Validates Phases 1-4 |
+| **Phase 5.5** | Mixed mode | Already mostly works if Phase 1 is done right |
+| **Phase 6** | Network isolation | Independent of other phases after Phase 5 |
+| **Phase 7** | Security hardening + resource limits | Polish |
+
+This front-loads the hardest work (shared code, SSOT) and makes subsequent phases straightforward.
+
+---
+
 ## Self-Review: Issues Found and Fixed in v3
 
 ### Fixed in This Version
