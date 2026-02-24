@@ -1454,8 +1454,6 @@ These must hold true after Phase 1:
 
 ---
 
----
-
 ## Estimate
 
 | Phase | Effort | Depends On |

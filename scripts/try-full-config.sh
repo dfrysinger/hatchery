@@ -11,6 +11,9 @@
 #           With --group: restarts only the specified isolation group
 #
 # Dependencies: lib-health-check.sh, lib-isolation.sh, openclaw-state.sh (optional)
+#
+# Env:
+#   STATE_STRICT — if "true", state machine failures are fatal (for CI/testing)
 # =============================================================================
 set -euo pipefail
 
@@ -54,18 +57,30 @@ if [ "$ISOLATION" = "session" ] || [ "$ISOLATION" = "container" ]; then
   fi
 fi
 
+# --- State machine helpers ---
+# In strict mode (STATE_STRICT=true), state machine failures are fatal.
+# Default: warn and continue (state machine is supplementary to marker files).
+_state() {
+  local desc="$1"; shift
+  if "$@" 2>/dev/null; then
+    return 0
+  else
+    log "WARNING: $desc failed"
+    [ "${STATE_STRICT:-false}" = "true" ] && { log "FATAL: strict mode — aborting"; exit 1; }
+    return 0
+  fi
+}
+
 # --- State machine: lock and transition ---
 if [ -x "$STATE_CMD" ]; then
   if [ -n "$TARGET_GROUP" ]; then
-    GROUP="$TARGET_GROUP" "$STATE_CMD" lock --holder "try-full-config" --ttl 300 2>/dev/null \
-      || log "WARNING: state lock acquisition failed (group=$TARGET_GROUP)"
-    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config" 2>/dev/null \
-      || log "WARNING: state transition to TRANSITIONING failed (group=$TARGET_GROUP)"
+    _state "lock (group=$TARGET_GROUP)" \
+      env GROUP="$TARGET_GROUP" "$STATE_CMD" lock --holder "try-full-config" --ttl 300
+    _state "transition to TRANSITIONING (group=$TARGET_GROUP)" \
+      env GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config"
   else
-    "$STATE_CMD" lock --holder "try-full-config" --ttl 300 2>/dev/null \
-      || log "WARNING: state lock acquisition failed"
-    "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config" 2>/dev/null \
-      || log "WARNING: state transition to TRANSITIONING failed"
+    _state "lock" "$STATE_CMD" lock --holder "try-full-config" --ttl 300
+    _state "transition to TRANSITIONING" "$STATE_CMD" transition --to TRANSITIONING --reason "try-full-config" --by "try-full-config"
   fi
 fi
 
@@ -171,15 +186,13 @@ state_transition() {
   local state="$1" reason="$2"
   [ -x "$STATE_CMD" ] || return 0
   if [ -n "$TARGET_GROUP" ]; then
-    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config" 2>/dev/null \
-      || log "WARNING: state transition to $state failed (group=$TARGET_GROUP)"
-    GROUP="$TARGET_GROUP" "$STATE_CMD" unlock 2>/dev/null \
-      || log "WARNING: state unlock failed (group=$TARGET_GROUP)"
+    _state "transition to $state (group=$TARGET_GROUP)" \
+      env GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config"
+    _state "unlock (group=$TARGET_GROUP)" \
+      env GROUP="$TARGET_GROUP" "$STATE_CMD" unlock
   else
-    "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config" 2>/dev/null \
-      || log "WARNING: state transition to $state failed"
-    "$STATE_CMD" unlock 2>/dev/null \
-      || log "WARNING: state unlock failed"
+    _state "transition to $state" "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config"
+    _state "unlock" "$STATE_CMD" unlock
   fi
 }
 

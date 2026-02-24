@@ -356,8 +356,10 @@ generate_group_env() {
     local env_file="${config_dir}/group.env"
 
     cat > "$env_file" <<ENVFILE
-# Runtime environment for group '${group}' — do not edit
-# Topology metadata: see /etc/openclaw-groups.json
+# Runtime environment for group '${group}' — GENERATED, DO NOT EDIT
+# Topology values below are derived from /etc/openclaw-groups.json (the SSOT).
+# They are duplicated here because systemd EnvironmentFile cannot read JSON.
+# To change topology, update the habitat config and re-run build-full-config.sh.
 GROUP=${group}
 GROUP_PORT=${port}
 ISOLATION=${isolation}
