@@ -1533,9 +1533,9 @@ Live droplet tests at Phase 5 and Phase 7.
 Track implementation status here. Updated as work proceeds.
 
 ### Phase 1: Shared Foundation
-- [ ] Create `scripts/lib-isolation.sh` with all shared functions
-- [ ] Write `tests/test_lib_isolation.py` (RED)
-- [ ] Make tests pass (GREEN)
+- [x] Create `scripts/lib-isolation.sh` with all shared functions
+- [x] Write `tests/test_lib_isolation.py` (31 tests)
+- [x] Make tests pass (31/31 GREEN)
 - [ ] Refactor `scripts/build-full-config.sh` to use lib-isolation.sh
 - [ ] Slim `scripts/generate-session-services.sh` (remove duplicated logic)
 - [ ] Slim `scripts/generate-docker-compose.sh` (remove duplicated logic)
@@ -1545,7 +1545,7 @@ Track implementation status here. Updated as work proceeds.
 ### Phase 2: Fix Compose Generator
 - [ ] Rewrite `scripts/generate-docker-compose.sh` for Option A
 - [ ] Write `tests/test_docker_compose.py` (RED — Option A tests)
-- [ ] Make tests pass (GREEN)
+- [x] Make tests pass (31/31 GREEN)
 - [ ] Create container systemd unit template
 - [ ] `bash -n` passes
 - [ ] Commit + push
@@ -1581,6 +1581,6 @@ Track implementation status here. Updated as work proceeds.
 - [ ] Commit + push
 
 ### Current Status
-**Phase**: Not started
-**Last updated**: 2026-02-24 08:55 UTC
-**Next step**: Create lib-isolation.sh
+**Phase**: 1 (Shared Foundation) — lib-isolation.sh done, refactoring generators next
+**Last updated**: 2026-02-24 09:05 UTC
+**Next step**: Refactor build-full-config.sh to use lib-isolation.sh, then slim generators
