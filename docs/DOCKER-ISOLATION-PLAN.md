@@ -8,6 +8,18 @@
 
 ---
 
+## Must-Fix Before Phase 1 (ChatGPT Quick Checklist)
+
+- [ ] **Rollback steps documented** for each phase (especially Phase 1 and Phase 4) with exact commands.
+- [ ] **Deterministic compose project naming** (`COMPOSE_PROJECT_NAME`) defined per group.
+- [ ] **Canonical file layout** defined for generated compose/config artifacts (no ambiguous paths).
+- [ ] **Container security baseline enabled** by default (`cap_drop: ["ALL"]`, `no-new-privileges`, read-only rootfs where feasible).
+- [ ] **Port allocator contract documented** (algorithm + idempotency + persistence source of truth).
+- [ ] **Health-check/restart timeouts and retries** specified explicitly (no implicit defaults).
+- [ ] **Acceptance gates for Phase 1** added (`docker compose config`, unit start/stop behavior, non-blocking startup).
+
+---
+
 ## Architecture Decision: Host-Orchestrated
 
 Health checks and safe mode run on the **host**, not inside containers. Containers are just a runtime boundary. This lets us reuse all the scripts we just merged with minimal adaptation:
@@ -147,3 +159,63 @@ Host rewrites config file → `docker compose restart` → container picks up ne
 - Shared filesystem: confirmed working, but need to validate cross-mode access patterns
 - Browser support in containers: deferred to Phase 6 `full` variant (needs Xvfb + Chrome)
 - Log aggregation: containers log to stdout, host collects via `docker logs` — sufficient?
+
+---
+
+## Review Comments (ChatGPT)
+
+Overall: strong, practical plan. Host-orchestrated is the right call for incremental delivery.
+
+### High-priority additions before implementation
+
+1. **Define rollback behavior per phase**
+   - For each phase, add: “if validation fails, revert by …”
+   - Especially for Phase 1/4 (compose generation + port assignment), include exact rollback commands.
+
+2. **Pin compose project naming + paths**
+   - Specify deterministic `COMPOSE_PROJECT_NAME` per isolation group.
+   - Define canonical location for per-group compose files and generated configs.
+   - Prevent accidental cross-group `docker compose down` collisions.
+
+3. **Security baseline for all containers**
+   - Add default hardening:
+     - `read_only: true` (except required writable mounts)
+     - `cap_drop: ["ALL"]`
+     - `security_opt: ["no-new-privileges:true"]`
+     - explicit writable tmpfs for `/tmp` if needed
+   - This should be baseline in Phase 2/7, not optional.
+
+4. **Port allocation contract**
+   - Document the allocator algorithm and persistence source of truth.
+   - Ensure idempotent regeneration (same input => same assigned ports unless intentionally reallocated).
+
+5. **Health-check timing and failure semantics**
+   - Define concrete timeouts/retry counts for `docker compose restart`, `docker exec` checks, and escalation to safe mode.
+   - Avoid implicit defaults.
+
+### Medium-priority design clarifications
+
+6. **Secret handling in container mode**
+   - `gateway-token` mount is fine, but add strict file perms check at startup.
+   - Prefer per-group tokens over a shared token if not already guaranteed.
+
+7. **Network mode `none` implementation detail**
+   - Good call avoiding Docker `network_mode: none`.
+   - Add exact mechanism for “isolated bridge + no egress” (iptables/nftables policy + DNS behavior) and test assertions.
+
+8. **Container/image lifecycle policy**
+   - Define prune policy, image update cadence, and how stale images are handled safely.
+
+9. **Log retention and debugging**
+   - Add retention + rotation guidance for `docker logs` collection path.
+   - Include a minimal “incident triage” command set.
+
+### Suggested acceptance criteria (add to phases)
+
+- **Phase 1:** generated compose validates (`docker compose config`), unit file starts/stops cleanly, no blocking start.
+- **Phase 3:** health check abstraction proves identical pass/fail semantics vs session mode.
+- **Phase 4:** no port collisions across mixed groups after repeated regenerate/restart cycles.
+- **Phase 5:** mixed-mode restart of one group does not impact other groups.
+- **Phase 6:** `internal/none` modes block egress as designed while preserving required IPC.
+- **Phase 7:** resource limits are enforced and observable under stress test.
+
