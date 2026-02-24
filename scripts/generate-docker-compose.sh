@@ -118,8 +118,12 @@ for group in "${CONTAINER_GROUPS[@]}"; do
         network_section="    network_mode: host"
     else
         # Isolated network — internal bridge (no external access)
+        # Port mapping required so host health checks can reach the gateway
         network_section="    networks:
-      - internal"
+      - internal
+    ports:
+      - \"${port}:${port}\"
+    dns: []"
         networks_block="
 networks:
   internal:
@@ -131,10 +135,22 @@ networks:
     resource_lines=""
     if [ -n "$mem_limit" ]; then
         resource_lines="${resource_lines}    mem_limit: ${mem_limit}"$'\n'
+        resource_lines="${resource_lines}    memswap_limit: ${mem_limit}"$'\n'  # Prevent swap
     fi
     if [ -n "$cpu_limit" ]; then
         resource_lines="${resource_lines}    cpus: ${cpu_limit}"$'\n'
     fi
+
+    # --- Security hardening ---
+    security_section="    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256M
+      - /run:size=64M
+    pids_limit: 256"
 
     # --- Write docker-compose.yaml ---
     cat > "$compose_path" <<COMPOSE
@@ -152,7 +168,8 @@ ${network_section}
       - NODE_OPTIONS=--experimental-sqlite
     volumes:
 ${volumes}
-${resource_lines}    healthcheck:
+${resource_lines}${security_section}
+    healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:${port}/"]
       interval: 30s
       timeout: 5s

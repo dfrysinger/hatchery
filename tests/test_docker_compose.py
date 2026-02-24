@@ -350,6 +350,91 @@ class TestSystemdUnit:
 
 
 # =========================================================================
+# Network Isolation (Phase 6)
+# =========================================================================
+
+class TestNetworkIsolation:
+    """Phase 6: Isolated network gets port mapping and no DNS."""
+
+    def test_isolated_has_port_mapping(self, tmp_path):
+        """Isolated network must map port so host health check can reach gateway."""
+        r, cd, _, _ = run_generator(tmp_path, {
+            'sandbox': {'port': 18790, 'network': 'isolated'}
+        })
+        _, svc = get_svc(cd, 'sandbox')
+        ports = svc.get('ports', [])
+        assert len(ports) >= 1, f"Isolated network needs port mapping: {svc}"
+        assert '18790:18790' in str(ports[0]), f"Port mapping wrong: {ports}"
+
+    def test_isolated_has_no_dns(self, tmp_path):
+        """Isolated containers should have empty DNS to prevent resolution."""
+        r, cd, _, _ = run_generator(tmp_path, {
+            'sandbox': {'port': 18790, 'network': 'isolated'}
+        })
+        _, svc = get_svc(cd, 'sandbox')
+        dns = svc.get('dns', None)
+        assert dns == [], f"Isolated network should have dns: []: {dns}"
+
+    def test_host_has_no_port_mapping(self, tmp_path):
+        """Host network doesn't need port mapping."""
+        r, cd, _, _ = run_generator(tmp_path, {
+            'sandbox': {'port': 18790, 'network': 'host'}
+        })
+        _, svc = get_svc(cd, 'sandbox')
+        assert 'ports' not in svc
+
+
+# =========================================================================
+# Security Hardening (Phase 7)
+# =========================================================================
+
+class TestSecurityHardening:
+    """Phase 7: cap_drop, security_opt, read_only, tmpfs, pids_limit."""
+
+    def test_cap_drop_all(self, tmp_path):
+        r, cd, _, _ = run_generator(tmp_path, {'sandbox': {'port': 18790}})
+        _, svc = get_svc(cd, 'sandbox')
+        assert svc.get('cap_drop') == ['ALL'], \
+            f"Should drop all capabilities: {svc.get('cap_drop')}"
+
+    def test_no_new_privileges(self, tmp_path):
+        r, cd, _, _ = run_generator(tmp_path, {'sandbox': {'port': 18790}})
+        _, svc = get_svc(cd, 'sandbox')
+        sec_opt = svc.get('security_opt', [])
+        assert 'no-new-privileges:true' in sec_opt, \
+            f"Should have no-new-privileges: {sec_opt}"
+
+    def test_read_only_rootfs(self, tmp_path):
+        r, cd, _, _ = run_generator(tmp_path, {'sandbox': {'port': 18790}})
+        _, svc = get_svc(cd, 'sandbox')
+        assert svc.get('read_only') is True, \
+            f"Should have read_only: true: {svc.get('read_only')}"
+
+    def test_tmpfs_mounts(self, tmp_path):
+        r, cd, _, _ = run_generator(tmp_path, {'sandbox': {'port': 18790}})
+        _, svc = get_svc(cd, 'sandbox')
+        tmpfs = svc.get('tmpfs', [])
+        assert any('/tmp' in str(t) for t in tmpfs), f"Missing /tmp tmpfs: {tmpfs}"
+        assert any('/run' in str(t) for t in tmpfs), f"Missing /run tmpfs: {tmpfs}"
+
+    def test_pids_limit(self, tmp_path):
+        r, cd, _, _ = run_generator(tmp_path, {'sandbox': {'port': 18790}})
+        _, svc = get_svc(cd, 'sandbox')
+        assert svc.get('pids_limit') == 256, \
+            f"pids_limit should be 256: {svc.get('pids_limit')}"
+
+    def test_memswap_equals_mem_limit(self, tmp_path):
+        """memswap_limit should equal mem_limit to prevent swap."""
+        r, cd, _, _ = run_generator(tmp_path, {
+            'sandbox': {'port': 18790, 'memory': '1g'}
+        })
+        _, svc = get_svc(cd, 'sandbox')
+        assert svc.get('mem_limit') == '1g'
+        assert svc.get('memswap_limit') == '1g', \
+            f"memswap_limit should match mem_limit: {svc.get('memswap_limit')}"
+
+
+# =========================================================================
 # Syntax
 # =========================================================================
 
