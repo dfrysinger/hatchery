@@ -89,13 +89,81 @@ class TestRestartService:
         assert 'restart' in result.stdout
         assert 'workers' in result.stdout
 
-    def test_default_isolation_is_session(self):
-        """When ISOLATION is unset, defaults to session (systemctl)."""
+    def test_default_isolation_is_none(self):
+        """When ISOLATION is unset, defaults to none (single openclaw service)."""
         result = run_hc_function(
             'hc_restart_service "browser"',
-            env={},  # No ISOLATION set
+            env={},  # No ISOLATION set — defaults to none
         )
-        assert 'SYSTEMCTL restart openclaw-browser' in result.stdout
+        assert 'SYSTEMCTL restart openclaw' in result.stdout
+        # In none mode, group arg is ignored — restarts the single service
+        assert 'openclaw-browser' not in result.stdout
+
+
+class TestNoneMode:
+    """All hc_* functions work correctly in none mode (no isolation)."""
+
+    def test_restart_none_mode(self):
+        result = run_hc_function(
+            'hc_restart_service ""',
+            env={'ISOLATION': 'none'},
+        )
+        assert 'SYSTEMCTL restart openclaw' in result.stdout
+        assert 'openclaw-' not in result.stdout
+
+    def test_is_active_none_mode(self):
+        result = run_hc_function(
+            'hc_is_service_active "" && echo "ACTIVE" || echo "INACTIVE"',
+            env={'ISOLATION': 'none'},
+        )
+        assert 'SYSTEMCTL is-active --quiet openclaw' in result.stdout
+        assert 'ACTIVE' in result.stdout
+
+    def test_logs_none_mode(self):
+        result = run_hc_function(
+            'hc_service_logs "" 25',
+            env={'ISOLATION': 'none'},
+        )
+        assert 'JOURNALCTL -u openclaw' in result.stdout
+        assert '25' in result.stdout
+
+    def test_stop_none_mode(self):
+        result = run_hc_function(
+            'hc_stop_service ""',
+            env={'ISOLATION': 'none'},
+        )
+        assert 'SYSTEMCTL stop openclaw' in result.stdout
+        assert 'openclaw-' not in result.stdout
+
+    def test_curl_none_mode(self):
+        result = run_hc_function(
+            'hc_curl_gateway "" "/"',
+            env={'ISOLATION': 'none', 'GROUP_PORT': '18789'},
+        )
+        assert 'CURL' in result.stdout
+        assert '18789' in result.stdout
+
+    def test_service_name_helper_none(self):
+        result = run_hc_function(
+            'echo "SVC=$(_hc_service_name)"',
+            env={'ISOLATION': 'none'},
+        )
+        assert 'SVC=openclaw' in result.stdout
+
+    def test_service_name_helper_session(self):
+        result = run_hc_function(
+            'echo "SVC=$(_hc_service_name browser)"',
+            env={'ISOLATION': 'session'},
+        )
+        assert 'SVC=openclaw-browser' in result.stdout
+
+    def test_group_defaults_to_env_var(self):
+        """When no arg passed, hc_* functions use $GROUP from env."""
+        result = run_hc_function(
+            'hc_restart_service',
+            env={'ISOLATION': 'session', 'GROUP': 'docs'},
+        )
+        assert 'SYSTEMCTL restart openclaw-docs' in result.stdout
 
 
 class TestIsServiceActive:

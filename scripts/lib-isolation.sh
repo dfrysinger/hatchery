@@ -14,11 +14,12 @@
 set -euo pipefail
 
 # --- Constants ---
-MANIFEST="${MANIFEST:-/etc/openclaw-groups.json}"
-CONFIG_BASE="${CONFIG_BASE:-${HOME_DIR:-/home/bot}/.openclaw/configs}"
-STATE_BASE="${STATE_BASE:-${HOME_DIR:-/home/bot}/.openclaw-sessions}"
-COMPOSE_BASE="${COMPOSE_BASE:-${HOME_DIR:-/home/bot}/.openclaw/compose}"
 LIB_SVC_USER="${SVC_USER:-bot}"
+_LIB_HOME="${HOME_DIR:-/home/${LIB_SVC_USER}}"
+MANIFEST="${MANIFEST:-/etc/openclaw-groups.json}"
+CONFIG_BASE="${CONFIG_BASE:-${_LIB_HOME}/.openclaw/configs}"
+STATE_BASE="${STATE_BASE:-${_LIB_HOME}/.openclaw-sessions}"
+COMPOSE_BASE="${COMPOSE_BASE:-${_LIB_HOME}/.openclaw/compose}"
 
 # =========================================================================
 # Group/Agent Queries

@@ -154,12 +154,17 @@ networks:
       - ${HOME_DIR}/.cache:size=64M
     pids_limit: 256"
 
+    # Resolve UID/GID for user: directive (host user must match container user)
+    bot_uid=$(id -u "$SVC_USER" 2>/dev/null || echo 1000)
+    bot_gid=$(id -g "$SVC_USER" 2>/dev/null || echo 1000)
+
     # --- Write docker-compose.yaml ---
     cat > "$compose_path" <<COMPOSE
 services:
   openclaw-${group}:
     image: ${BASE_IMAGE}
     container_name: openclaw-${group}
+    user: "${bot_uid}:${bot_gid}"
     restart: on-failure
 ${network_section}
     command: ["--bind", "loopback", "--port", "${port}"]

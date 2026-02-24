@@ -4,29 +4,36 @@
 # =============================================================================
 # Purpose:  Switch from minimal/safe-mode config to full config.
 #           Validates health and rolls back on failure.
-#           Handles both single-service and session-isolation modes.
+#           Handles all isolation modes: none, session, container.
 #
 # Usage:    sudo try-full-config.sh [--group <group>]
 #           Without --group: restarts all services (single mode or all groups)
 #           With --group: restarts only the specified isolation group
 #
-# Dependencies: systemctl, curl, openclaw-state.sh (optional)
+# Dependencies: lib-health-check.sh, lib-isolation.sh, openclaw-state.sh (optional)
 # =============================================================================
 set -euo pipefail
 
-set -a; source /etc/droplet.env; set +a
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+# Source shared libraries (hard requirements)
+for _lp in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lp/lib-health-check.sh" ] && { source "$_lp/lib-health-check.sh"; break; }
+done
+type hc_init_logging &>/dev/null || { echo "FATAL: lib-health-check.sh not found" >&2; exit 1; }
+
+for _lp in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lp/lib-isolation.sh" ] && { source "$_lp/lib-isolation.sh"; break; }
+done
+type generate_group_config &>/dev/null || { echo "FATAL: lib-isolation.sh not found" >&2; exit 1; }
+
+[ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
+
+hc_init_logging "${GROUP:-}"
+hc_load_environment
 
 AC="${AGENT_COUNT:-1}"
-H="/home/${USERNAME:-bot}"
-ISOLATION="${ISOLATION_DEFAULT:-none}"
+H="${HC_HOME:-/home/${USERNAME:-bot}}"
+ISOLATION="${HC_ISOLATION:-none}"
 STATE_CMD="/usr/local/bin/openclaw-state.sh"
-MANIFEST="${MANIFEST:-/etc/openclaw-groups.json}"
-
-# Source lib-isolation if available (for hc_* functions)
-for _lp in /usr/local/sbin /usr/local/bin; do
-  [ -f "$_lp/lib-health-check.sh" ] && source "$_lp/lib-health-check.sh" && break
-done
 
 # Parse args
 TARGET_GROUP=""
@@ -37,7 +44,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
+log "Attempting full config switch (isolation=$ISOLATION, group=${TARGET_GROUP:-all})"
 
 # --- State machine: lock and transition ---
 if [ -x "$STATE_CMD" ]; then
@@ -50,102 +57,90 @@ if [ -x "$STATE_CMD" ]; then
   fi
 fi
 
-# --- Determine which services to restart ---
-restart_services() {
-  if [ "$ISOLATION" = "session" ] || [ "$ISOLATION" = "container" ]; then
-    if [ -n "$TARGET_GROUP" ]; then
-      log "Restarting group ${TARGET_GROUP} (${ISOLATION})"
-      if type hc_restart_service &>/dev/null; then
-        ISOLATION="$ISOLATION" hc_restart_service "$TARGET_GROUP"
+# --- Regenerate full config ---
+apply_full_config() {
+  case "$ISOLATION" in
+    session|container)
+      if [ -n "$TARGET_GROUP" ]; then
+        log "Regenerating config for group ${TARGET_GROUP}"
+        generate_group_config "$TARGET_GROUP"
       else
-        # Fallback: use manifest serviceName
-        local svc_name
-        svc_name=$(jq -r --arg g "$TARGET_GROUP" '.groups[$g].serviceName // empty' "$MANIFEST" 2>/dev/null)
-        [ -n "$svc_name" ] && systemctl restart "${svc_name}.service"
+        # Regenerate configs for all groups
+        local groups="${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}"
+        IFS=',' read -ra _groups <<< "$groups"
+        for grp in "${_groups[@]}"; do
+          log "Regenerating config for group ${grp}"
+          generate_group_config "$grp"
+        done
       fi
-    else
-      # Restart all isolation groups
-      local groups="${ISOLATION_GROUPS:-}"
-      IFS=',' read -ra _groups <<< "$groups"
-      for grp in "${_groups[@]}"; do
-        log "Restarting group ${grp}"
-        if type hc_restart_service &>/dev/null; then
-          local grp_iso
-          grp_iso=$(jq -r --arg g "$grp" '.groups[$g].isolation // "session"' "$MANIFEST" 2>/dev/null)
-          ISOLATION="$grp_iso" hc_restart_service "$grp"
-        else
-          local svc_name
-          svc_name=$(jq -r --arg g "$grp" '.groups[$g].serviceName // empty' "$MANIFEST" 2>/dev/null)
-          [ -n "$svc_name" ] && systemctl restart "${svc_name}.service"
-        fi
-      done
-    fi
-  else
-    log "Restarting openclaw.service"
-    systemctl restart openclaw.service
-  fi
+      ;;
+    *)
+      # none mode: restore saved full config
+      log "Restoring full config from backup"
+      cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
+      chown "${USERNAME:-bot}:${USERNAME:-bot}" "$H/.openclaw/openclaw.json"
+      chmod 600 "$H/.openclaw/openclaw.json"
+      ;;
+  esac
 }
 
-# --- Read port from manifest (SSOT) ---
-get_port() {
-  local grp="$1"
-  if [ -f "$MANIFEST" ]; then
-    jq -r --arg g "$grp" '.groups[$g].port // empty' "$MANIFEST" 2>/dev/null
-  fi
+# --- Restart services ---
+restart_services() {
+  case "$ISOLATION" in
+    session|container)
+      if [ -n "$TARGET_GROUP" ]; then
+        log "Restarting group ${TARGET_GROUP}"
+        ISOLATION="$(get_group_isolation "$TARGET_GROUP")" hc_restart_service "$TARGET_GROUP"
+      else
+        local groups="${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}"
+        IFS=',' read -ra _groups <<< "$groups"
+        for grp in "${_groups[@]}"; do
+          log "Restarting group ${grp}"
+          ISOLATION="$(get_group_isolation "$grp")" hc_restart_service "$grp"
+        done
+      fi
+      ;;
+    *)
+      log "Restarting openclaw.service"
+      hc_restart_service ""
+      ;;
+  esac
 }
 
-# --- Determine health check port(s) ---
+# --- Health check ---
 check_health() {
-  if [ "$ISOLATION" = "session" ] || [ "$ISOLATION" = "container" ]; then
-    if [ -n "$TARGET_GROUP" ]; then
-      local port
-      port=$(get_port "$TARGET_GROUP")
-      port="${port:-18789}"
-      if type hc_curl_gateway &>/dev/null; then
-        local grp_iso
-        grp_iso=$(jq -r --arg g "$TARGET_GROUP" '.groups[$g].isolation // "session"' "$MANIFEST" 2>/dev/null)
-        local grp_net
-        grp_net=$(jq -r --arg g "$TARGET_GROUP" '.groups[$g].network // "host"' "$MANIFEST" 2>/dev/null)
-        ISOLATION="$grp_iso" NETWORK_MODE="$grp_net" GROUP_PORT="$port" \
+  case "$ISOLATION" in
+    session|container)
+      if [ -n "$TARGET_GROUP" ]; then
+        local port net iso
+        port=$(get_group_port "$TARGET_GROUP")
+        iso=$(get_group_isolation "$TARGET_GROUP")
+        net=$(get_group_network "$TARGET_GROUP" 2>/dev/null)
+        ISOLATION="$iso" NETWORK_MODE="$net" GROUP_PORT="${port:-18789}" \
           hc_curl_gateway "$TARGET_GROUP" "/" >/dev/null 2>&1
       else
-        curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1
+        local groups="${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}"
+        IFS=',' read -ra _groups <<< "$groups"
+        for grp in "${_groups[@]}"; do
+          local port net iso
+          port=$(get_group_port "$grp")
+          iso=$(get_group_isolation "$grp")
+          net=$(get_group_network "$grp" 2>/dev/null)
+          if ! ISOLATION="$iso" NETWORK_MODE="$net" GROUP_PORT="${port:-18789}" \
+            hc_curl_gateway "$grp" "/" >/dev/null 2>&1; then
+            return 1
+          fi
+        done
       fi
-    else
-      local groups="${ISOLATION_GROUPS:-}"
-      IFS=',' read -ra _groups <<< "$groups"
-      for grp in "${_groups[@]}"; do
-        local port
-        port=$(get_port "$grp")
-        port="${port:-18789}"
-        if ! curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
-          return 1
-        fi
-      done
-    fi
-  else
-    curl -sf "http://127.0.0.1:18789/" >/dev/null 2>&1
-  fi
+      ;;
+    *)
+      hc_curl_gateway "" "/" >/dev/null 2>&1
+      ;;
+  esac
 }
 
-# --- Apply full config ---
-log "Attempting full config switch (isolation=$ISOLATION, group=${TARGET_GROUP:-all})"
-
-if [ "$ISOLATION" = "session" ] && [ -n "$TARGET_GROUP" ]; then
-  # Per-group: restore the group's session config from the full template
-  # The session config is regenerated by generate-session-services.sh
-  log "Regenerating session config for group $TARGET_GROUP"
-  bash /usr/local/sbin/generate-session-services.sh 2>/dev/null || true
-else
-  # Single mode or all groups: restore the main config
-  cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
-  chown "${USERNAME}:${USERNAME}" "$H/.openclaw/openclaw.json"
-  chmod 600 "$H/.openclaw/openclaw.json"
-  # Also regenerate isolation configs if in isolation mode
-  [ "$ISOLATION" = "session" ] && bash /usr/local/sbin/generate-session-services.sh 2>/dev/null || true
-  [ "$ISOLATION" = "container" ] && bash /usr/local/sbin/generate-docker-compose.sh 2>/dev/null || true
-fi
-
+# --- Execute ---
+apply_full_config
 restart_services
 
 # --- Wait for health ---
@@ -160,6 +155,18 @@ for _ in $(seq 1 12); do
 done
 
 # --- Handle result ---
+state_transition() {
+  local state="$1" reason="$2"
+  [ -x "$STATE_CMD" ] || return 0
+  if [ -n "$TARGET_GROUP" ]; then
+    GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config" 2>/dev/null || true
+    GROUP="$TARGET_GROUP" "$STATE_CMD" unlock 2>/dev/null || true
+  else
+    "$STATE_CMD" transition --to "$state" --reason "$reason" --by "try-full-config" 2>/dev/null || true
+    "$STATE_CMD" unlock 2>/dev/null || true
+  fi
+}
+
 if [ "$HEALTHY" = "true" ]; then
   log "SUCCESS: Full config is healthy"
 
@@ -174,40 +181,23 @@ if [ "$HEALTHY" = "true" ]; then
     for si in $(seq 1 "$AC"); do rm -f "$H/clawd/agents/agent${si}/SAFE_MODE.md"; done
   fi
 
-  # Update state machine
-  if [ -x "$STATE_CMD" ]; then
-    if [ -n "$TARGET_GROUP" ]; then
-      GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to HEALTHY --reason "full-config-restored" --by "try-full-config" 2>/dev/null || true
-      GROUP="$TARGET_GROUP" "$STATE_CMD" unlock 2>/dev/null || true
-    else
-      "$STATE_CMD" transition --to HEALTHY --reason "full-config-restored" --by "try-full-config" 2>/dev/null || true
-      "$STATE_CMD" unlock 2>/dev/null || true
-    fi
-  fi
-
+  state_transition "HEALTHY" "full-config-restored"
   exit 0
 else
   log "FAILED: Rolling back to safe-mode config"
 
-  # Rollback
-  if [ -f "$H/.openclaw/openclaw.minimal.json" ]; then
+  # Rollback: restore safe-mode config
+  if [ "$ISOLATION" = "none" ] && [ -f "$H/.openclaw/openclaw.minimal.json" ]; then
     cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
-    chown "${USERNAME}:${USERNAME}" "$H/.openclaw/openclaw.json"
+    chown "${USERNAME:-bot}:${USERNAME:-bot}" "$H/.openclaw/openclaw.json"
     chmod 600 "$H/.openclaw/openclaw.json"
   fi
   restart_services
 
-  # Update state machine
-  if [ -x "$STATE_CMD" ]; then
-    if [ -n "$TARGET_GROUP" ]; then
-      GROUP="$TARGET_GROUP" "$STATE_CMD" transition --to SAFE_MODE --reason "full-config-failed" --by "try-full-config" 2>/dev/null || true
-      GROUP="$TARGET_GROUP" "$STATE_CMD" unlock 2>/dev/null || true
-    else
-      "$STATE_CMD" transition --to SAFE_MODE --reason "full-config-failed" --by "try-full-config" 2>/dev/null || true
-      "$STATE_CMD" unlock 2>/dev/null || true
-    fi
-  fi
+  state_transition "SAFE_MODE" "full-config-failed"
 
-  log "Check logs: journalctl -u openclaw-${TARGET_GROUP:-openclaw} --since '5 min ago'"
+  local svc_name
+  svc_name=$(_hc_service_name "${TARGET_GROUP:-}")
+  log "Check logs: hc_service_logs '${TARGET_GROUP:-}' 50"
   exit 1
 fi

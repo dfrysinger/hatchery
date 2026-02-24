@@ -219,10 +219,9 @@ format_diagnostics() {
 }
 
 generate_boot_report() {
-  # Capture the actual errors from OpenClaw service logs (journalctl)
-  local service_name="openclaw${GROUP:+-$GROUP}"
+  # Capture the actual errors from OpenClaw service logs via hc_service_logs
   local service_errors
-  service_errors=$(journalctl -u "$service_name" --no-pager -n 100 --since "5 min ago" 2>/dev/null \
+  service_errors=$(hc_service_logs "${GROUP:-}" 100 2>/dev/null \
     | grep -iE "401|403|error|failed|authentication|unauthorized|invalid.*key|No API key" \
     | grep -v "rename-bots" \
     | head -15 || echo "Could not read service logs")
@@ -291,39 +290,26 @@ generate_boot_report
 # --- Restart service ---
 
 restart_and_verify() {
-  local target_service="$HC_SERVICE_NAME"
+  local svc_name
+  svc_name=$(_hc_service_name "${GROUP:-}")
 
-  log "Restarting $target_service with safe mode config..."
-
-  if [ -n "${GROUP:-}" ] && [ "$ISOLATION" = "container" ]; then
-    docker restart "openclaw-${GROUP}" 2>/dev/null || true
-  else
-    systemctl restart "${target_service}.service" 2>/dev/null || systemctl restart "$target_service" 2>/dev/null || true
-  fi
+  log "Restarting $svc_name with safe mode config..."
+  hc_restart_service "${GROUP:-}" || true
   sleep 5
 
   for attempt in 1 2 3; do
-    local is_active=false
-
-    if [ -n "${GROUP:-}" ] && [ "$ISOLATION" = "container" ]; then
-      docker inspect --format='{{.State.Running}}' "openclaw-${GROUP}" 2>/dev/null | grep -q 'true' && is_active=true
-    else
-      systemctl is-active --quiet "${target_service}.service" 2>/dev/null && is_active=true
-      systemctl is-active --quiet "$target_service" 2>/dev/null && is_active=true
-    fi
-
-    if [ "$is_active" = "true" ]; then
-      log "$target_service started (attempt $attempt)"
+    if hc_is_service_active "${GROUP:-}"; then
+      log "$svc_name started (attempt $attempt)"
       /usr/local/bin/rename-bots.sh >> "$HC_LOG" 2>&1 || true
       return 0
     fi
 
-    log "$target_service not active, retry $attempt/3..."
-    systemctl restart "${target_service}.service" 2>/dev/null || systemctl restart "$target_service" 2>/dev/null || true
+    log "$svc_name not active, retry $attempt/3..."
+    hc_restart_service "${GROUP:-}" || true
     sleep 5
   done
 
-  log "CRITICAL: $target_service failed to start"
+  log "CRITICAL: $svc_name failed to start"
   touch "/var/lib/init-status/gateway-failed${GROUP:+-$GROUP}"
   set_stage 13
   return 1

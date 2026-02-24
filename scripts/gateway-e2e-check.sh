@@ -304,7 +304,7 @@ fi
 log "========== E2E DECISION =========="
 log "HEALTHY=$HEALTHY, ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE"
 
-# --- Report to state machine (Phase 2) ---
+# --- Report to state machine ---
 if [ "$USE_STATE_MACHINE" = "true" ]; then
   if [ "$HEALTHY" = "true" ]; then
     log "STATE MACHINE: reporting health pass"
@@ -315,7 +315,7 @@ if [ "$USE_STATE_MACHINE" = "true" ]; then
   fi
 fi
 
-# --- Legacy marker handling (kept for Phase 1 compatibility) ---
+# --- Handle health result ---
 if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
   log "DECISION: SAFE MODE STABLE — recovery config working"
   rm -f "$HC_UNHEALTHY_MARKER" "$HC_RECOVERY_COUNTER" "/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}" /var/lib/init-status/needs-post-boot-check

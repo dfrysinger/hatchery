@@ -129,26 +129,47 @@ get_owner_id_for_platform() {
 
 # --- Isolation-aware service management ---
 # All health check consumers use these functions — never direct systemctl/docker calls.
-# ${USERNAME} comes from env_load() (lib-env.sh), sourced at script startup.
-# ${ISOLATION} comes from EnvironmentFile= in the calling systemd unit.
+# Works for all 3 isolation modes: none, session, container.
+#
+# In "none" mode (no isolation), group is ignored and the single "openclaw" service is used.
+# In "session" mode, each group has its own systemd service "openclaw-{group}".
+# In "container" mode, each group runs via docker compose.
+#
+# Environment deps:
+#   ISOLATION  — from group.env (EnvironmentFile=) or hc_load_environment()
+#   GROUP      — group name (empty in none mode)
+#   GROUP_PORT — gateway port (default 18789)
+
+# Resolve service name from group + isolation mode
+_hc_service_name() {
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
+  if [ "$iso" = "none" ] || [ -z "$group" ]; then
+    echo "openclaw"
+  else
+    echo "openclaw-${group}"
+  fi
+}
 
 hc_restart_service() {
-  local group="${1:?Usage: hc_restart_service <group>}"
-  local iso="${ISOLATION:-session}"
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
   local user="${HC_USERNAME:-${USERNAME:-bot}}"
   case "$iso" in
     container)
       docker compose \
         -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
         -p "openclaw-${group}" restart 2>&1 ;;
+    none)
+      systemctl restart openclaw 2>&1 ;;
     *)
       systemctl restart "openclaw-${group}" 2>&1 ;;
   esac
 }
 
 hc_is_service_active() {
-  local group="${1:?Usage: hc_is_service_active <group>}"
-  local iso="${ISOLATION:-session}"
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
   case "$iso" in
     container)
       # Check compose health status, not just .State.Running.
@@ -156,46 +177,52 @@ hc_is_service_active() {
       local status
       status=$(docker inspect --format='{{.State.Health.Status}}' "openclaw-${group}" 2>/dev/null)
       [ "$status" = "healthy" ] ;;
+    none)
+      systemctl is-active --quiet openclaw ;;
     *)
       systemctl is-active --quiet "openclaw-${group}" ;;
   esac
 }
 
 hc_service_logs() {
-  local group="${1:?Usage: hc_service_logs <group>}"
+  local group="${1:-${GROUP:-}}"
   local lines="${2:-50}"
-  local iso="${ISOLATION:-session}"
+  local iso="${ISOLATION:-none}"
   local user="${HC_USERNAME:-${USERNAME:-bot}}"
   case "$iso" in
     container)
       docker compose \
         -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
         -p "openclaw-${group}" logs --tail="$lines" 2>/dev/null ;;
+    none)
+      journalctl -u openclaw --no-pager -n "$lines" 2>/dev/null ;;
     *)
       journalctl -u "openclaw-${group}" --no-pager -n "$lines" 2>/dev/null ;;
   esac
 }
 
 hc_stop_service() {
-  local group="${1:?Usage: hc_stop_service <group>}"
-  local iso="${ISOLATION:-session}"
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
   local user="${HC_USERNAME:-${USERNAME:-bot}}"
   case "$iso" in
     container)
       docker compose \
         -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
         -p "openclaw-${group}" down 2>&1 ;;
+    none)
+      systemctl stop openclaw 2>&1 ;;
     *)
       systemctl stop "openclaw-${group}" 2>&1 ;;
   esac
 }
 
-# Reach the gateway — handles isolated network containers via docker exec
+# Reach the gateway — handles all isolation modes including isolated network containers
 hc_curl_gateway() {
-  local group="${1:?Usage: hc_curl_gateway <group>}"
+  local group="${1:-${GROUP:-}}"
   local path="${2:-/}"
   local port="${GROUP_PORT:-18789}"
-  local iso="${ISOLATION:-session}"
+  local iso="${ISOLATION:-none}"
   local net="${NETWORK_MODE:-host}"
 
   if [ "$iso" = "container" ] && [ "$net" != "host" ]; then
@@ -203,7 +230,7 @@ hc_curl_gateway() {
     docker exec "openclaw-${group}" \
       curl -sf "http://127.0.0.1:${port}${path}" 2>/dev/null
   else
-    # Host network or session mode: direct curl
+    # Host network, session mode, or none mode: direct curl
     curl -sf "http://127.0.0.1:${port}${path}" 2>/dev/null
   fi
 }
