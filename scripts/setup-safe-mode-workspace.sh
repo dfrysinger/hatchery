@@ -369,55 +369,85 @@ because both are on the same display.
 
 ### Step-by-step
 
-1. **Launch the onboard wizard in a tmux session on DISPLAY=:10:**
-   ```bash
-   # Start tmux session with visible terminal on the desktop
-   DISPLAY=:10 xfce4-terminal --title "OpenAI Codex Re-Auth" --hold \
-     -e "tmux new-session -s onboard 'openclaw onboard --auth-choice openai-codex'" &
-   ```
+The onboard wizard detects VPS environments and shows a "paste URL" flow instead
+of auto-opening Chrome. You need to: run the wizard in tmux, navigate the TUI,
+extract the OAuth URL, then open Chrome on DISPLAY=:10 yourself.
 
-2. **Navigate the onboard TUI wizard using tmux keystrokes:**
-   ```bash
-   # Read current screen
-   tmux capture-pane -t onboard -p | tail -20
+**Phase 1: Launch wizard and navigate TUI**
 
-   # Send keystrokes (arrow keys, Enter, etc.)
-   tmux send-keys -t onboard Enter
-   tmux send-keys -t onboard Down Enter
-   tmux send-keys -t onboard Left Enter
+```bash
+# Start onboard in tmux
+DISPLAY=:10 tmux new-session -d -s onboard "openclaw onboard --auth-choice openai-codex"
+sleep 3
 
-   # Type text
-   tmux send-keys -t onboard "yes" Enter
-   ```
-   The wizard has interactive menus — use tmux to navigate them until Chrome opens
-   for the user to log in.
+# Read screen to see where you are
+tmux capture-pane -t onboard -p | tail -15
 
-3. **Tell the user to complete the Chrome login:**
-   > "Chrome will open on your RDP desktop for ChatGPT login. Complete the sign-in
-   > (it may ask for 2FA) — the terminal will confirm when the token is saved."
+# Navigate through prompts (security=Yes, QuickStart, Use existing):
+tmux send-keys -t onboard Left Enter    # "Yes" to security
+sleep 2
+tmux send-keys -t onboard Enter          # QuickStart
+sleep 2
+tmux send-keys -t onboard Enter          # Use existing values
+sleep 5
+```
 
-4. **Wait for the user to confirm login.** Do NOT automate the ChatGPT login — it
-   has CAPTCHAs and 2FA that require human interaction.
+**Phase 2: Extract OAuth URL and open Chrome**
 
-5. **After login succeeds, verify the token:**
-   ```bash
-   jq '.profiles[] | select(.provider == "openai-codex") | {provider, expires: .expires, has_refresh: (.cred.refreshToken != null)}' \
-     ~/.openclaw/agents/main/agent/auth-profiles.json
-   ```
+```bash
+# Extract the full URL (use -J to join wrapped lines)
+URL=$(tmux capture-pane -t onboard -p -S -100 -J | grep -oP 'https://auth\.openai\.com\S+')
+echo "URL length: ${#URL}"  # Should be ~400 chars
 
-6. **Exit safe mode** (see "Recovery Will Kill You" in AGENTS.md — write memory + farewell FIRST):
-   ```bash
-   sudo try-full-config.sh
-   ```
+# Open Chrome on the desktop with the URL
+DISPLAY=:10 google-chrome-stable --no-sandbox --no-first-run "$URL" &>/dev/null &
+```
+
+**Phase 3: Tell the user to log in**
+
+> "I've opened the OpenAI login page in Chrome on your RDP desktop.
+> Please sign in to ChatGPT — the token will be saved automatically
+> when the login completes."
+
+The callback server (localhost:1455) is already listening from the onboard
+process. After login, Chrome redirects to localhost and the wizard receives
+the token automatically.
+
+**Phase 4: Verify and monitor**
+
+```bash
+# Watch the tmux session for completion
+tmux capture-pane -t onboard -p | tail -15
+
+# After the user confirms login, verify the token:
+jq '.profiles[] | select(.provider == "openai-codex") | {provider, expires: .expires_at, has_refresh: (.cred.refreshToken != null)}' \
+  ~/.openclaw/agents/main/agent/auth-profiles.json
+
+# Clean up tmux
+tmux kill-session -t onboard 2>/dev/null
+```
+
+**Phase 5: Exit safe mode** (see "Recovery Will Kill You" in AGENTS.md)
+
+Write to MEMORY.md and send farewell message FIRST, then:
+```bash
+sudo try-full-config.sh
+```
+
+### Key tips
+
+- Use `tmux capture-pane -t onboard -p -J` — the `-J` flag joins wrapped lines
+- The OAuth URL is ~400 chars — if shorter, it's truncated
+- The callback server runs on localhost:1455 — Chrome on :10 can reach it
+- The wizard says "paste URL" but the callback works automatically
 
 ### What NOT to do
 
-- ❌ Do NOT use `xdotool` — it is not installed and not reliable
-- ❌ Do NOT run `openclaw onboard` via your exec tool directly — the callback will fail
-- ❌ Do NOT use `openclaw models auth login --provider openai-codex` — known bug
+- ❌ Do NOT use `xdotool` — it is not installed
+- ❌ Do NOT run `openclaw onboard` via your exec tool directly — hidden session, callback fails
 - ❌ Do NOT try to automate the ChatGPT login (CAPTCHAs, 2FA)
 - ❌ Do NOT install Selenium, Playwright, puppeteer, or xdotool
-- ❌ Do NOT ask user to copy-paste URLs or use SSH tunnels — RDP is already there
+- ❌ Do NOT ask user to copy-paste URLs or SSH tunnels — RDP is already there
 
 ### Checking token status without re-auth
 
