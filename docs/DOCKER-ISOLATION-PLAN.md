@@ -1,8 +1,9 @@
-# Docker Container Isolation — Implementation Plan v3
+# Docker Container Isolation — Implementation Plan v4
 
 > Original v1 by ClaudeBot (2026-02-21). Reviewed by ChatGPTBot (11 comments).
 > v2 by ClaudeBot (2026-02-21) — all review comments addressed.
 > v3 by ClaudeBot (2026-02-24) — comprehensive rewrite with full implementation details.
+> v4 by ClaudeBot (2026-02-24) — SSOT audit, shared code architecture, revised phases.
 
 ---
 
@@ -10,20 +11,22 @@
 
 1. [Architecture Decision](#architecture-decision)
 2. [Current State Assessment](#current-state-assessment)
-3. [Pre-Implementation Checklist](#pre-implementation-checklist)
-4. [Phase 1: Fix Compose Generator](#phase-1-fix-compose-generator)
-5. [Phase 2: Dockerfile + Docker Install](#phase-2-dockerfile--docker-install)
-6. [Phase 3: Health Check Abstraction](#phase-3-health-check-abstraction)
-7. [Phase 4: Port Allocator + First Live Test](#phase-4-port-allocator--first-live-test)
-8. [Phase 5: Mixed Mode](#phase-5-mixed-mode)
-9. [Phase 6: Network Isolation](#phase-6-network-isolation)
-10. [Phase 7: Resource Limits + Security Hardening](#phase-7-resource-limits--security-hardening)
-11. [Config Hot-Reload](#config-hot-reload)
-12. [Rollback Procedures](#rollback-procedures)
-13. [Container Lifecycle Management](#container-lifecycle-management)
-14. [Debugging and Incident Triage](#debugging-and-incident-triage)
-15. [Open Questions](#open-questions)
-16. [Estimate](#estimate)
+3. [SSOT Violations to Fix](#ssot-violations-to-fix)
+4. [Target Architecture](#target-architecture)
+5. [Pre-Implementation Checklist](#pre-implementation-checklist)
+6. [Phase 1: Shared Foundation](#phase-1-shared-foundation)
+7. [Phase 2: Fix Compose Generator](#phase-2-fix-compose-generator)
+8. [Phase 3: Dockerfile + Docker Install](#phase-3-dockerfile--docker-install)
+9. [Phase 4: Health Check Abstraction](#phase-4-health-check-abstraction)
+10. [Phase 5: First Live Test](#phase-5-first-live-test)
+11. [Phase 6: Network Isolation](#phase-6-network-isolation)
+12. [Phase 7: Security Hardening + Resource Limits](#phase-7-security-hardening--resource-limits)
+13. [Config Hot-Reload](#config-hot-reload)
+14. [Rollback Procedures](#rollback-procedures)
+15. [Container Lifecycle Management](#container-lifecycle-management)
+16. [Debugging and Incident Triage](#debugging-and-incident-triage)
+17. [Open Questions](#open-questions)
+18. [Estimate](#estimate)
 
 ---
 
@@ -36,7 +39,7 @@
 | Health checks | Host | Reuse `gateway-health-check.sh`, `gateway-e2e-check.sh` unchanged |
 | Safe mode detection | Host | `.path` unit watches marker files on host filesystem |
 | Safe mode recovery | Host | `safe-mode-handler.sh`, `safe-mode-recovery.sh` stay on host |
-| Config generation | Host | `build-full-config.sh` → `generate-docker-compose.sh` |
+| Config generation | Host | `build-full-config.sh` → per-group configs + mode-specific artifacts |
 | State machine | Host | `openclaw-state.sh` operates on host-local state files |
 | OpenClaw gateway | Container | Only the runtime process is isolated |
 | Agent workspace | Container (rw) | Bind-mounted from host for persistence |
@@ -58,78 +61,533 @@
 | Artifact | Status | Issues |
 |----------|--------|--------|
 | `generate-docker-compose.sh` | ⚠️ Scaffolded | Built for Option B — mounts scripts, state, logs into containers |
+| `generate-session-services.sh` | ✅ Working | Contains logic that should be shared (config gen, auth, dirs, safeguard units) |
+| `build-full-config.sh` | ✅ Working | Orchestrator, but delegates too much to generators |
+| `generate-config.sh` | ✅ Working | `--mode session` for per-group configs, `--mode safe-mode` for recovery |
 | `test_docker_compose.py` | ✅ 26 tests pass | Tests validate current (wrong) Option B behavior |
 | `docs/specs/agent-isolation/` | ✅ Specs exist | `architecture.md` (corrupted), `data-model.md`, `api-contracts.md` |
 | `examples/habitat-isolation-container.json` | ✅ Example | Good reference for container habitat config |
 | `parse-habitat.py` | ✅ Outputs container vars | `AGENT{N}_ISOLATION`, `AGENT{N}_NETWORK`, `AGENT{N}_RESOURCES_*` |
-| `safe-mode-handler.sh` | ⚠️ Partial | Has `docker restart` and `docker inspect` stubs (lines 298-309) |
+| `safe-mode-handler.sh` | ⚠️ Partial | Has `docker restart`/`docker inspect` stubs (lines 298-309) |
+| `lib-health-check.sh` | ✅ Working | Needs container-aware abstractions added |
+| `lib-isolation.sh` | ❌ Missing | Shared group/agent/port functions don't exist yet |
 | `Dockerfile` | ❌ Missing | `hatchery/agent:latest` referenced but never built |
 | Docker install in provisioning | ❌ Missing | `provision.sh` doesn't install Docker |
 | Container systemd units | ❌ Missing | No `openclaw-container-{group}.service` template |
-| Port allocator | ❌ Missing | Session services hardcode `BASE_PORT=18790`, compose hardcodes `18789 + offset` |
+| Port allocator | ❌ Missing | Two generators use different base ports |
 
-### What the Compose Generator Currently Does Wrong
+---
 
-1. **Mounts host scripts into container** — `gateway-health-check.sh`, `safe-mode-recovery.sh`, `setup-safe-mode-workspace.sh`, `lib-permissions.sh` (Option B artifacts)
-2. **Mounts host state into container** — `/var/lib/init-status`, `/var/log` (defeats isolation)
-3. **Mounts secrets directly** — `/etc/droplet.env`, `/etc/habitat-parsed.env` (over-exposes)
-4. **Blocking entrypoint** — Inline bash that runs gateway + health check in same process (should be gateway only; health check on host)
-5. **Port assignment** — Local variable, not coordinated with session services
-6. **No project naming** — Missing `COMPOSE_PROJECT_NAME`, risks collisions on `docker compose down`
+## SSOT Violations to Fix
+
+Six concerns are currently duplicated across isolation types. Phase 1 consolidates all of them.
+
+### 1. Agent-per-group filtering (reimplemented 3×)
+
+The pattern "iterate `AGENT{N}_ISOLATION_GROUP`, match against group name" exists in:
+- `generate-session-services.sh` (lines 85-96)
+- `generate-docker-compose.sh` (lines 68-82)
+- `generate-docker-compose.sh` again in `get_group_network()`, `get_group_memory()`, `get_group_cpu()`, `get_group_agent_names()` (lines 110-170)
+
+### 2. OpenClaw config generation (session-only)
+
+`generate-session-services.sh` calls `generate-config.sh --mode session` to produce `openclaw.session.json`. `generate-docker-compose.sh` doesn't generate a config at all — it mounts a `./config/${group}` directory and hopes something else fills it.
+
+### 3. Auth-profiles handling (3 different approaches)
+
+- `build-full-config.sh` creates `agents/main/agent/auth-profiles.json`, symlinks to `agents/agent{N}/agent/`
+- `generate-session-services.sh` copies auth-profiles into `${state_dir}/agents/agent{N}/agent/`
+- Container mode (planned) would bind-mount from `configs/{group}/`
+
+### 4. Port assignment (different base ports, will collide)
+
+- `generate-session-services.sh`: `BASE_PORT=18790`, offset by group index within session groups
+- `generate-docker-compose.sh`: `18789 + offset` within container groups
+- Mixed mode = guaranteed collision
+
+### 5. Safeguard/E2E units (session-only)
+
+`generate-session-services.sh` generates safeguard `.path`, `.service`, and E2E check service per group. Container mode needs the same units (they run on the host). Currently no container equivalent exists.
+
+### 6. Directory structure setup (scattered 3×)
+
+Directory creation for configs, state, workspaces scattered across `build-full-config.sh`, `generate-session-services.sh`, and (planned) compose generator.
+
+---
+
+## Target Architecture
+
+After Phase 1, the pipeline looks like this:
+
+```
+build-full-config.sh (orchestrator — single entry point)
+  │
+  ├── source lib-isolation.sh
+  │     ├── get_group_agents(group)          → "agent1,agent3"
+  │     ├── get_group_port(group)            → reads /etc/openclaw-ports.env
+  │     ├── get_group_network(group)         → "host"|"internal"|"none"
+  │     ├── get_group_resources(group)       → "512Mi 0.5"
+  │     ├── get_group_isolation(group)       → "session"|"container"
+  │     ├── get_groups_by_type(type)         → "council,workers"
+  │     └── generate_safeguard_units(group, port, isolation, output_dir)
+  │
+  ├── allocate_ports()                       → /etc/openclaw-ports.env
+  │
+  ├── FOR EACH group:
+  │     ├── setup_group_directories(group)   → config dir, state dir, agent subdirs
+  │     ├── setup_group_auth_profiles(group) → symlink master auth-profiles
+  │     ├── generate_group_token(group)      → per-group gateway token
+  │     ├── generate-config.sh --mode session → openclaw.session.json (ALL modes)
+  │     └── generate_safeguard_units(group)  → .path + .service + E2E (ALL modes)
+  │
+  ├── generate-session-services.sh           → THIN: systemd unit files only
+  │     (reads port from /etc/openclaw-ports.env, config/auth already exist)
+  │
+  └── generate-docker-compose.sh             → THIN: compose + container systemd unit only
+        (reads port from /etc/openclaw-ports.env, config/auth already exist)
+```
+
+**Key principle:** generators are thin. They produce ONLY mode-specific artifacts:
+- Session: one systemd `.service` file per group
+- Container: one `docker-compose.yaml` + one systemd `.service` file per group
+
+Everything else (config, auth, ports, dirs, safeguard units) is centralized in `build-full-config.sh`.
 
 ---
 
 ## Pre-Implementation Checklist
 
-Complete these before writing any Phase 1 code:
+Complete before writing Phase 1 code:
 
-- [ ] **Rollback commands documented** for each phase (see [Rollback Procedures](#rollback-procedures))
-- [ ] **`COMPOSE_PROJECT_NAME` convention defined**: `openclaw-{group}` (matches container naming)
-- [ ] **File layout defined** for generated artifacts:
-  ```
-  /home/bot/
-  ├── .openclaw/compose/{group}/docker-compose.yaml          # Per-group compose file
-  ├── .openclaw/
-  │   └── configs/{group}/
-  │       ├── openclaw.session.json         # OpenClaw config (same as session mode)
-  │       └── auth-profiles.json            # Auth credentials
-  └── clawd/
-      └── agents/{agent}/                   # Agent workspace (bind-mounted rw)
-  ```
-- [ ] **Security baseline defined**: `cap_drop: ALL`, `security_opt: no-new-privileges:true`, `read_only: true` with tmpfs for `/tmp`
-- [ ] **Port allocator contract**: see [Phase 4](#phase-4-port-allocator--first-live-test)
-- [ ] **Health-check timeouts defined**: see [Phase 3](#phase-3-health-check-abstraction)
-- [ ] **Phase 1 acceptance gates**: `docker compose config` validates, systemd unit start/stop clean, non-blocking startup
+- [ ] **`COMPOSE_PROJECT_NAME` convention**: `openclaw-{group}`
+- [ ] **File layout** (see [Appendix](#appendix-file-layout-reference))
+- [ ] **Security baseline**: `cap_drop: ALL`, `no-new-privileges:true`, `read_only: true` + tmpfs
+- [ ] **Port range**: 18790+ (18789 reserved for non-isolated default)
+- [ ] **Rollback commands** documented per phase (see [Rollback Procedures](#rollback-procedures))
 
 ---
 
-## Phase 1: Fix Compose Generator
+## Phase 1: Shared Foundation
 
-**Goal:** `generate-docker-compose.sh` produces correct Option A compose files.
+**Goal:** Create `lib-isolation.sh`, centralize port allocation, extract shared concerns from generators into `build-full-config.sh`. Both generators become thin.
 
-### 1.1 Remove Option B Volume Mounts
+This is the most important phase. Everything else depends on it.
 
-Delete all script and state mounts. Containers get exactly:
+### 1.1 Create `lib-isolation.sh`
+
+New shared library sourced by `build-full-config.sh` and both generators:
+
+```bash
+#!/bin/bash
+# =============================================================================
+# lib-isolation.sh — Shared functions for isolation group management
+# =============================================================================
+# Single source of truth for group/agent queries, port lookups, and
+# generation of mode-agnostic systemd units (safeguard, E2E).
+#
+# Dependencies: lib-env.sh (env_load), lib-permissions.sh (ensure_bot_dir)
+# =============================================================================
+
+# --- Group/Agent Queries ---
+
+# Get agent IDs belonging to a group (comma-separated).
+# Usage: get_group_agents "council" → "agent1,agent3"
+get_group_agents() {
+    local group="$1"
+    local agents=""
+    for i in $(seq 1 "${AGENT_COUNT:?AGENT_COUNT required}"); do
+        local ag_var="AGENT${i}_ISOLATION_GROUP"
+        local iso_var="AGENT${i}_ISOLATION"
+        local ag="${!ag_var:-}"
+        local iso="${!iso_var:-}"
+        if [ "$ag" = "$group" ]; then
+            [ -n "$agents" ] && agents="${agents},"
+            agents="${agents}agent${i}"
+        fi
+    done
+    echo "$agents"
+}
+
+# Get the isolation type for a group (first agent's type, or ISOLATION_DEFAULT).
+# Usage: get_group_isolation "council" → "session"
+get_group_isolation() {
+    local group="$1"
+    for i in $(seq 1 "${AGENT_COUNT}"); do
+        local ag_var="AGENT${i}_ISOLATION_GROUP"
+        local iso_var="AGENT${i}_ISOLATION"
+        local ag="${!ag_var:-}"
+        local iso="${!iso_var:-}"
+        if [ "$ag" = "$group" ] && [ -n "$iso" ]; then
+            echo "$iso"
+            return
+        fi
+    done
+    echo "${ISOLATION_DEFAULT:-none}"
+}
+
+# Get network mode for a group (first agent with a setting, default "host").
+get_group_network() {
+    local group="$1"
+    for i in $(seq 1 "${AGENT_COUNT}"); do
+        local ag_var="AGENT${i}_ISOLATION_GROUP"
+        local net_var="AGENT${i}_NETWORK"
+        if [ "${!ag_var:-}" = "$group" ] && [ -n "${!net_var:-}" ]; then
+            echo "${!net_var}"
+            return
+        fi
+    done
+    echo "host"
+}
+
+# Get resource limits for a group: "memory cpu" (empty strings if unset).
+get_group_resources() {
+    local group="$1"
+    local mem="" cpu=""
+    for i in $(seq 1 "${AGENT_COUNT}"); do
+        local ag_var="AGENT${i}_ISOLATION_GROUP"
+        if [ "${!ag_var:-}" = "$group" ]; then
+            local mem_var="AGENT${i}_RESOURCES_MEMORY"
+            local cpu_var="AGENT${i}_RESOURCES_CPU"
+            [ -z "$mem" ] && mem="${!mem_var:-}"
+            [ -z "$cpu" ] && cpu="${!cpu_var:-}"
+        fi
+    done
+    echo "$mem $cpu"
+}
+
+# Get groups filtered by isolation type.
+# Usage: get_groups_by_type "session" → "council workers"
+get_groups_by_type() {
+    local type="$1"
+    local result=""
+    IFS=',' read -ra groups <<< "${ISOLATION_GROUPS:-}"
+    for group in "${groups[@]}"; do
+        if [ "$(get_group_isolation "$group")" = "$type" ]; then
+            [ -n "$result" ] && result="${result} "
+            result="${result}${group}"
+        fi
+    done
+    echo "$result"
+}
+
+# --- Port Allocation ---
+
+# Read port for a group from the centralized port file.
+# Usage: get_group_port "council" → "18790"
+get_group_port() {
+    local group="$1"
+    local port_file="/etc/openclaw-ports.env"
+    if [ -f "$port_file" ]; then
+        local var="OPENCLAW_PORT_${group}"
+        source "$port_file"
+        echo "${!var:-}"
+    fi
+}
+
+# Allocate ports for all groups. Deterministic: sorted alphabetically, BASE_PORT=18790.
+# Writes /etc/openclaw-ports.env as the single source of truth.
+allocate_ports() {
+    local base_port=18790
+    local port_file="/etc/openclaw-ports.env"
+    local groups_sorted
+
+    IFS=',' read -ra groups_array <<< "${ISOLATION_GROUPS:?ISOLATION_GROUPS required}"
+    groups_sorted=($(printf '%s\n' "${groups_array[@]}" | sort))
+
+    echo "# Generated by build-full-config.sh — do not edit" > "$port_file"
+    echo "# $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$port_file"
+    echo "# Algorithm: sorted alphabetically, BASE_PORT=${base_port}" >> "$port_file"
+
+    local offset=0
+    for group in "${groups_sorted[@]}"; do
+        echo "OPENCLAW_PORT_${group}=$((base_port + offset))" >> "$port_file"
+        offset=$((offset + 1))
+    done
+
+    chmod 644 "$port_file"
+    source "$port_file"  # Make ports available immediately
+}
+
+# --- Per-Group Setup (mode-agnostic) ---
+
+# Create all directories for a group.
+setup_group_directories() {
+    local group="$1"
+    local config_dir="${CONFIG_BASE:?}/${group}"
+    local state_dir="${STATE_BASE:?}/${group}"
+
+    ensure_bot_dir "$config_dir" 700
+    ensure_bot_dir "$state_dir" 700
+
+    # Per-agent subdirs within the state dir (OpenClaw expects this layout)
+    local agents
+    IFS=',' read -ra agents <<< "$(get_group_agents "$group")"
+    for agent_id in "${agents[@]}"; do
+        ensure_bot_dir "${state_dir}/agents/${agent_id}/agent" 700
+    done
+}
+
+# Set up auth-profiles for all agents in a group (symlink to master).
+setup_group_auth_profiles() {
+    local group="$1"
+    local state_dir="${STATE_BASE:?}/${group}"
+    local master="${HOME_DIR:?}/.openclaw/agents/main/agent/auth-profiles.json"
+
+    if [ ! -f "$master" ]; then
+        echo "WARNING: No master auth-profiles.json at $master" >&2
+        return 1
+    fi
+
+    local agents
+    IFS=',' read -ra agents <<< "$(get_group_agents "$group")"
+    for agent_id in "${agents[@]}"; do
+        local target="${state_dir}/agents/${agent_id}/agent/auth-profiles.json"
+        ln -sf "$master" "$target"
+    done
+}
+
+# Generate per-group gateway token.
+generate_group_token() {
+    local group="$1"
+    local config_dir="${CONFIG_BASE:?}/${group}"
+    local token_file="${config_dir}/gateway-token.txt"
+
+    if [ ! -f "$token_file" ]; then
+        openssl rand -hex 16 > "$token_file"
+        chmod 600 "$token_file"
+        chown "${SVC_USER:?}:${SVC_USER}" "$token_file" 2>/dev/null || true
+    fi
+    cat "$token_file"
+}
+
+# Generate OpenClaw config for a group (delegates to generate-config.sh).
+generate_group_config() {
+    local group="$1"
+    local config_dir="${CONFIG_BASE:?}/${group}"
+    local port
+    port=$(get_group_port "$group")
+    local token
+    token=$(generate_group_token "$group")
+    local agents
+    agents=$(get_group_agents "$group")
+
+    local gen_script=""
+    for p in /usr/local/sbin /usr/local/bin "$(dirname "${BASH_SOURCE[0]}")"; do
+        [ -f "$p/generate-config.sh" ] && { gen_script="$p/generate-config.sh"; break; }
+    done
+    [ -z "$gen_script" ] && { echo "FATAL: generate-config.sh not found" >&2; return 1; }
+
+    "$gen_script" --mode session \
+        --group "$group" \
+        --agents "$agents" \
+        --port "$port" \
+        --gateway-token "$token" \
+        > "${config_dir}/openclaw.session.json"
+
+    chown "${SVC_USER}:${SVC_USER}" "${config_dir}/openclaw.session.json" 2>/dev/null || true
+    chmod 600 "${config_dir}/openclaw.session.json" 2>/dev/null || true
+}
+
+# --- Systemd Unit Generation (mode-agnostic) ---
+
+# Generate safeguard .path + .service for any group.
+# These run on the host regardless of isolation mode.
+generate_safeguard_units() {
+    local group="$1"
+    local port="$2"
+    local isolation="$3"
+    local output_dir="${4:-/etc/systemd/system}"
+
+    # .path unit — watches for unhealthy marker (identical for all modes)
+    cat > "${output_dir}/openclaw-safeguard-${group}.path" <<PATHFILE
+[Unit]
+Description=Watch for ${group} unhealthy marker
+
+[Path]
+PathExists=/var/lib/init-status/unhealthy-${group}
+Unit=openclaw-safeguard-${group}.service
+
+[Install]
+WantedBy=multi-user.target
+PATHFILE
+
+    # .service unit — runs recovery (passes ISOLATION so hc_ functions dispatch correctly)
+    cat > "${output_dir}/openclaw-safeguard-${group}.service" <<SGFILE
+[Unit]
+Description=OpenClaw Safe Mode Recovery - ${group}
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/safe-mode-handler.sh
+Environment=GROUP=${group}
+Environment=GROUP_PORT=${port}
+Environment=ISOLATION=${isolation}
+Environment=RUN_MODE=path-triggered
+SGFILE
+}
+
+# Generate E2E check service for any group.
+generate_e2e_unit() {
+    local group="$1"
+    local port="$2"
+    local isolation="$3"
+    local output_dir="${4:-/etc/systemd/system}"
+
+    cat > "${output_dir}/openclaw-e2e-${group}.service" <<E2EFILE
+[Unit]
+Description=OpenClaw E2E Check - ${group}
+After=openclaw-${group}.service openclaw-container-${group}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gateway-e2e-check.sh
+Environment=GROUP=${group}
+Environment=GROUP_PORT=${port}
+Environment=ISOLATION=${isolation}
+Environment=RUN_MODE=e2e-check
+E2EFILE
+}
+```
+
+### 1.2 Centralize in `build-full-config.sh`
+
+Move the per-group setup loop into `build-full-config.sh`, before generator dispatch:
+
+```bash
+source /usr/local/sbin/lib-isolation.sh
+
+# --- Centralized per-group setup (all modes) ---
+if [ -n "${ISOLATION_GROUPS:-}" ]; then
+    # 1. Allocate ports (single source of truth)
+    allocate_ports
+
+    # 2. Per-group setup (config, auth, dirs, tokens, safeguard units)
+    IFS=',' read -ra ALL_GROUPS <<< "$ISOLATION_GROUPS"
+    for group in "${ALL_GROUPS[@]}"; do
+        port=$(get_group_port "$group")
+        isolation=$(get_group_isolation "$group")
+
+        setup_group_directories "$group"
+        setup_group_auth_profiles "$group"
+        generate_group_config "$group"
+        generate_safeguard_units "$group" "$port" "$isolation"
+        generate_e2e_unit "$group" "$port" "$isolation"
+
+        echo "  [${group}] isolation=${isolation} port=${port} → configured"
+    done
+
+    # 3. Dispatch to mode-specific generators (thin — service definitions only)
+    session_groups=$(get_groups_by_type "session")
+    container_groups=$(get_groups_by_type "container")
+
+    if [ -n "$session_groups" ]; then
+        ISOLATION_GROUPS="$(echo "$session_groups" | tr ' ' ',')" \
+            bash /usr/local/sbin/generate-session-services.sh
+    fi
+    if [ -n "$container_groups" ]; then
+        ISOLATION_GROUPS="$(echo "$container_groups" | tr ' ' ',')" \
+            bash /usr/local/sbin/generate-docker-compose.sh
+    fi
+fi
+```
+
+### 1.3 Slim Down `generate-session-services.sh`
+
+Remove from `generate-session-services.sh`:
+- ❌ Agent-per-group filtering loop (use `get_group_agents` from lib)
+- ❌ `generate-config.sh` call (done by orchestrator)
+- ❌ Auth-profiles copy (done by orchestrator)
+- ❌ Directory creation (done by orchestrator)
+- ❌ Safeguard/E2E unit generation (done by orchestrator)
+- ❌ Port computation (read from `/etc/openclaw-ports.env`)
+
+What remains:
+- ✅ Generate the session-mode systemd `.service` file per group (the main service unit)
+- ✅ Enable/start services (or skip if `DRY_RUN`)
+
+The script drops from ~380 lines to ~80 lines.
+
+### 1.4 Slim Down `generate-docker-compose.sh`
+
+Remove from `generate-docker-compose.sh`:
+- ❌ Agent-per-group filtering loop + `get_group_*` functions
+- ❌ Port computation
+- ❌ All Option B volume mounts
+
+What remains:
+- ✅ Generate `docker-compose.yaml` per group with correct Option A mounts
+- ✅ Generate the container-mode systemd `.service` file per group
+- ✅ Enable/start services (or skip if `DRY_RUN`)
+
+### 1.5 Update Tests
+
+**TDD approach:** Write new tests first (RED), then refactor (GREEN), then delete old tests.
+
+New tests for `lib-isolation.sh`:
+- `get_group_agents()` returns correct agents for each group
+- `get_group_isolation()` returns correct type, falls back to `ISOLATION_DEFAULT`
+- `get_group_network()` returns correct mode, defaults to "host"
+- `get_group_resources()` returns memory/cpu or empty strings
+- `get_groups_by_type()` correctly filters session vs container groups
+- `allocate_ports()` is deterministic (same input → same output)
+- `allocate_ports()` doesn't collide (unique ports for all groups)
+- `generate_safeguard_units()` creates valid systemd units
+- `generate_e2e_unit()` passes `ISOLATION` to environment
+
+Updated tests for generators:
+- Session generator only creates `.service` file (no config, no auth, no safeguard)
+- Container generator only creates `docker-compose.yaml` + `.service` file
+- Both read ports from `/etc/openclaw-ports.env` (not computed)
+
+### Acceptance Criteria
+
+- [ ] `lib-isolation.sh` passes `bash -n` syntax check
+- [ ] All `get_group_*` functions return correct results for test fixtures
+- [ ] `allocate_ports` is idempotent (same input → same ports)
+- [ ] No port collisions in mixed mode (session + container groups)
+- [ ] `generate-session-services.sh` does NOT call `generate-config.sh`
+- [ ] `generate-session-services.sh` does NOT copy auth-profiles
+- [ ] `generate-session-services.sh` does NOT generate safeguard/E2E units
+- [ ] `generate-docker-compose.sh` does NOT have `get_group_*` functions
+- [ ] Safeguard units include `Environment=ISOLATION=` for all groups
+- [ ] Existing session isolation still works (regression test on real droplet)
+
+### Rollback
+
+```bash
+# Revert all three scripts + new library
+git checkout HEAD~1 -- scripts/lib-isolation.sh scripts/build-full-config.sh \
+    scripts/generate-session-services.sh scripts/generate-docker-compose.sh
+rm -f /etc/openclaw-ports.env
+```
+
+---
+
+## Phase 2: Fix Compose Generator
+
+**Goal:** `generate-docker-compose.sh` produces correct Option A compose files. (Now thin, since Phase 1 extracted shared concerns.)
+
+### 2.1 Correct Volume Mounts
+
+Containers get exactly these mounts (nothing more):
 
 ```yaml
 volumes:
-  # OpenClaw config (generated by host, read by container)
-  - ${HOME}/.openclaw/configs/${GROUP}/openclaw.session.json:${HOME}/.openclaw/openclaw.json:ro
-  # Auth credentials (per-agent — one mount per agent in the group)
-  # Session isolation copies auth-profiles to ${STATE_DIR}/agents/${AGENT}/agent/
-  # Container mounts mirror the same layout:
-  - ${HOME}/.openclaw/configs/${GROUP}/agents/${AGENT}/agent/auth-profiles.json:${STATE_DIR}/agents/${AGENT}/agent/auth-profiles.json:ro
-  # Gateway token (per-group — see Phase 7 for per-group token generation)
-  - ${HOME}/.openclaw/configs/${GROUP}/gateway-token.txt:${HOME}/.openclaw/gateway-token.txt:ro
+  # OpenClaw config (generated by orchestrator, read by container)
+  - ${CONFIG_DIR}/openclaw.session.json:${HOME}/.openclaw/openclaw.json:ro
+  # Gateway token (per-group)
+  - ${CONFIG_DIR}/gateway-token.txt:${HOME}/.openclaw/gateway-token.txt:ro
+  # Session state dir (transcripts, auth-profiles already symlinked inside)
+  - ${STATE_DIR}:${HOME}/.openclaw-sessions/${GROUP}:rw
   # Agent workspaces (rw — agents write memory, transcripts, etc.)
-  - ${HOME}/clawd/agents/${AGENT}:${HOME}/clawd/agents/${AGENT}:rw
+  - ${HOME}/clawd/agents/${AGENT}:${HOME}/clawd/agents/${AGENT}:rw  # (one per agent)
   # Shared workspace (rw — cross-agent collaboration)
   - ${HOME}/clawd/shared:${HOME}/clawd/shared:rw
-  # Session state (transcripts, persisted across restarts)
-  - ${HOME}/.openclaw-sessions/${GROUP}:${HOME}/.openclaw-sessions/${GROUP}:rw
   # Additional shared paths from habitat config
   # (one entry per ISOLATION_SHARED_PATHS item)
 ```
+
+Note: auth-profiles are already symlinked inside `${STATE_DIR}/agents/{agent}/agent/` by the orchestrator in Phase 1. No separate auth mount needed — the state dir mount covers it.
 
 Mounts explicitly **removed** (Option B artifacts):
 - ~~`/usr/local/bin/gateway-health-check.sh`~~
@@ -141,20 +599,17 @@ Mounts explicitly **removed** (Option B artifacts):
 - ~~`/var/lib/init-status`~~
 - ~~`/var/log`~~
 
-### 1.2 Fix Entrypoint
+### 2.2 Entrypoint and Command
 
-Container runs OpenClaw gateway only. No health check, no bash wrapper.
-Override CMD (not entrypoint) so compose can pass the per-group port:
+Container runs OpenClaw gateway only. Dockerfile sets `ENTRYPOINT ["openclaw", "gateway"]`, compose overrides only `CMD`:
 
 ```yaml
 command: ["--bind", "loopback", "--port", "${GROUP_PORT}"]
 ```
 
-The Dockerfile `ENTRYPOINT` is `["openclaw", "gateway"]` — compose only overrides `CMD`.
+### 2.3 Environment Variables
 
-### 1.3 Fix Environment Variables
-
-Container needs API keys passed explicitly (not via `/etc/droplet.env` mount):
+API keys passed explicitly (not via file mounts):
 
 ```yaml
 environment:
@@ -168,7 +623,7 @@ environment:
   - BRAVE_API_KEY=${BRAVE_API_KEY}
 ```
 
-### 1.4 Add Container Metadata
+### 2.4 Container Metadata
 
 ```yaml
 container_name: openclaw-${GROUP}
@@ -176,25 +631,22 @@ restart: on-failure
 user: "${BOT_UID}:${BOT_GID}"
 ```
 
-### 1.5 Per-Group Compose Files
+### 2.5 Per-Group Compose Files
 
-Generate one compose file per group (not one monolith), in a dedicated directory to avoid filename ambiguity with hyphenated group names:
+One compose file per group in a dedicated directory:
 
 ```
-/home/bot/.openclaw/compose/council/docker-compose.yaml
-/home/bot/.openclaw/compose/workers/docker-compose.yaml
-/home/bot/.openclaw/compose/code-sandbox/docker-compose.yaml
+~/.openclaw/compose/council/docker-compose.yaml
+~/.openclaw/compose/workers/docker-compose.yaml
+~/.openclaw/compose/code-sandbox/docker-compose.yaml
 ```
 
-This prevents `docker compose down` on one group from affecting another. Each uses `COMPOSE_PROJECT_NAME=openclaw-{group}`. The compose command becomes:
-
+Each uses `COMPOSE_PROJECT_NAME=openclaw-{group}`. The compose command:
 ```bash
 docker compose -f ~/.openclaw/compose/${group}/docker-compose.yaml -p openclaw-${group} up -d
 ```
 
-### 1.6 Create Container Systemd Unit Template
-
-Replace the blocking compose-up pattern with a proper systemd unit:
+### 2.6 Container Systemd Unit Template
 
 ```ini
 [Unit]
@@ -208,7 +660,6 @@ RemainAfterExit=yes
 User=root
 WorkingDirectory=/home/${SVC_USER}
 
-# Use per-group compose file with deterministic project name
 ExecStart=/usr/bin/docker compose -f .openclaw/compose/%i/docker-compose.yaml -p openclaw-%i up -d --wait
 ExecStop=/usr/bin/docker compose -f .openclaw/compose/%i/docker-compose.yaml -p openclaw-%i down
 ExecStartPost=+/bin/bash -c 'GROUP=%i GROUP_PORT=${PORT} ISOLATION=container RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
@@ -225,57 +676,50 @@ WantedBy=multi-user.target
 
 Key differences from session mode unit:
 - `Type=oneshot` + `RemainAfterExit=yes` (compose up returns immediately with `-d`)
-- `Requires=docker.service` (dependency on Docker daemon)
-- `User=root` (Docker socket requires root; container runs as bot via `user:` in compose)
-- `ExecStop` runs `docker compose down` (clean container lifecycle)
-- `--wait` flag makes `up -d` block until containers are healthy
+- `Requires=docker.service`
+- `User=root` (Docker socket; container runs as bot via compose `user:`)
+- `ExecStop` runs `docker compose down`
+- `--wait` blocks until containers are healthy
 
-### Tests to Update
+### Tests
 
-- Rewrite `test_docker_compose.py` to validate Option A behavior:
-  - No script mounts
-  - No state/log mounts
-  - No secret file mounts
-  - Config, auth-profiles, gateway-token mounts are ro
-  - Workspace mounts are rw
-  - Entrypoint is `openclaw gateway` (not bash wrapper)
-  - `container_name` follows `openclaw-{group}` convention
-  - Environment variables include API keys
-  - Per-group compose files generated
+Rewrite `test_docker_compose.py` for Option A:
+- No script/state/log/secret mounts
+- Config and gateway-token mounts are ro
+- State dir mount is rw (contains auth-profiles symlinks)
+- Workspace mounts are rw
+- No bash wrapper entrypoint
+- `container_name` follows `openclaw-{group}` convention
+- Per-group compose files in `~/.openclaw/compose/{group}/`
+- Environment includes API keys
 
 ### Acceptance Criteria
 
-- [ ] `docker compose -f .openclaw/compose/{group}/docker-compose.yaml config` validates without errors
-- [ ] Systemd unit starts cleanly: `systemctl start openclaw-container-{group}`
-- [ ] Container starts, gateway binds to port, responds to HTTP health check
-- [ ] `systemctl stop` cleanly removes the container
+- [ ] `docker compose -f ~/.openclaw/compose/{group}/docker-compose.yaml config` validates
+- [ ] Container systemd unit starts/stops cleanly
 - [ ] No host scripts, state dirs, or log dirs mounted inside container
+- [ ] `docker inspect` shows only the expected mounts
 - [ ] `bash -n generate-docker-compose.sh` passes
 
 ### Rollback
 
 ```bash
-# Revert compose generator
 git checkout HEAD~1 -- scripts/generate-docker-compose.sh
-# Remove generated compose files
-rm -rf /home/bot/.openclaw/compose/
-# Remove container systemd units
+rm -rf ~/.openclaw/compose/
 rm -f /etc/systemd/system/openclaw-container-*.service
 systemctl daemon-reload
 ```
 
 ---
 
-## Phase 2: Dockerfile + Docker Install
+## Phase 3: Dockerfile + Docker Install
 
 **Goal:** Build `hatchery/agent:latest` image and add Docker to the provisioning pipeline.
 
-### 2.1 Dockerfile
+### 3.1 Dockerfile
 
 ```dockerfile
 # hatchery/agent:latest — Minimal OpenClaw runtime
-# Build: docker build --build-arg BOT_UID=$(id -u bot) --build-arg OPENCLAW_VERSION=latest -t hatchery/agent:latest .
-
 ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-bookworm-slim
 
@@ -283,54 +727,45 @@ ARG BOT_UID=1000
 ARG BOT_GID=${BOT_UID}
 ARG OPENCLAW_VERSION=latest
 
-# System dependencies for OpenClaw + healthcheck
+# System deps for OpenClaw + compose healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    jq \
-    bash \
-    ca-certificates \
+    curl jq bash ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create bot user matching host UID (for bind mount permissions)
+# Create bot user matching host UID (bind mount permissions)
 RUN groupadd -g ${BOT_GID} bot 2>/dev/null || true \
     && useradd -u ${BOT_UID} -g ${BOT_GID} -m -s /bin/bash bot
 
 # Install OpenClaw
 RUN npm install -g openclaw@${OPENCLAW_VERSION}
 
-# Runtime defaults
 USER bot
 WORKDIR /home/bot
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--experimental-sqlite
 
 # Health check for compose --wait
-# Note: GROUP_PORT is a runtime env var (from compose environment:), not a build arg.
-# Shell form HEALTHCHECK required for variable expansion.
+# Shell form required: GROUP_PORT is a runtime env var, not a build arg
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=60s \
     CMD curl -sf http://127.0.0.1:${GROUP_PORT:-18790}/ || exit 1
 
-# Default port overridden by compose command: ["--bind", "loopback", "--port", "${GROUP_PORT}"]
 ENTRYPOINT ["openclaw", "gateway"]
 CMD ["--bind", "loopback", "--port", "18790"]
 ```
 
-**Notes:**
-- `bookworm-slim` not alpine — OpenClaw has native Node modules that need glibc
-- `BOT_UID` build arg ensures container user matches host `bot` user (bind mount perms)
-- `OPENCLAW_VERSION` build arg for pinning across deployments
-- Browser variant deferred to Phase 7 (`hatchery/agent:full` with Xvfb + Chrome)
-- No `DISPLAY` env — headless by default
+Notes:
+- `bookworm-slim` not alpine — native Node modules need glibc
+- `BOT_UID` build arg matches host `bot` user for bind mount perms
+- Browser variant (`hatchery/agent:full`) deferred to Phase 7
+- Default CMD port overridden by compose `command:`
 
-### 2.2 Docker Install in Provisioning
+### 3.2 Docker Install in Provisioning
 
-Add to `provision.sh` (Stage 5: Install tools), gated on `ISOLATION_DEFAULT`:
+Add to `provision.sh` Stage 5, gated on isolation config:
 
 ```bash
-# --- Docker (only for container isolation) ---
 if [ "$ISOLATION_DEFAULT" = "container" ] || group_needs_container; then
-    echo "Installing Docker for container isolation..."
-    # Use official apt repo with version pinning (not curl|sh per AGENTS.md rules)
+    # Official apt repo with version pinning (not curl|sh per AGENTS.md rules)
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
@@ -339,354 +774,189 @@ if [ "$ISOLATION_DEFAULT" = "container" ] || group_needs_container; then
       > /etc/apt/sources.list.d/docker.list
     apt-get update
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-    # Add bot user to docker group (allows docker commands without sudo)
+
     usermod -aG docker "$USERNAME"
-    # Enable Docker service
-    systemctl enable docker
-    systemctl start docker
-    
-    # Build the base image
+    systemctl enable docker && systemctl start docker
+
+    # Configure log rotation
+    cat > /etc/docker/daemon.json <<'DAEMON'
+{
+    "log-driver": "json-file",
+    "log-opts": { "max-size": "50m", "max-file": "3" }
+}
+DAEMON
+    systemctl restart docker
+
+    # Build base image
     docker build \
         --build-arg BOT_UID="$(id -u "$USERNAME")" \
         --build-arg OPENCLAW_VERSION="$(openclaw --version 2>/dev/null || echo latest)" \
         -t hatchery/agent:latest \
-        -f /opt/hatchery/Dockerfile \
-        /opt/hatchery/
+        -f /opt/hatchery/Dockerfile /opt/hatchery/
 fi
-```
-
-### 2.3 Image Build Verification
-
-```bash
-# Verify image
-docker run --rm hatchery/agent:latest --version
-# Expected: openclaw X.Y.Z
 ```
 
 ### Acceptance Criteria
 
 - [ ] `docker build` succeeds with pinned OpenClaw version
-- [ ] Container starts and `openclaw gateway --version` works
-- [ ] Image size under 500MB (slim base, no browser)
+- [ ] `docker run --rm hatchery/agent:latest --version` returns version
+- [ ] Image size under 500MB
 - [ ] Container runs as `bot` user (UID matches host)
-- [ ] Healthcheck passes when gateway is running
+- [ ] Compose healthcheck passes when gateway is running
+- [ ] Log rotation configured (50MB × 3)
 
 ### Rollback
 
 ```bash
-# Remove image
 docker rmi hatchery/agent:latest
-# Docker itself stays installed (no harm)
+# Docker itself stays installed
 ```
 
 ---
 
-## Phase 3: Health Check Abstraction
+## Phase 4: Health Check Abstraction
 
-**Goal:** Health check scripts work identically for session and container modes.
+**Goal:** Health check scripts work identically for session and container modes via shared functions.
 
-### 3.1 Service Restart Abstraction
+### 4.1 Service Abstraction Functions
 
 Add to `lib-health-check.sh`:
 
 ```bash
-# Restart the OpenClaw service for a given group.
-# Handles both session mode (systemd) and container mode (docker compose).
+# --- Isolation-aware service management ---
+# All health check consumers use these functions — never direct systemctl/docker calls.
+
 hc_restart_service() {
     local group="${1:?Usage: hc_restart_service <group>}"
     local isolation="${ISOLATION:-session}"
-
     case "$isolation" in
         container)
             docker compose -f "/home/${USERNAME}/.openclaw/compose/${group}/docker-compose.yaml" \
-                -p "openclaw-${group}" restart
-            ;;
-        session|*)
-            systemctl restart "openclaw-${group}"
-            ;;
+                -p "openclaw-${group}" restart ;;
+        *)  systemctl restart "openclaw-${group}" ;;
     esac
 }
 
-# Check if the OpenClaw service for a group is running.
 hc_is_service_active() {
     local group="${1:?Usage: hc_is_service_active <group>}"
     local isolation="${ISOLATION:-session}"
-
     case "$isolation" in
         container)
-            docker inspect --format='{{.State.Running}}' "openclaw-${group}" 2>/dev/null | grep -q 'true'
-            ;;
-        session|*)
-            systemctl is-active --quiet "openclaw-${group}"
-            ;;
+            docker inspect --format='{{.State.Running}}' "openclaw-${group}" 2>/dev/null | grep -q 'true' ;;
+        *)  systemctl is-active --quiet "openclaw-${group}" ;;
     esac
 }
 
-# Get recent logs for a group's service.
 hc_service_logs() {
     local group="${1:?Usage: hc_service_logs <group>}"
     local lines="${2:-50}"
     local isolation="${ISOLATION:-session}"
-
     case "$isolation" in
         container)
             docker compose -f "/home/${USERNAME}/.openclaw/compose/${group}/docker-compose.yaml" \
-                -p "openclaw-${group}" logs --tail="$lines" 2>/dev/null
-            ;;
-        session|*)
-            journalctl -u "openclaw-${group}" --no-pager -n "$lines" 2>/dev/null
-            ;;
+                -p "openclaw-${group}" logs --tail="$lines" 2>/dev/null ;;
+        *)  journalctl -u "openclaw-${group}" --no-pager -n "$lines" 2>/dev/null ;;
     esac
 }
 
-# Stop the service for a group (used during safe mode takeover).
 hc_stop_service() {
     local group="${1:?Usage: hc_stop_service <group>}"
     local isolation="${ISOLATION:-session}"
-
     case "$isolation" in
         container)
             docker compose -f "/home/${USERNAME}/.openclaw/compose/${group}/docker-compose.yaml" \
-                -p "openclaw-${group}" down
-            ;;
-        session|*)
-            systemctl stop "openclaw-${group}"
-            ;;
+                -p "openclaw-${group}" down ;;
+        *)  systemctl stop "openclaw-${group}" ;;
     esac
 }
 ```
 
-### 3.2 E2E Health Check for Containers
+### 4.2 E2E Health Check for Containers
 
-`gateway-e2e-check.sh` needs to reach the gateway inside the container. Since containers use `network_mode: host` by default, the gateway is reachable at `localhost:${GROUP_PORT}` — no change needed. For `internal`/`none` network modes, E2E check uses `docker exec`:
+For `network_mode: host` — gateway reachable at `localhost:${GROUP_PORT}`, no change.
+For `internal`/`none` modes — reach via `docker exec`:
 
 ```bash
-# In gateway-e2e-check.sh
 if [ "$ISOLATION" = "container" ] && [ "$NETWORK_MODE" != "host" ]; then
-    # Can't reach container port from host — exec into container
     response=$(docker exec "openclaw-${GROUP}" \
         curl -sf "http://127.0.0.1:${GROUP_PORT}/api/health" 2>/dev/null)
 else
-    # Host network or session mode — reach directly
     response=$(curl -sf "http://127.0.0.1:${GROUP_PORT}/api/health" 2>/dev/null)
 fi
 ```
 
-### 3.3 Safe Mode Handler Adaptation
+### 4.3 Update Existing Consumers
 
-`safe-mode-handler.sh` already has container stubs (lines 298-309). Expand to use the new abstractions:
+Replace all direct `systemctl`/`docker` calls in health check and safe mode scripts:
 
-```bash
-# Replace direct docker/systemctl calls with:
-hc_stop_service "$GROUP"
-# ... recovery logic ...
-hc_restart_service "$GROUP"
-hc_is_service_active "$GROUP" || handle_failure
-```
+| Script | Replace | With |
+|--------|---------|------|
+| `safe-mode-handler.sh` (line 298-309) | `docker restart`, `docker inspect` | `hc_restart_service`, `hc_is_service_active` |
+| `try-full-config.sh` | `systemctl restart openclaw-${GROUP}` | `hc_restart_service "$GROUP"` |
+| `gateway-health-check.sh` | direct service checks | `hc_is_service_active "$GROUP"` |
 
-### 3.4 Health Check Timeouts
+### 4.4 Health Check Timeouts
 
 | Check | Timeout | Retries | Escalation |
 |-------|---------|---------|------------|
 | HTTP health (compose `HEALTHCHECK`) | 5s | 3 | Container marked unhealthy |
 | HTTP health (`gateway-health-check.sh`) | 10s | 3 | Marks gateway unhealthy |
 | E2E magic word (`gateway-e2e-check.sh`) | 60s | 1 | Triggers safe mode |
-| `docker compose restart` | 30s | — | Systemd RestartSec kicks in |
-| `docker compose up --wait` | 180s | — | TimeoutStartSec, then safe mode |
+| `docker compose restart` | 30s | — | Systemd `RestartSec` kicks in |
+| `docker compose up --wait` | 180s | — | `TimeoutStartSec`, then safe mode |
 
 ### Acceptance Criteria
 
 - [ ] `hc_restart_service` works for both `ISOLATION=session` and `ISOLATION=container`
 - [ ] `hc_is_service_active` returns correct status for both modes
-- [ ] `hc_service_logs` returns recent logs for both modes
+- [ ] No direct `systemctl`/`docker` calls remain in health check or safe mode scripts
 - [ ] E2E health check passes for container with `network_mode: host`
 - [ ] E2E health check passes for container with `internal` network (via `docker exec`)
-- [ ] Safe mode handler uses abstraction — no direct `systemctl`/`docker` calls in handler
-- [ ] Identical pass/fail semantics: same failure modes trigger same recovery paths regardless of isolation mode
+- [ ] Identical pass/fail semantics: same failures trigger same recovery regardless of mode
 
 ### Rollback
 
 ```bash
-# Revert lib-health-check.sh
-git checkout HEAD~1 -- scripts/lib-health-check.sh
-# Health check and safe mode fall back to session-mode-only behavior
+git checkout HEAD~1 -- scripts/lib-health-check.sh scripts/safe-mode-handler.sh \
+    scripts/try-full-config.sh scripts/gateway-health-check.sh scripts/gateway-e2e-check.sh
 ```
 
 ---
 
-## Phase 4: Port Allocator + First Live Test
+## Phase 5: First Live Test
 
-**Goal:** Deterministic, collision-free port assignment across all group types.
+**Goal:** Validate Phases 1-4 on a real droplet.
 
-### 4.1 Port Allocation Contract
+### Test Habitat
 
-**Algorithm:**
-1. Collect all isolation groups (session + container) from `ISOLATION_GROUPS`
-2. Sort alphabetically for deterministic ordering
-3. Assign ports starting at `BASE_PORT=18790` (18789 reserved for non-isolated default)
-4. Same input → same ports (idempotent)
-5. Port map written to `/etc/openclaw-ports.env` as source of truth
+Use `habitat-isolation-container.json` example with real tokens. Include at least one session group and one container group (mixed mode).
 
-```bash
-# /etc/openclaw-ports.env (generated by build-full-config.sh)
-# Source of truth for port assignments across all isolation modes.
-# Regenerated on every config build. Same input = same output.
-OPENCLAW_PORT_council=18790
-OPENCLAW_PORT_workers=18791
-OPENCLAW_PORT_sandbox=18792
-```
+### Test Sequence
 
-**Consumers:**
-- `generate-session-services.sh` reads `OPENCLAW_PORT_{group}` instead of computing `BASE_PORT + offset`
-- `generate-docker-compose.sh` reads `OPENCLAW_PORT_{group}` instead of computing `18789 + offset`
-- Both generators are now stateless — port allocation is centralized
-
-### 4.2 Port Allocator Implementation
-
-Add to `build-full-config.sh`:
-
-```bash
-# --- Global port assignment ---
-# Sort groups alphabetically for deterministic assignment.
-# BASE_PORT=18790 (18789 reserved for non-isolated single-instance mode).
-allocate_ports() {
-    local base_port=18790
-    local port_file="/etc/openclaw-ports.env"
-    local groups_sorted
-    
-    # Sort groups alphabetically
-    IFS=',' read -ra groups_array <<< "$ISOLATION_GROUPS"
-    groups_sorted=($(printf '%s\n' "${groups_array[@]}" | sort))
-    
-    # Write port map
-    echo "# Generated by build-full-config.sh — do not edit" > "$port_file"
-    echo "# $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$port_file"
-    
-    local offset=0
-    for group in "${groups_sorted[@]}"; do
-        local port=$((base_port + offset))
-        echo "OPENCLAW_PORT_${group}=${port}" >> "$port_file"
-        offset=$((offset + 1))
-    done
-    
-    chmod 644 "$port_file"
-}
-```
-
-### 4.3 First Live Droplet Test
-
-**Test habitat:** Use existing `habitat-isolation-container.json` example with real tokens.
-
-**Test sequence:**
-1. Provision fresh droplet with Docker + container isolation habitat
-2. Verify: `docker compose config` validates for each group
-3. Verify: `systemctl start openclaw-container-{group}` succeeds
-4. Verify: Container is running and healthy
-5. Verify: HTTP health check passes from host
-6. Verify: E2E magic word test passes
-7. Verify: `systemctl stop` cleanly removes container
-8. Verify: Port assignments are correct and don't collide
-9. Verify: No host scripts/state mounted inside container (`docker inspect` mounts check)
+1. Provision fresh droplet with Docker + mixed isolation habitat
+2. Verify: `/etc/openclaw-ports.env` has all groups with unique ports
+3. Verify: `~/.openclaw/configs/{group}/openclaw.session.json` exists for ALL groups
+4. Verify: auth-profiles symlinked in state dirs for ALL groups
+5. Verify: safeguard `.path` + `.service` exist for ALL groups (session AND container)
+6. Verify: `docker compose config` validates for each container group
+7. Verify: `systemctl start openclaw-container-{group}` succeeds
+8. Verify: container is running and healthy
+9. Verify: HTTP health check passes from host
+10. Verify: E2E magic word test passes
+11. Verify: `systemctl stop` cleanly removes container
+12. Verify: session groups still work as before (regression)
+13. Verify: `docker inspect` shows no host scripts/state/log mounts
+14. Verify: restarting one group doesn't affect another (cross-mode isolation)
 
 ### Acceptance Criteria
 
-- [ ] Port allocator produces identical output for identical input
-- [ ] No port collisions between session and container groups
-- [ ] Port file at `/etc/openclaw-ports.env` is source of truth
-- [ ] Both generators read from port file, not compute locally
-- [ ] Live test passes all 9 verification steps
-- [ ] Repeated `build-full-config.sh` runs don't change ports (idempotent)
+- [ ] All 14 verification steps pass
+- [ ] No regressions in session isolation mode
+- [ ] Safe mode triggers correctly for a deliberately broken container group
 
 ### Rollback
 
-```bash
-# Revert port allocator
-git checkout HEAD~1 -- scripts/build-full-config.sh
-# Revert generator changes
-git checkout HEAD~1 -- scripts/generate-session-services.sh scripts/generate-docker-compose.sh
-# Remove port file
-rm -f /etc/openclaw-ports.env
-```
-
----
-
-## Phase 5: Mixed Mode
-
-**Goal:** Session groups (systemd) and container groups (Docker) coexist on the same droplet.
-
-### 5.1 Mixed Mode Filtering
-
-`build-full-config.sh` determines which generator to call per group:
-
-```bash
-for group in "${ALL_GROUPS[@]}"; do
-    group_isolation=$(get_group_isolation "$group")
-    case "$group_isolation" in
-        container)
-            # Will be handled by generate-docker-compose.sh
-            container_groups+=("$group")
-            ;;
-        session|*)
-            # Will be handled by generate-session-services.sh
-            session_groups+=("$group")
-            ;;
-    esac
-done
-
-# Generate session services for session groups
-if [ ${#session_groups[@]} -gt 0 ]; then
-    ISOLATION_GROUPS=$(IFS=','; echo "${session_groups[*]}") \
-        generate-session-services.sh
-fi
-
-# Generate compose files for container groups
-if [ ${#container_groups[@]} -gt 0 ]; then
-    ISOLATION_GROUPS=$(IFS=','; echo "${container_groups[*]}") \
-        generate-docker-compose.sh
-fi
-```
-
-### 5.2 Service Naming Convention
-
-| Mode | Service Name | Compose Project |
-|------|-------------|-----------------|
-| Session | `openclaw-{group}.service` | — |
-| Container | `openclaw-container-{group}.service` | `openclaw-{group}` |
-| Safe mode (session) | `openclaw-safeguard-{group}.service` | — |
-| Safe mode (container) | `openclaw-safeguard-{group}.service` | — |
-
-Safe mode always runs on the host (not in container) — it uses the session-mode systemd pattern regardless of the group's normal isolation mode.
-
-### 5.3 Cross-Mode Restart Safety
-
-Restarting one group must not affect another, regardless of mode:
-
-- Session groups: `systemctl restart openclaw-{group}` (already isolated)
-- Container groups: `docker compose -p openclaw-{group} restart` (project name isolation)
-- Never use `docker compose down` without `-p` (would match any compose file in cwd)
-
-### Acceptance Criteria
-
-- [ ] Mixed habitat with session + container groups provisions correctly
-- [ ] Session group restart doesn't affect container group and vice versa
-- [ ] Safe mode for a container group runs on host (not in container)
-- [ ] Port assignments don't collide across modes
-- [ ] `systemctl list-units "openclaw-*"` shows both session and container units
-
-### Rollback
-
-```bash
-# Revert to session-only mode
-git checkout HEAD~1 -- scripts/build-full-config.sh
-# Stop and remove container services
-for f in /etc/systemd/system/openclaw-container-*.service; do
-    systemctl stop "$(basename "$f" .service)" 2>/dev/null || true
-    rm -f "$f"
-done
-systemctl daemon-reload
-# Remove compose files
-rm -rf /home/bot/.openclaw/compose/
-```
+Full rollback procedure in [Rollback Procedures](#rollback-procedures).
 
 ---
 
@@ -694,48 +964,41 @@ rm -rf /home/bot/.openclaw/compose/
 
 **Goal:** Three network modes with correct semantics.
 
-### 6.1 Network Mode Definitions
+### Network Mode Definitions
 
-| Mode | Docker Implementation | Egress | LLM API Access | Loopback | Use Case |
-|------|----------------------|--------|----------------|----------|----------|
+| Mode | Docker Implementation | Egress | LLM APIs | Loopback | Use Case |
+|------|----------------------|--------|----------|----------|----------|
 | `host` | `network_mode: host` | Full | Yes | Yes | Default — same as session mode |
-| `internal` | Custom bridge, no default route | None | No (unless proxy) | Yes | Code sandbox with shared FS IPC |
-| `none` | Custom bridge, iptables egress block | Blocked | No | Yes | Maximum isolation, shared FS only |
+| `internal` | Custom bridge, `internal: true` | None | No | Yes | Code sandbox with shared FS IPC |
+| `none` | Custom bridge, no IP masquerade | Blocked | No | Yes | Maximum isolation, shared FS only |
 
-**Critical:** `none` is NOT Docker's `network_mode: none` which removes the loopback interface entirely, making the gateway unable to bind. Instead, it's an isolated bridge with iptables rules blocking all egress.
+**Critical:** `none` is NOT Docker's `network_mode: none` (kills loopback). It's an isolated bridge with egress blocked.
 
-### 6.2 Network Implementation
+### Implementation
 
 ```yaml
-# .openclaw/compose/{group}/docker-compose.yaml
-
-# For host mode:
+# host mode (default):
 services:
   council:
     network_mode: host
-    # No port mapping needed — gateway binds directly on host
 
-# For internal mode:
+# internal mode:
 services:
   sandbox:
-    networks:
-      - isolated-sandbox
-    ports:
-      - "${GROUP_PORT}:${GROUP_PORT}"  # Expose gateway port to host for health checks
+    networks: [isolated-sandbox]
+    ports: ["${GROUP_PORT}:${GROUP_PORT}"]  # Expose to host for health checks
 
 networks:
   isolated-sandbox:
     driver: bridge
-    internal: true  # No external access
+    internal: true
 
-# For none mode:
+# none mode:
 services:
   lockdown:
-    networks:
-      - blocked-lockdown
-    ports:
-      - "${GROUP_PORT}:${GROUP_PORT}"
-    dns: []  # No DNS resolution
+    networks: [blocked-lockdown]
+    ports: ["${GROUP_PORT}:${GROUP_PORT}"]
+    dns: []
 
 networks:
   blocked-lockdown:
@@ -745,146 +1008,90 @@ networks:
       com.docker.network.bridge.enable_ip_masquerade: "false"
 ```
 
-For `internal` and `none` modes, the gateway port must be explicitly mapped so the host health check can reach it.
-
-### 6.3 DNS Behavior
-
-| Mode | DNS | Reason |
-|------|-----|--------|
-| `host` | Host DNS | Full network access |
-| `internal` | None | Bridge `internal: true` blocks external DNS |
-| `none` | None | Explicitly blocked |
+For `internal`/`none`: gateway port explicitly mapped so host health check can reach it.
 
 ### Acceptance Criteria
 
-- [ ] `host` mode: container can reach external APIs
-- [ ] `internal` mode: container cannot reach external IPs, loopback works, health check works from host
-- [ ] `none` mode: container cannot reach anything external, loopback works, health check works from host
-- [ ] All three modes pass E2E health check (gateway responds to magic word)
-- [ ] `internal`/`none` agents fail gracefully on LLM calls (return error, don't crash)
+- [ ] `host`: container reaches external APIs
+- [ ] `internal`: no external access, loopback works, health check works from host
+- [ ] `none`: no external access, loopback works, health check works from host
+- [ ] `internal`/`none` agents fail gracefully on LLM calls (error, not crash)
 
 ### Rollback
 
-```bash
-# Revert to host-only networking
-# Edit compose files to remove network definitions
-# Or regenerate from config
-```
+Regenerate compose files with `host` network only.
 
 ---
 
-## Phase 7: Resource Limits + Security Hardening
+## Phase 7: Security Hardening + Resource Limits
 
 **Goal:** Enforce resource boundaries and minimize container attack surface.
 
-### 7.1 Resource Limits
+### 7.1 Security Baseline (All Containers)
 
-From habitat config (`resources.memory`, `resources.cpu`):
-
-```yaml
-services:
-  sandbox:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "0.5"
-        reservations:
-          memory: 256M
-          cpus: "0.25"
-```
-
-### 7.2 Security Baseline (All Containers)
-
-Applied by default to every container service:
+Applied by default to every container:
 
 ```yaml
-services:
-  any-group:
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:size=256M
-      - /run:size=64M
-    # Workspace mount is rw (agents need to write memory/transcripts)
-    # Config/auth mounts are ro
+cap_drop: [ALL]
+security_opt: ["no-new-privileges:true"]
+read_only: true
+tmpfs:
+  - /tmp:size=256M
+  - /run:size=64M
 ```
 
-**`read_only: true` exceptions:**
-- Agent workspace bind mounts are `rw` (agents write `MEMORY.md`, transcripts, etc.)
-- Shared workspace is `rw`
-- Session state dir is `rw` (transcripts)
-- `/tmp` and `/run` as tmpfs
+`read_only: true` exceptions (bind mounts):
+- Agent workspace: `rw` (agents write memory, transcripts)
+- Shared workspace: `rw`
+- Session state dir: `rw` (transcripts)
 
-### 7.3 Per-Group Secret Isolation
+### 7.2 Resource Limits
 
-Each container group gets its own gateway token and auth-profiles:
+From habitat config:
 
-```bash
-# In build-full-config.sh
-for group in "${CONTAINER_GROUPS[@]}"; do
-    # Generate per-group gateway token (not shared across groups)
-    openssl rand -hex 32 > "${CONFIG_DIR}/${group}/gateway-token.txt"
-    chmod 600 "${CONFIG_DIR}/${group}/gateway-token.txt"
-done
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: ${RESOURCES_MEMORY}
+      cpus: "${RESOURCES_CPU}"
+    reservations:
+      memory: ${RESOURCES_MEMORY_HALF}
+      cpus: "${RESOURCES_CPU_HALF}"
 ```
 
-File permissions check at container startup (in compose healthcheck or entrypoint wrapper):
-```bash
-# Verify secret file permissions before starting
-[ "$(stat -c %a /home/bot/.openclaw/gateway-token.txt)" = "600" ] || exit 1
-```
-
-### 7.4 Browser Variant (Future)
-
-For agents needing browser tools (`hatchery/agent:full`):
+### 7.3 Browser Variant (Future)
 
 ```dockerfile
 FROM hatchery/agent:latest
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    xvfb chromium fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
+    xvfb chromium fonts-liberation && rm -rf /var/lib/apt/lists/*
 ENV DISPLAY=:99
-# Xvfb started by entrypoint wrapper
 ```
-
-Deferred — not part of the initial rollout.
 
 ### Acceptance Criteria
 
 - [ ] `docker inspect` shows `CapDrop: [ALL]`, `SecurityOpt: [no-new-privileges]`, `ReadonlyRootfs: true`
-- [ ] Container cannot write to root filesystem (except bind mounts and tmpfs)
-- [ ] Memory limits enforced: container OOM-killed at limit
-- [ ] CPU limits enforced: container throttled at limit
-- [ ] Each container group has its own gateway token
-- [ ] Gateway token file permissions are 600 inside container
+- [ ] Container cannot write to root filesystem
+- [ ] Memory/CPU limits enforced and observable via `docker stats`
 - [ ] Resource-constrained container still passes health check under normal load
 
 ### Rollback
 
-```bash
-# Remove security options from compose files (regenerate without hardening)
-# Resource limits can be removed by clearing resources in habitat config
-```
+Regenerate compose files without security options / resource limits.
 
 ---
 
 ## Config Hot-Reload
 
-When the host config changes (e.g., agent model update, new auth profile):
-
 ```
 Host: build-full-config.sh regenerates configs
   → Writes new openclaw.session.json to ~/.openclaw/configs/{group}/
   → For session mode: SIGUSR1 to gateway process (in-place reload)
-  → For container mode: docker compose -p openclaw-{group} restart
-    → Container stops, restarts with new config (bind-mounted, so already updated)
+  → For container mode: docker compose restart (container restarts, reads new bind-mounted config)
 ```
 
-This is the same pattern as session mode — the host is the config authority. Containers are stateless with respect to config.
+Use `docker compose restart` for config changes (keeps container, picks up new bind-mounted files). Use `docker compose up --force-recreate` for image updates (new container from new image).
 
 ---
 
@@ -894,13 +1101,13 @@ This is the same pattern as session mode — the host is the config authority. C
 
 | Phase | Rollback Command | Impact |
 |-------|-----------------|--------|
-| Phase 1 | `git checkout HEAD~1 -- scripts/generate-docker-compose.sh` | Reverts to Option B scaffolding |
-| Phase 2 | `docker rmi hatchery/agent:latest` | Removes image, Docker stays |
-| Phase 3 | `git checkout HEAD~1 -- scripts/lib-health-check.sh` | Falls back to session-only health |
-| Phase 4 | `rm /etc/openclaw-ports.env` + revert generators | Back to local port computation |
-| Phase 5 | Remove `openclaw-container-*.service`, revert `build-full-config.sh` | Session-only mode |
-| Phase 6 | Regenerate compose files with `host` network only | All containers on host network |
-| Phase 7 | Regenerate compose files without security opts | Containers run without hardening |
+| 1 | Revert `lib-isolation.sh`, `build-full-config.sh`, both generators | Back to pre-refactor |
+| 2 | Revert `generate-docker-compose.sh`, remove compose dirs | Reverts to Option B scaffolding |
+| 3 | `docker rmi hatchery/agent:latest` | Image removed, Docker stays |
+| 4 | Revert health check scripts | Falls back to session-only health |
+| 5 | — | Test phase, nothing to revert |
+| 6 | Regenerate compose with `host` network | All containers on host network |
+| 7 | Regenerate compose without security opts | No hardening |
 
 ### Full Rollback (Container → Session)
 
@@ -914,18 +1121,15 @@ done
 systemctl daemon-reload
 
 # 2. Remove compose files
-rm -rf /home/bot/.openclaw/compose/
+rm -rf ~/.openclaw/compose/
 
-# 3. Remove port file
-rm -f /etc/openclaw-ports.env
+# 3. Convert container groups to session in habitat config
+# Edit habitat JSON: isolation: "container" → isolation: "session"
 
-# 4. Convert container groups to session groups in habitat config
-# Edit habitat JSON: change isolation: "container" → isolation: "session"
-
-# 5. Regenerate session services
+# 4. Regenerate
 build-full-config.sh
 
-# 6. Start session services
+# 5. Start session services
 for group in $(echo "$ISOLATION_GROUPS" | tr ',' '\n'); do
     systemctl start "openclaw-${group}"
 done
@@ -938,312 +1142,76 @@ done
 ### Image Updates
 
 ```bash
-# Rebuild with new OpenClaw version
 docker build \
     --build-arg BOT_UID=$(id -u bot) \
     --build-arg OPENCLAW_VERSION=$(openclaw --version) \
     -t hatchery/agent:latest \
-    -f /opt/hatchery/Dockerfile \
-    /opt/hatchery/
+    -f /opt/hatchery/Dockerfile /opt/hatchery/
 
-# Rolling restart per group
-for group in "${CONTAINER_GROUPS[@]}"; do
-    docker compose -f ".openclaw/compose/${group}/docker-compose.yaml" -p "openclaw-${group}" up -d --force-recreate
-    sleep 10  # Allow health check to pass before next group
+# Rolling restart (force-recreate for image update)
+for group in $(get_groups_by_type "container"); do
+    docker compose -f "~/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" up -d --force-recreate
+    sleep 10  # Allow health check before next group
 done
 ```
 
 ### Prune Policy
 
-Add to the sync timer or a dedicated cron:
-
 ```bash
-# Weekly: remove dangling images and stopped containers
+# Weekly cron: remove old images and stopped containers
 docker image prune -f --filter "until=168h"
 docker container prune -f --filter "until=168h"
-```
-
-### Image Staleness Detection
-
-```bash
-# Check image age
-image_created=$(docker inspect --format='{{.Created}}' hatchery/agent:latest 2>/dev/null)
-# Compare with current OpenClaw version
-# Alert if image is >7 days old and OpenClaw has been updated
 ```
 
 ---
 
 ## Debugging and Incident Triage
 
-### Quick Diagnostic Commands
-
 ```bash
 # Container status
 docker ps --filter "name=openclaw-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-# Container logs (last 50 lines)
+# Container logs
 docker compose -p openclaw-council logs --tail=50
 
-# Container resource usage
-docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" $(docker ps -q --filter "name=openclaw-")
+# Resource usage
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
 
-# Container mounts (verify no Option B artifacts)
-docker inspect openclaw-council --format='{{range .Mounts}}{{.Source}} → {{.Destination}} ({{.Mode}}){{println}}{{end}}'
-
-# Container network
-docker inspect openclaw-council --format='{{range .NetworkSettings.Networks}}{{.NetworkID}} {{.IPAddress}}{{end}}'
+# Verify mounts (should see NO host scripts/state/logs)
+docker inspect openclaw-council \
+    --format='{{range .Mounts}}{{.Source}} → {{.Destination}} ({{.Mode}}){{println}}{{end}}'
 
 # Health check status
 docker inspect openclaw-council --format='{{.State.Health.Status}}'
 
-# Exec into container for debugging
-docker exec -it openclaw-council bash
-
-# Port assignments
+# Port assignments (single source of truth)
 cat /etc/openclaw-ports.env
 
-# State machine status for a group
+# State machine
 openclaw-state.sh status --group council
+
+# Exec into container
+docker exec -it openclaw-council bash
 ```
-
-### Log Retention
-
-Docker logs follow the daemon's default log driver. Configure in `/etc/docker/daemon.json`:
-
-```json
-{
-    "log-driver": "json-file",
-    "log-opts": {
-        "max-size": "50m",
-        "max-file": "3"
-    }
-}
-```
-
-This gives 150MB of logs per container (3 × 50MB rotation), consistent with the systemd journal retention for session mode.
 
 ---
 
 ## Open Questions
 
-1. **Shared filesystem race conditions:** Multiple containers writing to `~/clawd/shared/` simultaneously. Session mode has the same risk. Mitigation: OpenClaw's file locking should handle this, but worth a stress test in Phase 5.
+1. **Shared filesystem race conditions** — Multiple containers writing to `~/clawd/shared/`. Same risk as session mode. OpenClaw's file locking should handle it; stress test in Phase 5.
 
-2. **Browser in containers:** Deferred to Phase 7 `full` variant. Needs Xvfb + Chrome + significant image size increase. Consider: is it worth the complexity, or should browser agents always run in session mode?
+2. **`exec` tool inside containers** — Agents running shell commands get the container's toolset (minimal). Options: (a) fat image, (b) per-group image variants, (c) sidecar containers. Decide in Phase 3.
 
-3. **Dropbox sync for container transcripts:** Session state lives at `~/.openclaw-sessions/{group}/` on the host (bind-mounted into container). The sync script fix (commit `c724c76`) already handles this path, so container transcripts will be synced. Verify on first live test.
+3. **Dropbox sync for container transcripts** — State at `~/.openclaw-sessions/{group}/` on host (bind-mounted). Sync script fix (`c724c76`) handles this. Verify in Phase 5.
 
-4. **Safe mode in container context:** When a container group enters safe mode, the safe-mode bot runs on the host (session mode), not in a container. This means safe mode always works even if Docker is broken. Confirm this is the right design.
+4. **Safe mode runs on host** — When container group enters safe mode, the safe-mode bot runs on host (session mode), not in container. This means safe mode works even if Docker is broken. Confirm this is right.
 
-5. **Multi-host (future):** Docker Swarm or Kubernetes for `droplet` isolation level. Out of scope for v1 but the host-orchestrated architecture is a good foundation — the host just becomes a control plane node.
+5. **Graceful shutdown** — Docker sends SIGTERM then SIGKILL after `stop_grace_period` (10s). Verify OpenClaw shuts down in <10s or increase `stop_grace_period`.
 
-6. **OpenClaw `exec` tool inside containers:** Agents with `exec` capability run shell commands. In session mode this is on the host. In container mode, commands run inside the container — which is the whole point of isolation, but the container needs the tools the agent expects (git, python, etc.). The base image is minimal. Options: (a) fat image with common tools, (b) per-group image variants, (c) sidecar tool containers. Decide in Phase 2.
+6. **Browser in containers** — Deferred to Phase 7 `full` variant. Worth the complexity, or should browser agents always run in session mode?
 
-7. **Container restart vs recreate:** `docker compose restart` keeps the same container (preserves tmpfs state). `docker compose up --force-recreate` creates a fresh container. For config hot-reload, `restart` is sufficient. For image updates, `up --force-recreate` is required. Document which to use when.
-
-8. **Graceful shutdown:** OpenClaw gateway handles SIGTERM for graceful shutdown. Docker sends SIGTERM then SIGKILL after `stop_grace_period` (default 10s). Verify OpenClaw shuts down within 10s, or increase `stop_grace_period` in compose.
-
----
-
-## Architecture Review: Single Source of Truth
-
-### Current SSOT Violations (must fix)
-
-The codebase has **6 duplicated concerns** across isolation types that the plan must consolidate:
-
-#### 1. Agent-per-group filtering (duplicated 3×)
-
-The pattern "iterate `AGENT{N}_ISOLATION_GROUP`, match against group name, check `AGENT{N}_ISOLATION`" is implemented independently in:
-- `generate-session-services.sh` (lines 85-96)
-- `generate-docker-compose.sh` (lines 68-82)
-- `generate-docker-compose.sh` again in `get_group_network()`, `get_group_memory()`, `get_group_cpu()`, `get_group_agent_names()` (lines 110-170)
-
-**Fix:** Create `lib-isolation.sh` with shared functions:
-```bash
-# Get agent IDs belonging to a group
-get_group_agents() { local group="$1"; ... }
-# Get first network mode for a group
-get_group_network() { local group="$1"; ... }
-# Get resource limits for a group
-get_group_resources() { local group="$1"; ... }
-# Filter groups by isolation type
-get_groups_by_type() { local type="$1"; ... }  # "session" or "container"
-```
-
-Both generators source `lib-isolation.sh` instead of reimplementing filtering.
-
-#### 2. OpenClaw config generation (should be shared, currently session-only)
-
-`generate-session-services.sh` calls `generate-config.sh --mode session` to produce `openclaw.session.json`. `generate-docker-compose.sh` **doesn't generate a config at all** — it just mounts a `./config/${group}` directory and hopes something else fills it.
-
-**Fix:** `build-full-config.sh` generates `openclaw.session.json` for **all** groups regardless of isolation type, before dispatching to mode-specific generators. The container generator simply references the already-generated config. This makes `generate-config.sh --mode session` the single source of truth for per-group configs, used by both modes.
-
-```bash
-# In build-full-config.sh — unified config generation
-for group in "${ALL_GROUPS[@]}"; do
-    generate-config.sh --mode session \
-        --group "$group" \
-        --agents "$(get_group_agents "$group")" \
-        --port "$(get_group_port "$group")" \
-        --gateway-token "$(generate_group_token "$group")" \
-        > "${CONFIG_BASE}/${group}/openclaw.session.json"
-done
-
-# THEN dispatch to mode-specific generators (which only create service definitions)
-generate-session-services.sh   # → systemd units only
-generate-docker-compose.sh     # → compose files only
-```
-
-#### 3. Auth-profiles handling (duplicated 3×)
-
-Auth-profiles are created/managed in three places:
-- `build-full-config.sh` creates `agents/main/agent/auth-profiles.json` then symlinks to `agents/agent{N}/agent/`
-- `generate-session-services.sh` copies auth-profiles into `${state_dir}/agents/agent{N}/agent/`
-- The plan has container mode bind-mounting auth-profiles from `configs/{group}/`
-
-**Fix:** `build-full-config.sh` writes auth-profiles to the canonical location for each group:
-```bash
-# Single auth-profiles write function
-setup_group_auth_profiles() {
-    local group="$1"
-    local config_dir="${CONFIG_BASE}/${group}"
-    # Auth-profiles are per-agent within each group's config dir
-    for agent_id in $(get_group_agents "$group"); do
-        local auth_dir="${config_dir}/agents/${agent_id}/agent"
-        ensure_bot_dir "$auth_dir" 700
-        # Symlink to master auth-profiles (single source)
-        ln -sf "${HOME_DIR}/.openclaw/agents/main/agent/auth-profiles.json" \
-            "${auth_dir}/auth-profiles.json"
-    done
-}
-```
-
-Both session services and container compose reference the same `configs/{group}/` directory. Session mode uses `OPENCLAW_STATE_DIR` pointed at it. Container mode bind-mounts it.
-
-#### 4. Port assignment (duplicated 2×, different base ports)
-
-- `generate-session-services.sh`: `BASE_PORT=18790`, offset by group index within session groups
-- `generate-docker-compose.sh`: `18789 + offset` within container groups
-- Different base ports, different ordering = guaranteed collision in mixed mode
-
-**Fix:** Already in the plan (Phase 4) — centralized port allocator in `build-full-config.sh` writing `/etc/openclaw-ports.env`. Both generators read from this file. **Neither generator computes ports.** Move this to Phase 0/pre-implementation since it's needed by both generators.
-
-#### 5. Safeguard and E2E unit generation (session-only, needs both)
-
-`generate-session-services.sh` generates 3 units per group:
-- `openclaw-{group}.service` (main service)
-- `openclaw-safeguard-{group}.path` + `.service` (safe mode watcher)
-- `openclaw-e2e-{group}.service` (E2E health check)
-
-Container mode needs the same safeguard and E2E units (they run on the host). Only the main service unit differs between modes.
-
-**Fix:** Extract safeguard/E2E unit generation into shared functions in `lib-isolation.sh`:
-```bash
-# Generates safeguard .path + .service for any group (mode-agnostic)
-generate_safeguard_units() {
-    local group="$1" port="$2" isolation="$3" output_dir="$4"
-    # .path unit is identical for both modes (watches marker file on host)
-    # .service unit passes ISOLATION=$isolation so hc_ functions dispatch correctly
-    ...
-}
-
-# Generates E2E check service for any group (mode-agnostic)
-generate_e2e_unit() {
-    local group="$1" port="$2" isolation="$3" output_dir="$4"
-    ...
-}
-```
-
-Both generators call these shared functions. The main service unit is the only mode-specific artifact.
-
-#### 6. Directory structure setup (duplicated 3×)
-
-Directory creation is scattered across:
-- `build-full-config.sh` — creates `~/.openclaw/agents/`, `~/clawd/agents/`, `~/clawd/shared/`
-- `generate-session-services.sh` — creates `${state_dir}`, `${config_dir}`, per-agent subdirs
-- Container mode (planned) — creates compose directories
-
-**Fix:** Centralize in `build-full-config.sh`:
-```bash
-# Single function creates all directories for a group
-setup_group_directories() {
-    local group="$1"
-    ensure_bot_dir "${CONFIG_BASE}/${group}" 700
-    ensure_bot_dir "${STATE_BASE}/${group}" 700
-    ensure_bot_dir "${COMPOSE_BASE}/${group}" 755  # Only for container groups
-    for agent_id in $(get_group_agents "$group"); do
-        ensure_bot_dir "${STATE_BASE}/${group}/agents/${agent_id}/agent" 700
-    done
-}
-```
-
-### Proposed Architecture: Clean Separation
-
-```
-build-full-config.sh (orchestrator)
-  ├── lib-isolation.sh (shared group/agent/port queries)
-  ├── generate-config.sh --mode session (per-group OpenClaw config — used by ALL modes)
-  ├── setup_group_directories() (all dirs for all groups)
-  ├── setup_group_auth_profiles() (auth for all groups)
-  ├── allocate_ports() → /etc/openclaw-ports.env
-  │
-  ├── generate-session-services.sh (THIN — only generates systemd unit file)
-  │   └── calls generate_safeguard_units() from lib-isolation.sh
-  │   └── calls generate_e2e_unit() from lib-isolation.sh
-  │
-  └── generate-docker-compose.sh (THIN — only generates compose file + container systemd unit)
-      └── calls generate_safeguard_units() from lib-isolation.sh
-      └── calls generate_e2e_unit() from lib-isolation.sh
-```
-
-**Impact on plan phases:**
-- Phase 1 should create `lib-isolation.sh` first, then refactor both generators to use it
-- Port allocator moves from Phase 4 to Phase 1 (dependency)
-- Config generation happens in `build-full-config.sh`, not in individual generators
-- This makes Phase 3 (health check abstraction) cleaner because `ISOLATION` is always in the environment
-
-### Revised Phase Order
-
-| Phase | Content | Rationale |
-|-------|---------|-----------|
-| **Phase 1** | `lib-isolation.sh` + port allocator + refactor generators to be thin | Foundation — everything else depends on shared code |
-| **Phase 2** | Fix compose generator (Option A mounts, entrypoint, env vars) | Can now reuse `lib-isolation.sh` |
-| **Phase 3** | Dockerfile + Docker install | Depends on Phase 2 |
-| **Phase 4** | Health check abstraction | Depends on `ISOLATION` being in all units |
-| **Phase 5** | First live test | Validates Phases 1-4 |
-| **Phase 5.5** | Mixed mode | Already mostly works if Phase 1 is done right |
-| **Phase 6** | Network isolation | Independent of other phases after Phase 5 |
-| **Phase 7** | Security hardening + resource limits | Polish |
-
-This front-loads the hardest work (shared code, SSOT) and makes subsequent phases straightforward.
-
----
-
-## Self-Review: Issues Found and Fixed in v3
-
-### Fixed in This Version
-
-1. **Dockerfile HEALTHCHECK uses runtime env var** — `GROUP_PORT` is passed via compose `environment:`, not as a build arg. Shell-form `CMD` is required for variable expansion. Added clarifying comment.
-
-2. **Entrypoint vs CMD confusion** — Original plan had compose overriding `entrypoint`. Corrected: Dockerfile sets `ENTRYPOINT ["openclaw", "gateway"]`, compose overrides only `command` (CMD) with `["--bind", "loopback", "--port", "${GROUP_PORT}"]`.
-
-3. **Auth-profiles mount path wrong** — Plan mounted to `agents/main/agent/auth-profiles.json` but session isolation uses `${STATE_DIR}/agents/${AGENT}/agent/auth-profiles.json`. Container mounts must mirror the session isolation layout, with one auth-profiles per agent in the group.
-
-4. **Missing `exec` tool consideration** — Agents running shell commands inside containers need tools the base image doesn't have (git, python, etc.). Added to Open Questions.
-
-5. **Restart vs recreate semantics** — Config hot-reload section didn't distinguish between `restart` (keep container, reload config via bind mount) and `up --force-recreate` (needed for image updates). Clarified.
-
-6. **Graceful shutdown timing** — Docker's default 10s SIGTERM→SIGKILL may be too aggressive. Added to Open Questions.
-
-### Known Gaps Not Yet Addressed
-
-7. **`ISOLATION` env var for health check functions** — The `hc_restart_service()` abstraction reads `$ISOLATION` but this variable comes from `/etc/habitat-parsed.env`. The systemd ExecStartPost already passes `ISOLATION=container` via `Environment=`. However, the safeguard `.path` unit and E2E check service also need this. Ensure all systemd units that invoke health check functions have `ISOLATION` in their environment.
-
-8. **Per-group compose file naming with hyphens** — ✅ Resolved: using subdirectory convention `~/.openclaw/compose/{group}/docker-compose.yaml` to avoid ambiguity with hyphenated group names.
-
-9. **`get.docker.com` in provisioning** — The plan uses `curl -fsSL https://get.docker.com | sh` which violates the AGENTS.md rule: "Use `curl | bash` without verifying the source and pinning a version." Should pin Docker version or use the apt repository method with version pinning.
-
-10. **Test migration plan** — The existing 26 tests in `test_docker_compose.py` validate Option B behavior. These need to be rewritten, not just updated. The plan says "rewrite" but doesn't specify how to handle the transition period where tests break during Phase 1 implementation. Approach: write new tests first (RED), then fix the generator (GREEN), then delete old tests.
+7. **Container restart vs recreate** — `restart` keeps container (config reload). `up --force-recreate` makes new container (image update). Documented in Config Hot-Reload.
 
 ---
 
@@ -1251,16 +1219,16 @@ This front-loads the hardest work (shared code, SSOT) and makes subsequent phase
 
 | Phase | Effort | Depends On |
 |-------|--------|------------|
-| Phase 1: Fix Compose Generator | 1 session | — |
-| Phase 2: Dockerfile + Docker Install | 1 session | Phase 1 |
-| Phase 3: Health Check Abstraction | 1 session | Phase 1 |
-| Phase 4: Port Allocator + Live Test | 1 session | Phases 1-3 |
-| Phase 5: Mixed Mode | 0.5 session | Phase 4 |
-| Phase 6: Network Isolation | 0.5 session | Phase 4 |
-| Phase 7: Security Hardening | 0.5 session | Phase 4 |
-| **Total** | **5-6 sessions** | |
+| Phase 1: Shared Foundation | 1.5 sessions | — |
+| Phase 2: Fix Compose Generator | 0.5 session | Phase 1 |
+| Phase 3: Dockerfile + Docker Install | 0.5 session | Phase 2 |
+| Phase 4: Health Check Abstraction | 0.5 session | Phase 1 |
+| Phase 5: First Live Test | 1 session | Phases 1-4 |
+| Phase 6: Network Isolation | 0.5 session | Phase 5 |
+| Phase 7: Security Hardening | 0.5 session | Phase 5 |
+| **Total** | **5 sessions** | |
 
-Live droplet tests at Phases 4, 5, and 7.
+Live droplet tests at Phase 5 and Phase 7.
 
 ---
 
@@ -1269,20 +1237,24 @@ Live droplet tests at Phases 4, 5, and 7.
 ```
 /home/bot/
 ├── .openclaw/
-│   ├── compose/{group}/docker-compose.yaml  # Per-group compose file (generated)
-├── .openclaw/
 │   ├── openclaw.json                         # Default (non-isolated) config
 │   ├── gateway-token.txt                     # Default gateway token
+│   ├── compose/
+│   │   └── {group}/
+│   │       └── docker-compose.yaml           # Per-group compose (container mode)
 │   ├── configs/
 │   │   └── {group}/
-│   │       ├── openclaw.session.json         # Per-group OpenClaw config
-│   │       ├── auth-profiles.json            # Per-group auth credentials
-│   │       └── gateway-token.txt             # Per-group gateway token
+│   │       ├── openclaw.session.json         # Per-group OpenClaw config (ALL modes)
+│   │       └── gateway-token.txt             # Per-group gateway token (ALL modes)
 │   └── agents/
-│       └── {agent}/sessions/                 # Default state dir transcripts
+│       └── main/agent/
+│           └── auth-profiles.json            # Master auth-profiles (symlinked everywhere)
 ├── .openclaw-sessions/
-│   └── {group}/                              # Session-isolation state dir
-│       └── agents/{agent}/sessions/          # Per-group transcripts
+│   └── {group}/                              # Per-group session state (ALL modes)
+│       └── agents/{agent}/
+│           ├── agent/
+│           │   └── auth-profiles.json → master  # Symlink to master
+│           └── sessions/*.jsonl              # Transcripts
 ├── clawd/
 │   ├── agents/{agent}/                       # Agent workspaces
 │   │   ├── AGENTS.md, SOUL.md, etc.
@@ -1290,13 +1262,24 @@ Live droplet tests at Phases 4, 5, and 7.
 │   └── shared/                               # Cross-agent shared workspace
 ├── Dockerfile                                # Agent base image (or in /opt/hatchery/)
 /etc/
-├── openclaw-ports.env                        # Port allocation source of truth
+├── openclaw-ports.env                        # Port allocation (single source of truth)
+├── docker/daemon.json                        # Docker log rotation config
 ├── systemd/system/
-│   ├── openclaw-{group}.service              # Session mode units
-│   ├── openclaw-container-{group}.service    # Container mode units
-│   ├── openclaw-safeguard-{group}.path       # Safe mode watcher
-│   └── openclaw-safeguard-{group}.service    # Safe mode handler
+│   ├── openclaw-{group}.service              # Session mode main service
+│   ├── openclaw-container-{group}.service    # Container mode main service
+│   ├── openclaw-safeguard-{group}.path       # Safe mode watcher (ALL modes)
+│   ├── openclaw-safeguard-{group}.service    # Safe mode handler (ALL modes)
+│   └── openclaw-e2e-{group}.service          # E2E health check (ALL modes)
 /var/lib/openclaw/
 ├── state-{group}.json                        # State machine per group
 └── events-{group}.jsonl                      # Event log per group
+/usr/local/sbin/
+├── lib-isolation.sh                          # NEW: shared group/port/unit functions
+├── lib-health-check.sh                       # Updated: hc_restart_service, etc.
+├── lib-env.sh                                # Unchanged
+├── lib-permissions.sh                        # Unchanged
+├── generate-config.sh                        # Unchanged (called by lib-isolation.sh)
+├── generate-session-services.sh              # SLIMMED: systemd unit only
+├── generate-docker-compose.sh                # SLIMMED: compose + systemd unit only
+└── build-full-config.sh                      # EXPANDED: orchestrates all per-group setup
 ```
