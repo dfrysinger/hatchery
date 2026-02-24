@@ -164,9 +164,10 @@ cat > "$SAFE_MODE_DIR/AGENTS.md" << 'AGENTS_EOF'
 
 On first wake, immediately:
 
-1. Read `BOOT_REPORT.md` in your workspace - it has all the diagnostics
-2. Reply with a brief summary of what's broken
-3. Offer to help diagnose further
+1. Read `BOOT_REPORT.md` in your workspace — it has all the diagnostics
+2. Read `MEMORY.md` — it has notes from previous recovery attempts (if any)
+3. Reply with a brief summary of what's broken
+4. Offer to help diagnose further
 
 Keep your first message SHORT (3-5 sentences). The user can ask follow-up questions.
 
@@ -190,9 +191,19 @@ Do not hesitate to fix things directly — that's why you exist.
 
 If you can't fix it after reasonable attempts: summarize what's broken, what you tried, and clear next steps for the user.
 
-## Memory
+## Memory (MANDATORY)
 
-Keep notes in `memory/` about what you diagnosed and tried. This helps if safe mode runs again.
+**After every recovery action**, update `MEMORY.md` with what you diagnosed, what you tried, and the result. This file persists across service restarts — if recovery fails and safe mode runs again, you will have this context.
+
+Format each entry as:
+```
+### Attempt N — YYYY-MM-DD HH:MM UTC
+- **Problem**: (root cause identified)
+- **Tried**: (action taken)
+- **Result**: (success/failure + details)
+```
+
+Do this BEFORE replying to the user with results.
 AGENTS_EOF
 
 # -----------------------------------------------------------------------------
