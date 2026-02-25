@@ -204,6 +204,37 @@ else
 fi
 
 # =============================================================================
+# Bug 8: Safe mode handler notification spam loop
+# .path unit (PathExists) re-triggers handler after oneshot exits because
+# unhealthy marker was not cleaned up on failure path
+# =============================================================================
+echo ""
+echo "=== Bug 8: Safe mode handler breaks .path loop on failure ==="
+
+HANDLER="$REPO_DIR/scripts/safe-mode-handler.sh"
+
+# Critical exit path must remove unhealthy marker
+if grep -A10 'Already exhausted.*recovery attempts' "$HANDLER" | grep -q 'rm.*HC_UNHEALTHY_MARKER'; then
+  pass "Exhausted-attempts path removes unhealthy marker (breaks .path loop)"
+else
+  fail "Exhausted-attempts path does NOT remove unhealthy marker — .path will re-trigger infinitely"
+fi
+
+# restart_and_verify failure must also remove marker
+if grep -A5 'failed to start' "$HANDLER" | grep -q 'rm.*HC_UNHEALTHY_MARKER'; then
+  pass "restart_and_verify failure removes unhealthy marker"
+else
+  fail "restart_and_verify failure does NOT remove unhealthy marker — .path will re-trigger"
+fi
+
+# Critical notification should have a lockout to prevent spam
+if grep -q 'critical-notified' "$HANDLER"; then
+  pass "Critical failure notification has lockout mechanism"
+else
+  fail "Critical failure notification has no lockout — will spam on re-trigger"
+fi
+
+# =============================================================================
 # Bug 7: Safe mode bot had no exec access (couldn't run shell commands)
 # generate-config.sh safe-mode was missing tools.exec config
 # =============================================================================

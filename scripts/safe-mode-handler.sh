@@ -56,13 +56,23 @@ if [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECO
   touch /var/lib/init-status/gateway-failed${GROUP:+-$GROUP}
   set_stage 13
 
-  # Try to notify even in critical state
-  notify_find_token && notify_send_message "🔴 <b>[${HC_HABITAT_NAME}] CRITICAL FAILURE</b>
+  # Remove unhealthy marker to break .path re-trigger loop
+  # (gateway-failed marker records the terminal state)
+  rm -f "$HC_UNHEALTHY_MARKER"
+
+  # Only notify once — check for lockout marker
+  local lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
+  if [ ! -f "$lockout_file" ]; then
+    notify_find_token && notify_send_message "🔴 <b>[${HC_HABITAT_NAME}] CRITICAL FAILURE</b>
 
 Gateway failed after $MAX_RECOVERY_ATTEMPTS recovery attempts.
 Bot is OFFLINE.
 
 Check logs: <code>journalctl -u $HC_SERVICE_NAME -n 50</code>"
+    touch "$lockout_file"
+  else
+    log "CRITICAL FAILURE notification already sent — suppressing duplicate"
+  fi
 
   exit 2
 fi
@@ -309,8 +319,10 @@ restart_and_verify() {
     sleep 5
   done
 
-  log "CRITICAL: $svc_name failed to start"
+  log "CRITICAL: $svc_name failed to start after 3 attempts"
   touch "/var/lib/init-status/gateway-failed${GROUP:+-$GROUP}"
+  # Remove unhealthy marker to prevent .path unit re-trigger loop
+  rm -f "$HC_UNHEALTHY_MARKER"
   set_stage 13
   return 1
 }
