@@ -26,7 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create bot user matching host UID (bind mount permissions)
-RUN groupadd -g ${BOT_GID} bot 2>/dev/null || true \
+# node:*-slim images ship a 'node' user at UID 1000 — remove it first if it conflicts
+RUN if id node >/dev/null 2>&1; then userdel -r node 2>/dev/null || true; fi \
+    && groupadd -g ${BOT_GID} bot 2>/dev/null || true \
     && useradd -u ${BOT_UID} -g ${BOT_GID} -m -s /bin/bash bot
 
 # Install OpenClaw globally
