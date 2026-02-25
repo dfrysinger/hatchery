@@ -179,9 +179,19 @@ class TestVolumeMounts:
         })
         _, svc = get_svc(cd, 'sandbox')
         ws_vols = [v for v in svc['volumes'] if '/clawd/agents/' in v]
-        assert len(ws_vols) == 2
+        assert len(ws_vols) == 3  # agent1 + agent3 + safe-mode (always mounted for recovery)
         assert any('agent1' in v for v in ws_vols)
         assert any('agent3' in v for v in ws_vols)
+        assert any('safe-mode' in v for v in ws_vols)
+
+    def test_safe_mode_workspace_no_duplicate_when_in_agents(self, tmp_path):
+        """When safe-mode IS in the agent list, don't duplicate the mount."""
+        r, cd, _, _ = run_generator(tmp_path, {
+            'sandbox': {'port': 18790, 'agents': ['agent1', 'safe-mode']}
+        })
+        _, svc = get_svc(cd, 'sandbox')
+        sm_vols = [v for v in svc['volumes'] if 'safe-mode' in v]
+        assert len(sm_vols) == 1, f"Expected 1 safe-mode mount, got {len(sm_vols)}: {sm_vols}"
 
     def test_shared_workspace_mount(self, tmp_path):
         r, cd, _, _ = run_generator(tmp_path, {'sandbox': {'port': 18790}})

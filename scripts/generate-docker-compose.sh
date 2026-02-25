@@ -100,6 +100,14 @@ for group in "${CONTAINER_GROUPS[@]}"; do
         [ -z "$agent_id" ] && continue
         volumes="${volumes}      - ${HOME_DIR}/clawd/agents/${agent_id}:${HOME_DIR}/clawd/agents/${agent_id}:rw"$'\n'
     done
+    # Safe-mode agent workspace (rw — needed when recovery swaps to SafeModeBot)
+    safe_mode_already_mounted=false
+    for agent_id in "${agent_ids[@]}"; do
+        [ "$agent_id" = "safe-mode" ] && safe_mode_already_mounted=true
+    done
+    if [ "$safe_mode_already_mounted" = "false" ]; then
+        volumes="${volumes}      - ${HOME_DIR}/clawd/agents/safe-mode:${HOME_DIR}/clawd/agents/safe-mode:rw"$'\n'
+    fi
     # Shared workspace (rw — cross-agent collaboration)
     volumes="${volumes}      - ${HOME_DIR}/clawd/shared:${HOME_DIR}/clawd/shared:rw"
     # Additional shared paths from habitat config

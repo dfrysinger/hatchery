@@ -172,11 +172,13 @@ hc_is_service_active() {
   local iso="${ISOLATION:-none}"
   case "$iso" in
     container)
-      # Check compose health status, not just .State.Running.
-      # "healthy" means the HEALTHCHECK (HTTP probe) is passing.
-      local status
-      status=$(docker inspect --format='{{.State.Health.Status}}' "openclaw-${group}" 2>/dev/null)
-      [ "$status" = "healthy" ] ;;
+      # Check if container is running (matches systemd is-active semantics).
+      # Docker healthcheck has a 60s start_period — checking Health.Status
+      # here would false-negative during startup. Callers that need full
+      # health verification do their own HTTP probes.
+      local running
+      running=$(docker inspect --format='{{.State.Running}}' "openclaw-${group}" 2>/dev/null)
+      [ "$running" = "true" ] ;;
     none)
       systemctl is-active --quiet openclaw ;;
     *)

@@ -303,9 +303,17 @@ restart_and_verify() {
   local svc_name
   svc_name=$(_hc_service_name "${GROUP:-}")
 
+  # Containers need longer startup: Docker restart + gateway boot + node init.
+  # Systemd services are faster (direct process, no container overhead).
+  local wait_initial=5 wait_retry=5
+  if [ "${ISOLATION:-none}" = "container" ]; then
+    wait_initial=15
+    wait_retry=10
+  fi
+
   log "Restarting $svc_name with safe mode config..."
   hc_restart_service "${GROUP:-}" || true
-  sleep 5
+  sleep "$wait_initial"
 
   for attempt in 1 2 3; do
     if hc_is_service_active "${GROUP:-}"; then
@@ -316,7 +324,7 @@ restart_and_verify() {
 
     log "$svc_name not active, retry $attempt/3..."
     hc_restart_service "${GROUP:-}" || true
-    sleep 5
+    sleep "$wait_retry"
   done
 
   log "CRITICAL: $svc_name failed to start after 3 attempts"
