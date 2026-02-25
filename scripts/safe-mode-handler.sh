@@ -101,31 +101,26 @@ run_recovery_attempt() {
 
   if type run_full_recovery_escalation &>/dev/null; then
     log "Attempting full recovery escalation..."
-    local output exit_code
-    output=$(run_full_recovery_escalation 2>&1)
-    exit_code=$?
-
-    if [ $exit_code -eq 0 ]; then
+    local output
+    # set +e around command substitution: non-zero exit must not abort the script
+    if output=$(run_full_recovery_escalation 2>&1); then
       log "Recovery succeeded"
       log "Recovery output: $output"
       return 0
     else
-      log "Recovery FAILED (exit $exit_code)"
+      log "Recovery FAILED (exit $?)"
       log "Recovery output: $output"
     fi
   fi
 
   if type run_smart_recovery &>/dev/null; then
     log "Attempting smart recovery..."
-    local output exit_code
-    output=$(run_smart_recovery 2>&1)
-    exit_code=$?
-
-    if [ $exit_code -eq 0 ]; then
+    local output
+    if output=$(run_smart_recovery 2>&1); then
       log "Recovery succeeded"
       return 0
     else
-      log "Recovery FAILED (exit $exit_code): $output"
+      log "Recovery FAILED (exit $?): $output"
     fi
   fi
 

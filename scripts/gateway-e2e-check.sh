@@ -198,11 +198,15 @@ check_agents_e2e() {
     local env_prefix=""
     [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
 
-    local output
+    local output rc
     # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
-    output=$(timeout 60 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
-      --agent "$agent_id" --message "$test_prompt" --timeout 30 --json 2>&1)
-    local rc=$?
+    # if/else guards against set -e aborting on non-zero exit from command substitution
+    if output=$(timeout 60 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+      --agent "$agent_id" --message "$test_prompt" --timeout 30 --json 2>&1); then
+      rc=0
+    else
+      rc=$?
+    fi
     local dur=$(( $(date +%s) - start_time ))
 
     if [ $rc -eq 0 ] && echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
