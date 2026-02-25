@@ -342,6 +342,7 @@ TimeoutStartSec=180
 Restart=always
 RestartSec=10
 RestartPreventExitStatus=2
+Environment=CI=true
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--experimental-sqlite
 Environment=PATH=/usr/bin:/usr/local/bin
