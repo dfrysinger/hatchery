@@ -221,7 +221,7 @@ else
 fi
 
 # restart_and_verify failure must also remove marker
-if grep -A5 'failed to start' "$HANDLER" | grep -q 'rm.*HC_UNHEALTHY_MARKER'; then
+if grep -A5 'failed to respond' "$HANDLER" | grep -q 'rm.*HC_UNHEALTHY_MARKER'; then
   pass "restart_and_verify failure removes unhealthy marker"
 else
   fail "restart_and_verify failure does NOT remove unhealthy marker — .path will re-trigger"

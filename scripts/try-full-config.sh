@@ -134,52 +134,51 @@ restart_services() {
   esac
 }
 
-# --- Health check ---
-check_health() {
+# --- Execute ---
+apply_full_config
+restart_services
+
+# --- Wait for health ---
+# Uses hc_wait_for_http() from lib-health-check.sh (auto-scales timeout by isolation mode).
+# For multi-group, waits for each group individually since they may have different
+# isolation modes and network configurations.
+HEALTHY=false
+
+wait_for_all_groups() {
   case "$ISOLATION" in
     session|container)
       if [ -n "$TARGET_GROUP" ]; then
-        local port net iso
-        port=$(get_group_port "$TARGET_GROUP")
+        local iso net port
         iso=$(get_group_isolation "$TARGET_GROUP")
         net=$(get_group_network "$TARGET_GROUP" 2>/dev/null)
+        port=$(get_group_port "$TARGET_GROUP")
         ISOLATION="$iso" NETWORK_MODE="$net" GROUP_PORT="${port:-18789}" \
-          hc_curl_gateway "$TARGET_GROUP" "/" >/dev/null 2>&1
+          hc_wait_for_http "$TARGET_GROUP"
       else
         local groups="${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}"
         IFS=',' read -ra _groups <<< "$groups"
         for grp in "${_groups[@]}"; do
-          local port net iso
-          port=$(get_group_port "$grp")
+          local iso net port
           iso=$(get_group_isolation "$grp")
           net=$(get_group_network "$grp" 2>/dev/null)
+          port=$(get_group_port "$grp")
+          log "Waiting for group ${grp}..."
           if ! ISOLATION="$iso" NETWORK_MODE="$net" GROUP_PORT="${port:-18789}" \
-            hc_curl_gateway "$grp" "/" >/dev/null 2>&1; then
+            hc_wait_for_http "$grp"; then
             return 1
           fi
         done
       fi
       ;;
     *)
-      hc_curl_gateway "" "/" >/dev/null 2>&1
+      hc_wait_for_http ""
       ;;
   esac
 }
 
-# --- Execute ---
-apply_full_config
-restart_services
-
-# --- Wait for health ---
-HEALTHY=false
-for _ in $(seq 1 12); do
-  sleep 5
-  if check_health; then
-    HEALTHY=true
-    break
-  fi
-  log "Waiting for health..."
-done
+if wait_for_all_groups; then
+  HEALTHY=true
+fi
 
 # --- Handle result ---
 state_transition() {

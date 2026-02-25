@@ -172,10 +172,9 @@ hc_is_service_active() {
   local iso="${ISOLATION:-none}"
   case "$iso" in
     container)
-      # Check if container is running (matches systemd is-active semantics).
-      # Docker healthcheck has a 60s start_period — checking Health.Status
-      # here would false-negative during startup. Callers that need full
-      # health verification do their own HTTP probes.
+      # Check if container process is running (not health status).
+      # This is the equivalent of systemd is-active — "is the process alive?"
+      # For actual gateway readiness, use hc_curl_gateway() or hc_restart_and_wait().
       local running
       running=$(docker inspect --format='{{.State.Running}}' "openclaw-${group}" 2>/dev/null)
       [ "$running" = "true" ] ;;
@@ -184,6 +183,67 @@ hc_is_service_active() {
     *)
       systemctl is-active --quiet "openclaw-${group}" ;;
   esac
+}
+
+# Poll hc_curl_gateway() until the gateway responds or timeout.
+# No restart — just waits. Use after hc_restart_service() or on its own.
+#
+# Args:
+#   $1 — group name (optional, for isolation modes)
+#   $2 — max wait in seconds (optional, default auto-scaled by isolation mode)
+#
+# Returns: 0 if gateway responds, 1 if timed out
+hc_wait_for_http() {
+  local group="${1:-${GROUP:-}}"
+  local max_wait="${2:-}"
+  local iso="${ISOLATION:-none}"
+
+  # Auto-scale timeout if not provided:
+  #   none/session: systemd → Node boot = fast (30s)
+  #   container: Docker restart → container up → Node boot = slow (90s)
+  if [ -z "$max_wait" ]; then
+    case "$iso" in
+      container) max_wait=90 ;;
+      *)         max_wait=30 ;;
+    esac
+  fi
+
+  local start elapsed
+  start=$(date +%s)
+  while true; do
+    elapsed=$(( $(date +%s) - start ))
+    if [ "$elapsed" -ge "$max_wait" ]; then
+      log "Timed out after ${elapsed}s waiting for HTTP"
+      return 1
+    fi
+
+    if hc_curl_gateway "$group" "/" >/dev/null 2>&1; then
+      log "HTTP responding after ${elapsed}s"
+      return 0
+    fi
+
+    sleep 5
+  done
+}
+
+# Restart service and wait for HTTP readiness.
+# Single canonical implementation — use this instead of hand-rolled poll loops.
+# Restarts ONCE, then polls via hc_wait_for_http().
+# Does NOT re-restart on each poll failure (the old bug).
+#
+# Args:
+#   $1 — group name (optional, for isolation modes)
+#   $2 — max wait in seconds (optional, default auto-scaled by isolation mode)
+#
+# Returns: 0 if gateway responds, 1 if timed out
+hc_restart_and_wait() {
+  local group="${1:-${GROUP:-}}"
+  local max_wait="${2:-}"
+
+  log "Restarting $(_hc_service_name "$group")..."
+  hc_restart_service "$group" || true
+
+  hc_wait_for_http "$group" "$max_wait"
 }
 
 hc_service_logs() {

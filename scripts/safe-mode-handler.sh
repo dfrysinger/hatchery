@@ -300,34 +300,15 @@ generate_boot_report
 # --- Restart service ---
 
 restart_and_verify() {
-  local svc_name
-  svc_name=$(_hc_service_name "${GROUP:-}")
-
-  # Containers need longer startup: Docker restart + gateway boot + node init.
-  # Systemd services are faster (direct process, no container overhead).
-  local wait_initial=5 wait_retry=5
-  if [ "${ISOLATION:-none}" = "container" ]; then
-    wait_initial=15
-    wait_retry=10
+  # Single restart, poll HTTP — delegates to hc_restart_and_wait()
+  # which auto-scales timeout by isolation mode (30s systemd, 90s container).
+  if hc_restart_and_wait "${GROUP:-}"; then
+    log "$(_hc_service_name "${GROUP:-}") is serving HTTP"
+    /usr/local/bin/rename-bots.sh >> "$HC_LOG" 2>&1 || true
+    return 0
   fi
 
-  log "Restarting $svc_name with safe mode config..."
-  hc_restart_service "${GROUP:-}" || true
-  sleep "$wait_initial"
-
-  for attempt in 1 2 3; do
-    if hc_is_service_active "${GROUP:-}"; then
-      log "$svc_name started (attempt $attempt)"
-      /usr/local/bin/rename-bots.sh >> "$HC_LOG" 2>&1 || true
-      return 0
-    fi
-
-    log "$svc_name not active, retry $attempt/3..."
-    hc_restart_service "${GROUP:-}" || true
-    sleep "$wait_retry"
-  done
-
-  log "CRITICAL: $svc_name failed to start after 3 attempts"
+  log "CRITICAL: $(_hc_service_name "${GROUP:-}") failed to respond"
   touch "/var/lib/init-status/gateway-failed${GROUP:+-$GROUP}"
   # Remove unhealthy marker to prevent .path unit re-trigger loop
   rm -f "$HC_UNHEALTHY_MARKER"
