@@ -213,25 +213,26 @@ build_discord_channel() {
     guilds=$(jq -n --arg gid "$guild_id" '{($gid): {requireMention: true}}')
   fi
 
-  # Build DM config
-  local dm_config
+  # Build DM config — flat keys (dmPolicy, allowFrom), not nested dm object.
+  # OpenClaw expects flat format; nested dm.policy triggers Doctor migration prompt
+  # which hangs in non-interactive systemd service context.
+  local dm_flat
   if [ -n "$owner_id" ]; then
-    dm_config=$(jq -n --arg oid "$owner_id" '{enabled: true, policy: "pairing", allowFrom: [$oid]}')
+    dm_flat=$(jq -n --arg oid "$owner_id" '{dmPolicy: "pairing", allowFrom: [$oid]}')
   else
-    dm_config=$(jq -n '{enabled: true, policy: "pairing"}')
+    dm_flat=$(jq -n '{dmPolicy: "pairing"}')
   fi
 
   jq -n \
     --argjson enabled "$_dc_enabled" \
     --argjson accounts "$accounts" \
-    --argjson dm "$dm_config" \
+    --argjson dm_flat "$dm_flat" \
     --argjson guilds "$guilds" \
-    '{
+    '({
       enabled: $enabled,
       groupPolicy: "allowlist",
-      accounts: $accounts,
-      dm: $dm
-    } + (if $guilds != null then {guilds: $guilds} else {} end)'
+      accounts: $accounts
+    } + $dm_flat + (if $guilds != null then {guilds: $guilds} else {} end))'
 }
 
 # Build bindings array (maps non-default agents to their channel accounts)

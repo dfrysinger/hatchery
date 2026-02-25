@@ -197,10 +197,12 @@ class TestPlatformDiscord:
         assert config["channels"]["discord"]["accounts"]["agent1"]["token"] == "dc-token-1"
 
     def test_discord_dm_config(self):
+        """DM config uses flat keys (dmPolicy, allowFrom), not nested dm object."""
         config = run_generate_config(platform="discord")
-        dm = config["channels"]["discord"]["dm"]
-        assert dm["enabled"] is True
-        assert dm["policy"] == "pairing"
+        dc = config["channels"]["discord"]
+        assert dc["dmPolicy"] == "pairing"
+        # Ensure no nested dm object (triggers Doctor migration prompt)
+        assert "dm" not in dc
 
     def test_discord_group_policy(self):
         config = run_generate_config(platform="discord")
@@ -214,8 +216,8 @@ class TestPlatformDiscord:
 
     def test_discord_owner_id_in_dm_allow(self):
         config = run_generate_config(platform="discord", discord_owner_id="owner-999")
-        dm = config["channels"]["discord"]["dm"]
-        assert "owner-999" in dm["allowFrom"]
+        dc = config["channels"]["discord"]
+        assert "owner-999" in dc["allowFrom"]
 
     def test_no_guild_when_empty(self):
         config = run_generate_config(platform="discord", discord_guild_id="")
@@ -223,8 +225,8 @@ class TestPlatformDiscord:
 
     def test_no_allow_from_when_no_owner(self):
         config = run_generate_config(platform="discord", discord_owner_id="")
-        dm = config["channels"]["discord"]["dm"]
-        assert "allowFrom" not in dm
+        dc = config["channels"]["discord"]
+        assert "allowFrom" not in dc
 
 
 class TestPlatformBoth:
@@ -391,7 +393,7 @@ class TestConfigStructure:
         dc = config["channels"]["discord"]
         assert dc["enabled"] is True
         assert dc["guilds"]["guild-123"]["requireMention"] is True
-        assert "owner-456" in dc["dm"]["allowFrom"]
+        assert "owner-456" in dc["allowFrom"]
         assert dc["accounts"]["agent2"]["token"] == "dc-2"
 
 
