@@ -643,8 +643,8 @@ class TestSafeModeConfig:
             )
             assert isinstance(config, dict)
 
-    def test_safe_mode_has_browser(self):
-        """Safe-mode config should include browser settings."""
+    def test_safe_mode_has_browser_disabled(self):
+        """Safe-mode config disables browser (container has no Chrome)."""
         config = run_generate_config(
             mode="safe-mode",
             sm_bot_token="123:ABC",
@@ -653,7 +653,7 @@ class TestSafeModeConfig:
             sm_token="sk-ant-test",
             sm_owner_id="12345",
         )
-        assert config["browser"]["enabled"] is True
+        assert config["browser"]["enabled"] is False
 
     def test_safe_mode_has_gateway(self):
         """Safe-mode config should include gateway settings."""

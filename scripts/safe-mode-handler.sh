@@ -61,7 +61,7 @@ if [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECO
   rm -f "$HC_UNHEALTHY_MARKER"
 
   # Only notify once — check for lockout marker
-  local lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
+  lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
   if [ ! -f "$lockout_file" ]; then
     notify_find_token && notify_send_message "🔴 <b>[${HC_HABITAT_NAME}] CRITICAL FAILURE</b>
 

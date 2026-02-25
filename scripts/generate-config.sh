@@ -494,10 +494,7 @@ generate_safe_mode() {
     '{
       env: $env,
       browser: {
-        enabled: true,
-        executablePath: "/usr/bin/google-chrome-stable",
-        headless: false,
-        noSandbox: true
+        enabled: false
       },
       tools: {
         exec: $exec_policy
@@ -505,7 +502,8 @@ generate_safe_mode() {
       agents: {
         defaults: {
           model: { primary: $model },
-          workspace: $defaults_workspace
+          workspace: $defaults_workspace,
+          tools: { exec: $exec_policy }
         },
         list: [{
           id: "safe-mode",

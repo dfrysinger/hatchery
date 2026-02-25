@@ -44,7 +44,7 @@ GTO=$(d "$GLOBAL_TOOLS_B64")
 CGI="$COUNCIL_GROUP_ID"
 CGN="$COUNCIL_GROUP_NAME"
 CJ="$COUNCIL_JUDGE"
-GT=$(cat $H/.openclaw/gateway-token.txt)
+GT=$(cat "$H/.openclaw/gateway-token.txt")
 AC=${AGENT_COUNT:-1}
 # --- Generate config via generate-config.sh (single source of truth) ---
 GEN_CONFIG_SCRIPT=""
@@ -66,7 +66,7 @@ if type ensure_bot_dir &>/dev/null; then
     ensure_bot_dir "$H/clawd/agents/agent${i}/memory" 755
   done
 else
-  mkdir -p $H/.openclaw/credentials && chmod 700 $H/.openclaw/credentials
+  mkdir -p "$H/.openclaw/credentials" && chmod 700 "$H/.openclaw/credentials"
   for i in $(seq 1 $AC); do
     mkdir -p "$H/clawd/agents/agent${i}/memory"
   done
@@ -80,7 +80,7 @@ echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
 if [ -f /var/lib/init-status/safe-mode ]; then
   echo "Safe mode active - NOT overwriting openclaw.json with full config"
 else
-  cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
+  cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
 fi
 # Check if Dropbox-restored workspace files should be preserved.
 # When restore-openclaw-state.sh successfully restores files, it sets this marker.
@@ -256,15 +256,15 @@ fi
 # NOTE: This file provides actual credentials for OpenClaw's auth resolution.
 # generate-config.sh also references auth.profiles in the JSON config (provider list only).
 # Both are generated from the same env vars, but keep them in sync if adding providers.
-cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
+cat > "$H/.openclaw/agents/main/agent/auth-profiles.json" <<APJ
 {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","key":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"key\":\"${GK}\"}")}}
 APJ
 # SECURITY: auth-profiles.json contains credentials - restrict permissions
 if type ensure_bot_file &>/dev/null; then
   ensure_bot_file "$H/.openclaw/agents/main/agent/auth-profiles.json" 600
 else
-  chmod 600 $H/.openclaw/agents/main/agent/auth-profiles.json
-  chown $USERNAME:$USERNAME $H/.openclaw/agents/main/agent/auth-profiles.json
+  chmod 600 "$H/.openclaw/agents/main/agent/auth-profiles.json"
+  chown "$USERNAME:$USERNAME" "$H/.openclaw/agents/main/agent/auth-profiles.json"
 fi
 for i in $(seq 1 $AC); do
   if type ensure_bot_dir &>/dev/null; then
@@ -415,9 +415,9 @@ if type fix_bot_permissions &>/dev/null; then
   fix_bot_permissions "$H"
 else
   # Fallback if lib-permissions.sh not available
-  chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
-  chmod 700 $H/.openclaw
-  chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json 2>/dev/null || true
+  chown -R "$USERNAME:$USERNAME" "$H/.openclaw" "$H/clawd"
+  chmod 700 "$H/.openclaw"
+  chmod 600 "$H/.openclaw/openclaw.json" "$H/.openclaw/openclaw.full.json" 2>/dev/null || true
 fi
 
 # --- Initialize state machine (after permissions are fixed) ---
