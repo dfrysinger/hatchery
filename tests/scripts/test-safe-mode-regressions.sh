@@ -164,6 +164,14 @@ else
   fail "E2E magic word check may not be checking the right variable"
 fi
 
+# Some models (e.g., Gemini Flash) follow heartbeat system prompt instead of
+# the explicit test message. HEARTBEAT_OK still proves the LLM pipeline works.
+if grep 'grep.*HEARTBEAT_OK' "$E2E_CHECK" 2>/dev/null | grep -q 'HEALTH_CHECK_OK'; then
+  pass "E2E also accepts HEARTBEAT_OK as valid response (model behavior tolerance)"
+else
+  fail "E2E should accept HEARTBEAT_OK — proves pipeline works even when model follows system prompt"
+fi
+
 # =============================================================================
 # Bug 5: Emergency.json fallback removed (unnecessary complexity)
 # =============================================================================
