@@ -470,6 +470,7 @@ if [ -n "${ISOLATION_GROUPS:-}" ] && type generate_groups_manifest &>/dev/null; 
 
     # Enable safeguard + E2E units for this group
     systemctl enable "openclaw-safeguard-${group}.path" 2>/dev/null || true
+    systemctl enable "openclaw-e2e-${group}.service" 2>/dev/null || true
   done
 
   # 4. Dispatch to mode-specific generators (thin — service definitions only)

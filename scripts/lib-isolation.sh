@@ -458,5 +458,8 @@ Type=oneshot
 EnvironmentFile=${config_dir}/group.env
 Environment=RUN_MODE=e2e-check
 ExecStart=/usr/local/bin/gateway-e2e-check.sh
+
+[Install]
+WantedBy=openclaw-${group}.service openclaw-container-${group}.service
 E2EFILE
 }
