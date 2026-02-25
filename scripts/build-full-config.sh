@@ -467,6 +467,9 @@ if [ -n "${ISOLATION_GROUPS:-}" ] && type generate_groups_manifest &>/dev/null; 
     generate_e2e_unit "$group"
 
     echo "  [${group}] isolation=${isolation} port=${port} → configured"
+
+    # Enable safeguard + E2E units for this group
+    systemctl enable "openclaw-safeguard-${group}.path" 2>/dev/null || true
   done
 
   # 4. Dispatch to mode-specific generators (thin — service definitions only)
