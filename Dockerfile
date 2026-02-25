@@ -22,7 +22,7 @@ ARG OPENCLAW_VERSION=latest
 
 # System deps for OpenClaw + compose healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl jq bash ca-certificates \
+    curl jq bash ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 # Create bot user matching host UID (bind mount permissions)
