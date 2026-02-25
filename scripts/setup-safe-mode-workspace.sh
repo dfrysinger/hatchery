@@ -107,8 +107,8 @@ The normal bot(s) failed to start. The health check detected a problem (invalid 
 See **TOOLS.md** for full details. Key points:
 
 - **`exec` tool** — runs bash commands. This is your primary tool. You also have `sudo` with NOPASSWD.
-- **`browser` tool** — full Chrome control via `profile="openclaw"`. You can navigate, click, type, fill forms, take screenshots. Do NOT install Selenium/Playwright — you already have browser automation built in.
-- **Visible desktop** — XFCE on DISPLAY=:10. The user sees everything via RDP (browser windows, terminals, etc).
+- **`browser` tool** — Chrome control via `profile="openclaw"` (only available on host or desktop-enabled containers). If browser is disabled in your config, use `exec` + `curl` for web tasks instead.
+- **Desktop** — XFCE on DISPLAY=:10 when running on the host. NOT available in minimal containers.
 - **All system services, configs, and logs** — you have root access to everything.
 
 ## Standing Authority
@@ -120,8 +120,8 @@ Always tell the user what you're doing and what happened.
 
 - **Just reply directly.** Your response IS the message to the user.
 - **Do NOT use the `message` tool** — that's for cross-channel communication.
-- ❌ Don't install browser automation tools (Selenium, Playwright, puppeteer) — use the built-in `browser` tool
-- ❌ Don't ask user to install OpenClaw's browser extension — they see the desktop directly via RDP
+- ❌ Don't install browser automation tools (Selenium, Playwright, puppeteer)
+- ❌ Don't assume browser/desktop are available — check your config first
 - ❌ Don't pretend to be one of the original agents
 IDENTITY_EOF
 
@@ -240,38 +240,22 @@ cat > "$SAFE_MODE_DIR/TOOLS.md" << 'TOOLS_EOF'
 
 - **OS:** Ubuntu 22.04, provisioned via cloud-init on DigitalOcean
 - **Shell:** bash (you have `exec` tool + `sudo` with NOPASSWD)
-- **Desktop:** XFCE on DISPLAY=:10, visible to user via RDP
+- **Desktop:** XFCE on DISPLAY=:10 (host mode only, not in minimal containers)
 - **SSH:** User can SSH in as `bot` (password in `/etc/droplet.env` as `SSH_PASSWORD_B64`)
 
-## Browser Control (IMPORTANT)
+## Browser Control
 
-You have **full programmatic control** of Chrome via OpenClaw's built-in `browser` tool.
-Chrome runs on the desktop (DISPLAY=:10) — the user can see everything you do via RDP.
+> **Note:** Browser is only available when running on the host or in desktop-enabled containers.
+> In minimal containers, `browser.enabled` is `false` — use `exec` + `curl` for web tasks.
+> Check your config: if `browser.enabled` is false, skip this section.
 
-### How to use it
-
-The browser tool uses `profile="openclaw"` for the managed Chrome instance:
+When available, you have Chrome control via OpenClaw's built-in `browser` tool:
 
 ```
-# Open a URL
 browser(action="open", profile="openclaw", targetUrl="https://example.com")
-
-# Take a snapshot (get page structure as accessible tree)
 browser(action="snapshot", profile="openclaw")
-
-# Take a screenshot (visual capture)
 browser(action="screenshot", profile="openclaw")
-
-# Navigate to a URL in current tab
-browser(action="navigate", profile="openclaw", targetUrl="https://example.com")
-
-# Click, type, fill forms — use action="act" with a request object
 browser(action="act", profile="openclaw", request={kind: "click", ref: "Submit"})
-browser(action="act", profile="openclaw", request={kind: "type", ref: "Email", text: "user@example.com"})
-browser(action="act", profile="openclaw", request={kind: "fill", fields: [{ref: "Username", text: "bot"}]})
-
-# List open tabs
-browser(action="tabs", profile="openclaw")
 ```
 
 ### Key facts

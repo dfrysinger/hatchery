@@ -49,10 +49,21 @@ done
 
 log "Attempting full config switch (isolation=$ISOLATION, group=${TARGET_GROUP:-all})"
 
+# Resolve group list from manifest (SSOT) with env var fallback.
+# Manifest is the canonical source; env vars are legacy/fallback.
+MANIFEST="${MANIFEST:-/etc/openclaw-groups.json}"
+_resolve_groups() {
+  if [ -f "$MANIFEST" ]; then
+    jq -r '.groups | keys | join(",")' "$MANIFEST" 2>/dev/null
+  else
+    echo "${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}"
+  fi
+}
+
 # Guard: session/container modes require groups to be defined
 if [ "$ISOLATION" = "session" ] || [ "$ISOLATION" = "container" ]; then
-  if [ -z "$TARGET_GROUP" ] && [ -z "${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}" ]; then
-    log "FATAL: isolation=$ISOLATION but no groups defined (ISOLATION_GROUPS empty)"
+  if [ -z "$TARGET_GROUP" ] && [ -z "$(_resolve_groups)" ]; then
+    log "FATAL: isolation=$ISOLATION but no groups defined (manifest empty, ISOLATION_GROUPS empty)"
     exit 1
   fi
 fi
@@ -93,7 +104,7 @@ apply_full_config() {
         generate_group_config "$TARGET_GROUP"
       else
         # Regenerate configs for all groups
-        local groups="${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}"
+        local groups="$(_resolve_groups)"
         IFS=',' read -ra _groups <<< "$groups"
         for grp in "${_groups[@]}"; do
           log "Regenerating config for group ${grp}"
@@ -119,7 +130,7 @@ restart_services() {
         log "Restarting group ${TARGET_GROUP}"
         ISOLATION="$(get_group_isolation "$TARGET_GROUP")" hc_restart_service "$TARGET_GROUP"
       else
-        local groups="${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}"
+        local groups="$(_resolve_groups)"
         IFS=',' read -ra _groups <<< "$groups"
         for grp in "${_groups[@]}"; do
           log "Restarting group ${grp}"
@@ -155,7 +166,7 @@ wait_for_all_groups() {
         ISOLATION="$iso" NETWORK_MODE="$net" GROUP_PORT="${port:-18789}" \
           hc_wait_for_http "$TARGET_GROUP"
       else
-        local groups="${ISOLATION_GROUPS:-${HC_SESSION_GROUPS:-}}"
+        local groups="$(_resolve_groups)"
         IFS=',' read -ra _groups <<< "$groups"
         for grp in "${_groups[@]}"; do
           local iso net port

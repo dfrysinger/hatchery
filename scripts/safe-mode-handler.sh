@@ -16,7 +16,7 @@
 #   2 = critical failure, gave up
 # =============================================================================
 
-set -o pipefail
+set -euo pipefail
 
 # Source shared libraries
 for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
@@ -36,7 +36,8 @@ hc_init_logging "${GROUP:-}"
 hc_load_environment
 
 RUN_MODE="${RUN_MODE:-standalone}"
-MAX_RECOVERY_ATTEMPTS=2
+# Unified threshold — same env var as openclaw-state.sh (default: 3)
+MAX_RECOVERY_ATTEMPTS=${OPENCLAW_MAX_RECOVERY:-3}
 
 log "============================================================"
 log "========== SAFE MODE HANDLER STARTING =========="
@@ -63,12 +64,12 @@ if [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECO
   # Only notify once — check for lockout marker
   lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
   if [ ! -f "$lockout_file" ]; then
-    notify_find_token && notify_send_message "🔴 <b>[${HC_HABITAT_NAME}] CRITICAL FAILURE</b>
+    { notify_find_token && notify_send_message "🔴 <b>[${HC_HABITAT_NAME}] CRITICAL FAILURE</b>
 
 Gateway failed after $MAX_RECOVERY_ATTEMPTS recovery attempts.
 Bot is OFFLINE.
 
-Check logs: <code>journalctl -u $HC_SERVICE_NAME -n 50</code>"
+Check logs: <code>journalctl -u $HC_SERVICE_NAME -n 50</code>"; } || log "WARNING: Failed to send critical notification"
     touch "$lockout_file"
   else
     log "CRITICAL FAILURE notification already sent — suppressing duplicate"
@@ -181,11 +182,11 @@ echo "$((RECOVERY_ATTEMPTS + 1))" > "$HC_RECOVERY_COUNTER"
 
 if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
   log "========== SENDING SAFE MODE WARNING =========="
-  notify_find_token && notify_send_message "⚠️ <b>[${HC_HABITAT_NAME}] Entering Safe Mode</b>
+  { notify_find_token && notify_send_message "⚠️ <b>[${HC_HABITAT_NAME}] Entering Safe Mode</b>
 
 Health check failed. Recovering with backup configuration.
 
-SafeModeBot will follow up shortly with diagnostics."
+SafeModeBot will follow up shortly with diagnostics."; } || log "WARNING: Failed to send safe mode notification"
   log "========== SAFE MODE WARNING SENT =========="
 fi
 
@@ -250,7 +251,7 @@ ${service_errors:-No service errors captured}
 \`\`\`
 
 ## Recovery Actions
-$(grep -E "Recovery|recovery|SAFE MODE|token|API|provider|model" "$HC_LOG" 2>/dev/null | tail -20)
+$(grep -E "Recovery|recovery|SAFE MODE|token|API|provider|model" "$HC_LOG" 2>/dev/null | tail -20 || true)
 
 ## Diagnostics
 $(format_diagnostics)
@@ -321,7 +322,7 @@ date +%s > /var/lib/init-status/recently-recovered${GROUP:+-$GROUP}
 
 if restart_and_verify; then
   # Trigger SafeModeBot intro (shared implementation in lib-notify.sh)
-  notify_send_safe_mode_intro
+  notify_send_safe_mode_intro || log "WARNING: Failed to send safe mode intro"
 
   # Mark boot as complete (safe mode IS a completed boot, just degraded)
   touch /var/lib/init-status/setup-complete

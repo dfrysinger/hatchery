@@ -16,7 +16,7 @@
 #   GROUP / GROUP_PORT — per-group session isolation
 # =============================================================================
 
-set -o pipefail
+set -euo pipefail
 
 # Source shared libraries
 for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
@@ -70,7 +70,7 @@ if [ "$USE_STATE_MACHINE" = "true" ]; then
     state_cmd check-timeout || true
     exit 0
   fi
-  if state_cmd get --field lock.holder | grep -qv '^$'; then
+  if state_cmd get --field lock.holder 2>/dev/null | grep -qv '^$'; then
     lock_holder=$(state_cmd get --field lock.holder)
     if [ -n "$lock_holder" ] && [ "$lock_holder" != "null" ]; then
       log "Skipping E2E — state locked by '$lock_holder'"

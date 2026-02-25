@@ -18,6 +18,8 @@
 #   GROUP / GROUP_PORT         — per-group session isolation
 # =============================================================================
 
+set -euo pipefail
+
 # Source shared libraries
 for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
   [ -f "$lib_path/lib-health-check.sh" ] && { source "$lib_path/lib-health-check.sh"; break; }

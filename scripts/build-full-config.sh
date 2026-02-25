@@ -2,6 +2,7 @@
 # =============================================================================
 # build-full-config.sh -- Generate full openclaw.json with all features
 # =============================================================================
+set -euo pipefail
 umask 022  # Ensure files are world-readable (DO defaults to 077)
 
 # Source permission utilities (creates dirs with correct ownership)
