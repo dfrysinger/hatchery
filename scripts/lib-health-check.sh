@@ -279,6 +279,24 @@ hc_stop_service() {
   esac
 }
 
+# Start a stopped service (counterpart to hc_stop_service).
+# For containers: docker compose up -d; for systemd: systemctl start.
+hc_start_service() {
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" up -d 2>&1 ;;
+    none)
+      systemctl start openclaw 2>&1 ;;
+    *)
+      systemctl start "openclaw-${group}" 2>&1 ;;
+  esac
+}
+
 # Reach the gateway — handles all isolation modes including isolated network containers
 hc_curl_gateway() {
   local group="${1:-${GROUP:-}}"

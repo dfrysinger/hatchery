@@ -113,8 +113,11 @@ apply_full_config() {
       fi
       ;;
     *)
-      # none mode: restore saved full config
-      log "Restoring full config from backup"
+      # none mode: just write the config file. The gateway's file watcher
+      # detects changes and hot-reloads — no restart needed.
+      # Do NOT restart: the gateway's SIGTERM handler persists its in-memory
+      # config back to openclaw.json, clobbering the restored file.
+      log "Restoring full config from backup (gateway hot-reloads on file change)"
       cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
       chown "${USERNAME:-bot}:${USERNAME:-bot}" "$H/.openclaw/openclaw.json"
       chmod 600 "$H/.openclaw/openclaw.json"
@@ -123,6 +126,8 @@ apply_full_config() {
 }
 
 # --- Restart services ---
+# Session/container modes need a restart to pick up regenerated per-group configs.
+# None mode: gateway auto-reloads via file watcher — no restart needed.
 restart_services() {
   case "$ISOLATION" in
     session|container)
@@ -139,8 +144,7 @@ restart_services() {
       fi
       ;;
     *)
-      log "Restarting openclaw.service"
-      hc_restart_service ""
+      log "Skipping restart — gateway hot-reloads config from file watcher"
       ;;
   esac
 }
@@ -227,11 +231,13 @@ else
 
   # Rollback: restore safe-mode config
   if [ "$ISOLATION" = "none" ] && [ -f "$H/.openclaw/openclaw.minimal.json" ]; then
+    # Just write — gateway file watcher auto-reloads
     cp "$H/.openclaw/openclaw.minimal.json" "$H/.openclaw/openclaw.json"
     chown "${USERNAME:-bot}:${USERNAME:-bot}" "$H/.openclaw/openclaw.json"
     chmod 600 "$H/.openclaw/openclaw.json"
+  else
+    restart_services
   fi
-  restart_services
 
   state_transition "SAFE_MODE" "full-config-failed"
 
