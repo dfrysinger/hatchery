@@ -422,6 +422,10 @@ else
 fi
 
 # --- Initialize state machine (after permissions are fixed) ---
+# Ensure LOG and log() are available (may not be sourced from lib-health-check.sh)
+: "${LOG:=/dev/null}"
+type log &>/dev/null || log() { echo "[build-full-config] $*"; }
+
 if [ -x /usr/local/bin/openclaw-state.sh ]; then
   sudo -u "${USERNAME:-bot}" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
   if [ -n "${ISOLATION_GROUPS:-}" ]; then
