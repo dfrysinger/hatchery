@@ -96,6 +96,40 @@ esac
 # Exec policy — used for top-level tools.exec (gateway-wide policy).
 EXEC_POLICY='{"security":"full","ask":"off"}'
 
+# Build agents.defaults — single source of truth for all modes.
+# Args: $1 = model (optional override, defaults to opus)
+#        $2 = workspace override (optional)
+# All keys MUST match the OpenClaw config schema (agents.defaults.*).
+# Invalid keys cause "Config invalid" → gateway refuses to start.
+build_defaults() {
+  local model="${1:-anthropic/claude-opus-4-5}"
+  local workspace="${2:-${HOME_DIR}/clawd}"
+
+  jq -n \
+    --arg model "$model" \
+    --arg workspace "$workspace" \
+    '{
+      model: { primary: $model },
+      maxConcurrent: 4,
+      workspace: $workspace,
+      heartbeat: { every: "30m", session: "heartbeat" },
+      models: {
+        "openai/gpt-5.2": { params: { reasoning_effort: "high" } }
+      }
+    }'
+}
+
+# Build top-level tools section — single source of truth.
+# NOTE: tools.exec belongs here (top-level) or in agents.list[].tools,
+# NOT in agents.defaults.tools (which is not in the schema).
+build_tools() {
+  jq -n --argjson exec_policy "$EXEC_POLICY" \
+    '{
+      agentToAgent: { enabled: true },
+      exec: $exec_policy
+    }'
+}
+
 # Build the gateway section (common to all modes)
 build_gateway() {
   jq -n \
@@ -307,6 +341,7 @@ build_auth_profiles() {
 # =============================================================================
 generate_full() {
   local agents_list bindings_json env_json tg_channel dc_channel auth_profiles
+  local defaults_json tools_json
 
   agents_list=$(build_agents "")
   bindings_json=$(build_bindings "")
@@ -314,6 +349,8 @@ generate_full() {
   tg_channel=$(build_telegram_channel "")
   dc_channel=$(build_discord_channel "")
   auth_profiles=$(build_auth_profiles)
+  defaults_json=$(build_defaults)
+  tools_json=$(build_tools)
 
   jq -n \
     --argjson env "$env_json" \
@@ -325,8 +362,8 @@ generate_full() {
     --argjson dc "$dc_channel" \
     --argjson tg_enabled "$_tg_enabled" \
     --argjson dc_enabled "$_dc_enabled" \
-    --argjson exec_policy "$EXEC_POLICY" \
-    --arg workspace "${HOME_DIR}/clawd" \
+    --argjson defaults "$defaults_json" \
+    --argjson tools "$tools_json" \
     '{
       env: $env,
       browser: {
@@ -335,20 +372,9 @@ generate_full() {
         headless: false,
         noSandbox: true
       },
-      tools: {
-        agentToAgent: { enabled: true },
-        exec: $exec_policy
-      },
+      tools: $tools,
       agents: {
-        defaults: {
-          model: { primary: "anthropic/claude-opus-4-5" },
-          maxConcurrent: 4,
-          workspace: $workspace,
-          heartbeat: { every: "30m", session: "heartbeat" },
-          models: {
-            "openai/gpt-5.2": { params: { reasoning_effort: "high" } }
-          }
-        },
+        defaults: $defaults,
         list: $agents_list
       },
       bindings: $bindings,
@@ -387,6 +413,8 @@ generate_session() {
   bindings_json=$(build_bindings "$GROUP_AGENTS")
   tg_channel=$(build_telegram_channel "$GROUP_AGENTS")
   dc_channel=$(build_discord_channel "$GROUP_AGENTS")
+  local defaults_json
+  defaults_json=$(build_defaults)
 
   jq -n \
     --argjson agents_list "$agents_list" \
@@ -396,14 +424,12 @@ generate_session() {
     --argjson dc "$dc_channel" \
     --argjson tg_enabled "$_tg_enabled" \
     --argjson dc_enabled "$_dc_enabled" \
-    --arg workspace "${HOME_DIR}/clawd" \
+    --argjson defaults "$defaults_json" \
+    --argjson exec_policy "$EXEC_POLICY" \
     '{
+      tools: { exec: $exec_policy },
       agents: {
-        defaults: {
-          model: { primary: "anthropic/claude-opus-4-5" },
-          maxConcurrent: 4,
-          workspace: $workspace
-        },
+        defaults: $defaults,
         list: $agents_list
       },
       bindings: $bindings,
@@ -503,15 +529,15 @@ generate_safe_mode() {
       agents: {
         defaults: {
           model: { primary: $model },
-          workspace: $defaults_workspace,
-          tools: { exec: $exec_policy }
+          workspace: $defaults_workspace
         },
         list: [{
           id: "safe-mode",
           default: true,
           name: "SafeModeBot",
           model: $model,
-          workspace: $workspace
+          workspace: $workspace,
+          tools: { exec: $exec_policy }
         }]
       },
       gateway: $gateway,

@@ -266,17 +266,25 @@ else
   fail "safe-mode exec ask is not 'off' — bot will be blocked by confirmation prompts"
 fi
 
-# agents.defaults.tools.exec is where OpenClaw actually reads per-agent exec policy
-if echo "$SM_CONFIG" | jq -e '.agents.defaults.tools.exec' >/dev/null 2>&1; then
-  pass "safe-mode agents.defaults includes tools.exec"
+# Per-agent tools.exec is on agents.list[].tools.exec (NOT agents.defaults.tools
+# which is not in the OpenClaw config schema and causes "Config invalid").
+if echo "$SM_CONFIG" | jq -e '.agents.list[0].tools.exec' >/dev/null 2>&1; then
+  pass "safe-mode agent entry includes tools.exec"
 else
-  fail "safe-mode agents.defaults missing tools.exec — agent-level exec policy not set"
+  fail "safe-mode agent entry missing tools.exec — SafeModeBot won't have exec access"
 fi
 
-if echo "$SM_CONFIG" | jq -r '.agents.defaults.tools.exec.security' 2>/dev/null | grep -q 'full'; then
-  pass "safe-mode agents.defaults exec security is 'full'"
+if echo "$SM_CONFIG" | jq -r '.agents.list[0].tools.exec.security' 2>/dev/null | grep -q 'full'; then
+  pass "safe-mode agent entry exec security is 'full'"
 else
-  fail "safe-mode agents.defaults exec security is not 'full'"
+  fail "safe-mode agent entry exec security is not 'full'"
+fi
+
+# agents.defaults.tools must NOT exist (it's not in the config schema)
+if echo "$SM_CONFIG" | jq -e '.agents.defaults.tools' >/dev/null 2>&1; then
+  fail "agents.defaults.tools exists — this key is invalid and will crash the gateway"
+else
+  pass "agents.defaults.tools absent (correct — tools go on per-agent or top-level)"
 fi
 
 # =============================================================================
