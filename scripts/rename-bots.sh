@@ -37,12 +37,7 @@ rename_telegram() {
   for i in $(seq 1 $AC); do
     NV="AGENT${i}_NAME"; NAME="${!NV}"
     TV="AGENT${i}_BOT_TOKEN"; TOK="${!TV}"
-    # Don't append "Bot" if the name already ends in "Bot" (case-sensitive)
-    if [[ "$NAME" =~ Bot$ ]]; then
-      DN="${NAME}"
-    else
-      DN="${NAME}Bot"
-    fi
+    DN="${NAME}"
     [ -n "$HN" ] && DN="${DN} (${HN})"
     
     if [ -n "$TOK" ]; then
