@@ -8,13 +8,15 @@
 > v6 by ClaudeBot (2026-02-24) - integrated ChatGPT final audit (5 new fixes).
 > v7 by ClaudeBot (2026-02-24) - delta review: single manifest, secrets policy, self-sufficient examples.
 > v8 by ClaudeBot (2026-02-24) - final cleanup: terminology table, reader contract, last stale refs.
+> v9 by ClaudeBot (2026-02-27) - boot architecture: cloud-init power_state owns reboot, persistent self-destruct timer, modular runcmd.
 
 ---
 
 ## Table of Contents
 
 1. [Architecture Decision](#architecture-decision)
-2. [Current State Assessment](#current-state-assessment)
+2. [Boot Architecture](#boot-architecture)
+3. [Current State Assessment](#current-state-assessment)
 3. [SSOT Violations to Fix](#ssot-violations-to-fix)
 4. [Target Architecture](#target-architecture)
 5. [Pre-Implementation Checklist](#pre-implementation-checklist)
@@ -55,6 +57,39 @@
 - `systemctl stop openclaw-{group}` → `docker compose -p openclaw-{group} down`
 - `journalctl -u openclaw-{group}` → `docker compose -p openclaw-{group} logs`
 - `pgrep -f openclaw.gateway` → `docker inspect --format='{{.State.Running}}' openclaw-{group}`
+
+---
+
+## Boot Architecture
+
+**Cloud-init `power_state` owns the reboot, not `provision.sh`.**
+
+Provisioning scripts must never call `reboot` directly. The boot pipeline uses cloud-init's `power_state` module to reboot AFTER all `runcmd` entries complete, eliminating the class of bugs where runcmd entries race the shutdown.
+
+```yaml
+# hatch.yaml
+runcmd:
+  # provision.sh does stages 1-7, marks provision-complete, exits (NO reboot)
+  - [bash, -lc, "/usr/local/bin/bootstrap.sh"]
+  # These run with full network and systemd -- guaranteed by power_state
+  - [bash, -lc, "/usr/local/bin/schedule-destruct.sh"]
+  - [bash, -lc, "/usr/local/bin/rename-bots.sh"]
+
+power_state:
+  delay: "now"
+  mode: reboot
+  message: "Rebooting after provisioning"
+  condition: "test -f /var/lib/init-status/provision-complete"
+```
+
+**Why this matters:** `provision.sh` previously called `reboot` at the end of Stage 7. But `reboot` signals systemd and returns immediately -- cloud-init continued executing remaining runcmd entries while the network was being torn down. This caused `curl` (rename-bots), `systemd-run` (schedule-destruct), and `systemctl start` (api-server) to fail silently.
+
+**Key rules:**
+- `provision.sh` does stages 1-7, writes `provision-complete` marker, exits
+- Post-provision tasks (rename-bots, schedule-destruct) are modular runcmd entries
+- `power_state` reboots only if `provision-complete` marker exists (failed provisions don't reboot)
+- Adding a new post-provision task = adding a runcmd line (no code changes to provision.sh)
+- Self-destruct uses persistent systemd timer units (`OnBootSec`), not transient `systemd-run`
 
 ---
 
@@ -1586,14 +1621,29 @@ Track implementation status here. Updated as work proceeds.
 - [x] Commit: b3dfa2f
 - [x] Pushed to remote
 
+### Post-Phase: Boot Architecture Hardening
+- [x] Diagnosed runcmd-vs-shutdown race condition (rename-bots, schedule-destruct, api-server all fail during provisioning)
+- [x] Rewrote `schedule-destruct.sh` from transient `systemd-run` to persistent timer units (`OnBootSec`)
+- [x] Removed `reboot` from `provision.sh` -- cloud-init `power_state` module owns the reboot
+- [x] Restored modular `runcmd` entries (safe because power_state runs after all runcmd complete)
+- [x] Added `power_state` section to `hatch.yaml` (gated on `provision-complete` marker)
+- [x] 20 new tests: `test_runcmd_race.py` (11) + `test_schedule_destruct.py` (9)
+- [x] Commits: 188d39a, 696b444
+
+### Live Validation
+- [x] Container isolation: `bot2.frysinger.org` -- Stage 11 READY, both containers healthy
+- [x] Session isolation regression: `jobhunt.frysinger.org` -- Stage 11 READY, both session groups active
+- [x] Code review: R8 + R9 (clean pass, merge-ready)
+- [x] rename-bots display names: BotBot suffix bug fixed (`d252226`)
+
 ### Current Status
-**Phase**: ALL PHASES COMPLETE (1-7)
-**Last updated**: 2026-02-24 19:00 UTC
-**Commits**: da1e775, b68a6e6, 022117d, dc8d3be, 5d2ff8f, b3dfa2f, 343d8f8
-**Tests**: 133 passing (31 lib-isolation + 19 orchestration + 37 compose + 19 dockerfile + 8 install + 19 healthcheck)
-**All 36 scripts pass bash -n**
+**Phase**: ALL PHASES COMPLETE (1-7) + boot architecture hardening
+**Last updated**: 2026-02-27 03:10 UTC
+**Commits**: da1e775 ... 343d8f8, f545823, d252226, 5c526ad, 69f3317, 188d39a, 696b444
+**Tests**: 1056 passing, 3 skipped, 0 failed (includes 20 new boot architecture tests)
+**All scripts pass bash -n**
 **Branch pushed**: feature/docker-isolation
-**Next step**: Live droplet test (Phase 5 in plan — needs real container isolation habitat)
+**Next step**: Merge to main
 
 ---
 
