@@ -40,6 +40,11 @@ START=$(date +%s)
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [provision] $*" | tee -a "$LOG"; }
 
+# Clear stale failure marker from previous runs (allows manual re-run on
+# failed droplets without requiring cleanup: just re-run provision.sh).
+mkdir -p /var/lib/init-status
+rm -f /var/lib/init-status/build-failed
+
 # Source permission utilities
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
 
@@ -526,6 +531,7 @@ if [ -f /var/lib/init-status/build-failed ]; then
   ELAPSED=$(( $(date +%s) - START ))
   log "Provisioning FAILED in ${ELAPSED}s — build-failed marker present, skipping provision-complete"
   log "Droplet will NOT reboot (power_state condition will fail). SSH in to debug."
+  log "NOTE: self-destruct timer (if configured) is still active from this boot."
   $S 8 "provision-failed"
   exit 1
 fi
