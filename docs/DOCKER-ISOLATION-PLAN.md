@@ -151,6 +151,7 @@ hc_stop_modify_start() {
 - **Safe mode recovery**: MUST use `hc_stop_modify_start()` with a callback that restores auth-profiles from the golden copy.
 - **Config updates while gateway is running**: Stop → modify → start. Never `cp && restart`.
 - **Adding new providers**: Update both `auth-profiles.json` and `auth-profiles.provisioned.json` (or re-run `build-full-config.sh`).
+- **Credential rotation**: The golden copy is static after provisioning. If OAuth tokens are refreshed at runtime (e.g., OpenAI token refresh), the golden copy becomes stale. This is acceptable — the refresh token remains valid and OpenClaw re-authenticates on startup. To update the golden copy after credential changes, re-run `build-full-config.sh` or manually: `cp auth-profiles.json auth-profiles.provisioned.json`.
 
 ---
 

@@ -264,6 +264,8 @@ APJ
 # Golden copy — never modified by gateway, survives shutdown persistence clobber.
 # Safe mode recovery reads from this to find OAuth tokens that may have been
 # dropped from the live copy during gateway restart cycles.
+# NOTE: This is static after provisioning. If credentials are rotated at runtime
+# (e.g., OAuth token refresh), re-run build-full-config.sh to update the golden copy.
 cp "$H/.openclaw/agents/main/agent/auth-profiles.json" \
    "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
 
