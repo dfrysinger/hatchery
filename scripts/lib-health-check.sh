@@ -236,6 +236,29 @@ hc_wait_for_http() {
 #   $2 — max wait in seconds (optional, default auto-scaled by isolation mode)
 #
 # Returns: 0 if gateway responds, 1 if timed out
+# Stop gateway, run a modification callback, then start + wait for HTTP.
+# Prevents the gateway's SIGTERM handler from clobbering files written by the
+# callback (auth-profiles.json, openclaw.json). The callback runs AFTER the
+# gateway has fully stopped and persisted its state.
+#
+# Usage: hc_stop_modify_start GROUP modify_function [args...]
+hc_stop_modify_start() {
+  local group="${1:-${GROUP:-}}"; shift
+  local callback="$1"; shift
+
+  log "Stopping $(_hc_service_name "$group") for safe file modification..."
+  hc_stop_service "$group" || true
+
+  # Gateway has stopped and persisted its state. Now safe to modify files.
+  log "Service stopped — running modification callback..."
+  "$callback" "$@"
+
+  log "Starting $(_hc_service_name "$group")..."
+  hc_start_service "$group" || true
+
+  hc_wait_for_http "$group"
+}
+
 hc_restart_and_wait() {
   local group="${1:-${GROUP:-}}"
   local max_wait="${2:-}"
@@ -276,6 +299,22 @@ hc_stop_service() {
       systemctl stop openclaw 2>&1 ;;
     *)
       systemctl stop "openclaw-${group}" 2>&1 ;;
+  esac
+}
+
+hc_start_service() {
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" up -d 2>&1 ;;
+    none)
+      systemctl start openclaw 2>&1 ;;
+    *)
+      systemctl start "openclaw-${group}" 2>&1 ;;
   esac
 }
 

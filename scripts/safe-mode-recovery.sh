@@ -189,10 +189,12 @@ check_oauth_profile() {
     return 1
   fi
   
-  # Find auth-profiles.json
+  # Find auth-profiles.json — prefer golden provisioned copy (survives gateway
+  # SIGTERM persistence clobber), fall back to live copy if golden doesn't exist.
   if [ -z "$auth_file" ]; then
     local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
     for path in \
+      "$home/.openclaw/agents/main/agent/auth-profiles.provisioned.json" \
       "$home/.openclaw/agents/main/agent/auth-profiles.json" \
       "$home/.openclaw/agents/agent1/agent/auth-profiles.json" \
       "$home/.openclaw/agent/auth-profiles.json"; do

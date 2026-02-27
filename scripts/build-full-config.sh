@@ -257,15 +257,25 @@ fi
 # NOTE: This file provides actual credentials for OpenClaw's auth resolution.
 # generate-config.sh also references auth.profiles in the JSON config (provider list only).
 # Both are generated from the same env vars, but keep them in sync if adding providers.
+# Write auth-profiles.json (live copy — gateway reads/writes/persists on shutdown)
 cat > "$H/.openclaw/agents/main/agent/auth-profiles.json" <<APJ
 {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","key":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"key\":\"${GK}\"}")}}
 APJ
+# Golden copy — never modified by gateway, survives shutdown persistence clobber.
+# Safe mode recovery reads from this to find OAuth tokens that may have been
+# dropped from the live copy during gateway restart cycles.
+cp "$H/.openclaw/agents/main/agent/auth-profiles.json" \
+   "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
+
 # SECURITY: auth-profiles.json contains credentials - restrict permissions
 if type ensure_bot_file &>/dev/null; then
   ensure_bot_file "$H/.openclaw/agents/main/agent/auth-profiles.json" 600
+  ensure_bot_file "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json" 600
 else
-  chmod 600 "$H/.openclaw/agents/main/agent/auth-profiles.json"
-  chown "$USERNAME:$USERNAME" "$H/.openclaw/agents/main/agent/auth-profiles.json"
+  chmod 600 "$H/.openclaw/agents/main/agent/auth-profiles.json" \
+            "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
+  chown "$USERNAME:$USERNAME" "$H/.openclaw/agents/main/agent/auth-profiles.json" \
+                              "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
 fi
 for i in $(seq 1 $AC); do
   if type ensure_bot_dir &>/dev/null; then

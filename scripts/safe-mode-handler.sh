@@ -295,10 +295,30 @@ generate_boot_report
 
 # --- Restart service ---
 
+# Restore auth-profiles from golden provisioned copy.
+# Called between gateway stop and start to prevent the gateway's SIGTERM
+# persistence handler from clobbering OAuth tokens and other credentials.
+_restore_auth_profiles() {
+  local home="${H:-/home/${HC_USERNAME:-bot}}"
+  local live="$home/.openclaw/agents/main/agent/auth-profiles.json"
+  local golden="$home/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
+
+  if [ -f "$golden" ]; then
+    cp "$golden" "$live"
+    chmod 600 "$live"
+    [ -n "${HC_USERNAME:-}" ] && chown "${HC_USERNAME}:${HC_USERNAME}" "$live" 2>/dev/null
+    log "Restored auth-profiles.json from provisioned golden copy"
+  else
+    log "WARNING: No golden auth-profiles.provisioned.json found — live copy may be stale"
+  fi
+}
+
 restart_and_verify() {
-  # Single restart, poll HTTP — delegates to hc_restart_and_wait()
-  # which auto-scales timeout by isolation mode (30s systemd, 90s container).
-  if hc_restart_and_wait "${GROUP:-}"; then
+  # Use stop → modify → start pattern to prevent the gateway's SIGTERM
+  # handler from clobbering auth-profiles.json (and config). The gateway
+  # persists in-memory state on shutdown, which can drop OAuth tokens
+  # that weren't loaded by the safe-mode config.
+  if hc_stop_modify_start "${GROUP:-}" _restore_auth_profiles; then
     log "$(_hc_service_name "${GROUP:-}") is serving HTTP"
     /usr/local/bin/rename-bots.sh >> "$HC_LOG" 2>&1 || true
     return 0
