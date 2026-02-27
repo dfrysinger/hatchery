@@ -187,6 +187,79 @@ class TestProvisionCompletionGate:
         )
 
 
+class TestCriticalStageGating:
+    """Critical stages (1-3, 7) must gate the provision-complete marker."""
+
+    def _stage_section(self, start_num, end_num):
+        """Extract section between two stage markers."""
+        content = _load_provision()
+        pattern = rf"# Stage {start_num}:.*?# Stage {end_num}:"
+        match = re.search(pattern, content, re.DOTALL)
+        assert match, f"Cannot find Stage {start_num} section"
+        return match.group()
+
+    def test_stage1_verifies_node(self):
+        """Stage 1 must verify node binary and set build-failed if missing."""
+        section = self._stage_section(1, 2)
+        assert "command -v node" in section, (
+            "Stage 1 must check for node binary after installation"
+        )
+        assert "build-failed" in section, (
+            "Stage 1 must set build-failed if Node.js installation fails"
+        )
+
+    def test_stage2_verifies_openclaw(self):
+        """Stage 2 must verify openclaw binary and set build-failed if missing."""
+        section = self._stage_section(2, 3)
+        assert "command -v openclaw" in section, (
+            "Stage 2 must check for openclaw binary after installation"
+        )
+        assert "build-failed" in section, (
+            "Stage 2 must set build-failed if OpenClaw installation fails"
+        )
+
+    def test_stage3_verifies_user(self):
+        """Stage 3 must verify bot user exists and set build-failed if missing."""
+        section = self._stage_section(3, 4)
+        assert "build-failed" in section, (
+            "Stage 3 must set build-failed if user creation fails"
+        )
+        # Check for user existence verification (id command)
+        assert re.search(r'id\s.*USERNAME', section), (
+            "Stage 3 must verify bot user exists with id command"
+        )
+
+    def test_stage7_already_gates(self):
+        """Stage 7 (build-full-config.sh) already sets build-failed on failure."""
+        content = _load_provision()
+        # Find build-full-config.sh call and verify it has || build-failed
+        assert re.search(
+            r'build-full-config\.sh.*build-failed', content, re.DOTALL
+        ), "Stage 7 must set build-failed if build-full-config.sh fails"
+
+    def test_header_documents_critical_stages(self):
+        """Header must document which stages are critical."""
+        content = _load_provision()
+        header = content[:1500]  # First ~30 lines
+        assert "CRITICAL" in header, (
+            "Header must mark critical stages (stages that gate provision-complete)"
+        )
+
+    def test_completion_gate_documents_all_critical_stages(self):
+        """The completion gate comment must list all critical stages."""
+        content = _load_provision()
+        # Find the gate section
+        gate_match = re.search(
+            r'# Gate the provision-complete.*?if \[', content, re.DOTALL
+        )
+        assert gate_match, "Cannot find completion gate section"
+        gate_comment = gate_match.group()
+        for keyword in ["Node", "OpenClaw", "Bot user", "build-full-config"]:
+            assert keyword in gate_comment, (
+                f"Completion gate comment must mention {keyword}"
+            )
+
+
 class TestProvisionClean:
     """provision.sh should NOT contain tasks that belong in runcmd."""
 

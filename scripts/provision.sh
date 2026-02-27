@@ -6,18 +6,22 @@
 # One script, sequential stages, no background fork. Does NOT reboot.
 #
 # Called by: bootstrap.sh (which is called by cloud-init runcmd)
-# Reboot: handled by cloud-init power_state module AFTER all runcmd entries
-#         complete. Gated on provision-complete marker (not set on failure).
+# Reboot: cloud-init power_state module triggers reboot AFTER all runcmd
+#         entries complete. Gated on provision-complete marker.
+#
+# Critical stages (1-3, 7) set build-failed on failure, which prevents
+# provision-complete from being written and thus prevents reboot. The
+# droplet stays up for SSH debugging.
 #
 # Stages:
-#   1. Parse config + install Node/jq + start API server
-#   2. Install OpenClaw (npm)
-#   3. Create user + workspace + gateway token
+#   1. Parse config + install Node/jq + start API server  [CRITICAL]
+#   2. Install OpenClaw (npm)                              [CRITICAL]
+#   3. Create user + workspace + gateway token             [CRITICAL]
 #   4. Install desktop packages (apt)
 #   5. Install developer tools (apt)
 #   6. Install Chrome, pip packages & helpers
-#   7. Configure desktop + apps + build config + enable services
-#   8. Mark complete (or fail) -- cloud-init handles reboot via power_state
+#   7. Configure desktop + apps + build config + enable    [CRITICAL]
+#   8. Gate completion marker — exit (cloud-init reboots)
 #
 # After reboot: systemd starts enabled services -> health check -> E2E
 # =============================================================================
@@ -111,6 +115,13 @@ else
 fi
 apt-get install -y jq >> "$LOG" 2>&1 || true
 
+# Verify critical: Node binary must exist for npm/OpenClaw installation.
+# Without Node, stages 2+ are all broken.
+if ! command -v node &>/dev/null; then
+  log "FATAL: Node.js installation failed — node binary not found"
+  touch /var/lib/init-status/build-failed
+fi
+
 # Start API server early so iOS Shortcut can track provisioning stages
 if [ ! -f /etc/systemd/system/api-server.service ]; then
   cat > /etc/systemd/system/api-server.service <<'APISVC'
@@ -146,6 +157,13 @@ $S 2 "installing-openclaw"
 log "Stage 2: Installing OpenClaw..."
 
 npm install -g openclaw@latest >> "$LOG" 2>&1
+
+# Verify critical: OpenClaw binary must exist for post-boot services.
+# Safe mode itself needs the openclaw binary — it cannot recover from this.
+if ! command -v openclaw &>/dev/null; then
+  log "FATAL: OpenClaw installation failed — openclaw binary not found"
+  touch /var/lib/init-status/build-failed
+fi
 
 # =============================================================================
 # Stage 3: Create user + workspace
@@ -190,6 +208,13 @@ chown -R "$USERNAME:$USERNAME" "$H/.openclaw" "$H/clawd"
 chmod 700 "$H/.openclaw"
 chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
 ensure_exec_approvals "$H"
+
+# Verify critical: bot user must exist for all downstream operations.
+# Services, config, and workspace all depend on this user.
+if ! id "$USERNAME" &>/dev/null; then
+  log "FATAL: User creation failed — $USERNAME does not exist"
+  touch /var/lib/init-status/build-failed
+fi
 
 # =============================================================================
 # Stage 4: Install desktop packages (apt)
@@ -488,8 +513,15 @@ systemctl enable post-boot-check.service 2>/dev/null || true
 touch /var/lib/init-status/needs-post-boot-check
 
 # Gate the provision-complete marker on no critical failures.
-# This marker controls the cloud-init power_state reboot -- without it, no
-# reboot occurs and the droplet stays up for debugging.
+# Critical stages set build-failed on failure:
+#   Stage 1: Node.js binary    (required for npm/OpenClaw)
+#   Stage 2: OpenClaw binary   (required for post-boot services + safe mode)
+#   Stage 3: Bot user          (required for service startup + config ownership)
+#   Stage 7: build-full-config (required for valid OpenClaw config)
+# Stages 4-6 are non-critical — OpenClaw boots without desktop/tools/extras
+# and safe mode can recover from those missing packages.
+# Without this marker, cloud-init power_state condition fails → no reboot →
+# droplet stays up for SSH debugging.
 if [ -f /var/lib/init-status/build-failed ]; then
   ELAPSED=$(( $(date +%s) - START ))
   log "Provisioning FAILED in ${ELAPSED}s — build-failed marker present, skipping provision-complete"
