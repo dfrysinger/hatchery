@@ -31,6 +31,11 @@ for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[
 done
 type d &>/dev/null || { echo "FATAL: lib-env.sh not found" >&2; exit 1; }
 
+# --- Source lib-auth.sh (for get_default_model_for_provider) ---
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-auth.sh" ] && { source "$_lib_path/lib-auth.sh"; break; }
+done
+
 # --- Parse arguments ---
 MODE=""
 GROUP=""
@@ -467,15 +472,14 @@ generate_safe_mode() {
   fi
 
   # Use explicitly passed model, or fall back to provider default
-  # NOTE: Keep in sync with get_default_model_for_provider() in lib-auth.sh
   local model="${SM_MODEL:-}"
   if [ -z "$model" ]; then
-    case "$SM_PROVIDER" in
-      anthropic) model="anthropic/claude-sonnet-4-5" ;;
-      openai)    model="openai/gpt-4.1-mini" ;;
-      google)    model="google/gemini-2.5-flash" ;;
-      *)         model="anthropic/claude-sonnet-4-5" ;;
-    esac
+    if type get_default_model_for_provider &>/dev/null; then
+      model=$(get_default_model_for_provider "$SM_PROVIDER")
+    else
+      # Fallback if lib-auth.sh not available (shouldn't happen in production)
+      model="anthropic/claude-sonnet-4-5"
+    fi
   fi
 
   # Build channel config — only include the active platform.
