@@ -482,47 +482,22 @@ else
   chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
 fi
 
-# =============================================================================
-# Pre-reboot tasks (must run while network and systemd are fully operational)
-# =============================================================================
-# These were previously in hatch.yaml runcmd entries AFTER bootstrap.sh, but
-# provision.sh triggers a reboot at the end of Stage 7. The reboot signals
-# systemd but returns immediately, so cloud-init continues executing runcmd
-# entries while systemd is shutting down. This causes:
-#   - systemctl start/enable --now → FAILS (systemd stopping)
-#   - curl (rename-bots) → FAILS (network torn down)
-#   - systemd-run (schedule-destruct) → FAILS (reboot.target queued)
-# Fix: run everything here, before the reboot.
-
 # Enable post-boot health check (runs after reboot to verify services)
 systemctl enable post-boot-check.service 2>/dev/null || true
 
-# Schedule self-destruct timer (persistent unit, survives reboot)
-/usr/local/bin/schedule-destruct.sh || log "Warning: schedule-destruct failed (non-fatal)"
-
-# Rename Telegram bots with habitat-specific display names
-/usr/local/bin/rename-bots.sh || log "Warning: rename-bots failed (non-fatal)"
-
-# Mark provisioning complete (before reboot)
+# Mark provisioning complete
+# This marker gates the cloud-init power_state reboot — without it, no reboot.
 touch /var/lib/init-status/provision-complete
 touch /var/lib/init-status/needs-post-boot-check
 
 ELAPSED=$(( $(date +%s) - START ))
-log "Provisioning complete in ${ELAPSED}s — rebooting"
+log "Provisioning complete in ${ELAPSED}s"
 
 # =============================================================================
-# Stage 8: REBOOT
+# NOTE: provision.sh does NOT reboot. Cloud-init's power_state module owns
+# the reboot and triggers it AFTER all runcmd entries (schedule-destruct,
+# rename-bots, etc.) have completed. This eliminates the race condition where
+# runcmd entries execute during shutdown.
 # =============================================================================
-# Reboot is REQUIRED:
-# - Packages need kernel modules loaded (xrdp, chrome sandbox)
-# - systemd needs clean daemon-reload after new unit files
-# - Avoids weird state from halfway-installed packages
-# - All services are enabled and will start automatically on boot
 
-if [ -f /var/lib/init-status/build-failed ]; then
-  log "!!! BUILD FAILED — rebooting anyway but services will not start correctly !!!"
-fi
-
-$S 8 "rebooting"
-sleep 2
-reboot
+$S 8 "waiting-for-reboot"

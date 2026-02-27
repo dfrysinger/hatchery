@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Tests for runcmd race condition prevention.
+"""Tests for runcmd / power_state boot architecture.
 
-Validates that hatch.yaml runcmd contains ONLY bootstrap.sh, and that
-provision.sh handles all pre-reboot tasks (rename-bots, schedule-destruct,
-post-boot-check) before triggering the reboot.
+Validates that:
+1. provision.sh does NOT call reboot (cloud-init power_state owns the reboot)
+2. hatch.yaml uses power_state to reboot after all runcmd entries complete
+3. runcmd entries are modular and safe (network/systemd guaranteed operational)
 
-Background: cloud-init runcmd entries after bootstrap.sh race against the
-reboot triggered by provision.sh. systemd is already shutting down when
-they execute, causing network operations (curl) and service management
-(systemctl start) to fail silently.
+Background: cloud-init runcmd entries run sequentially. If any entry triggers
+a reboot, subsequent entries race the shutdown. The fix is to let cloud-init's
+power_state module handle the reboot AFTER all runcmd entries complete. This
+eliminates the race condition as a class, not just for specific scripts.
 """
 
 import os
@@ -19,110 +20,152 @@ import pytest
 REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 
-class TestHatchYamlRuncmd:
-    """hatch.yaml runcmd must not have entries that race the reboot."""
+def _load_yaml():
+    with open(os.path.join(REPO_ROOT, "hatch.yaml")) as f:
+        return f.read()
 
-    def _load_hatch_yaml(self):
-        path = os.path.join(REPO_ROOT, "hatch.yaml")
-        with open(path) as f:
-            return f.read()
 
-    def _get_runcmd_entries(self):
-        """Extract only command entries (not comments) from runcmd section."""
-        content = self._load_hatch_yaml()
-        runcmd_match = re.search(r"^runcmd:.*?(?=^\w|\Z)", content, re.MULTILINE | re.DOTALL)
-        assert runcmd_match, "No runcmd section found in hatch.yaml"
-        runcmd = runcmd_match.group()
-        # Only check actual command entries (lines starting with '  -'), not comments
-        entries = [
-            line.strip()
-            for line in runcmd.split("\n")
-            if line.strip().startswith("- ")
-        ]
-        return entries
+def _load_provision():
+    with open(os.path.join(REPO_ROOT, "scripts", "provision.sh")) as f:
+        return f.read()
 
-    def test_no_rename_bots_in_runcmd(self):
-        """rename-bots.sh must not be a runcmd entry (runs in provision.sh instead)."""
-        entries = self._get_runcmd_entries()
-        for entry in entries:
-            assert "rename-bots" not in entry, (
-                "rename-bots.sh is in runcmd and will race the reboot. "
-                "Move to provision.sh pre-reboot section."
-            )
 
-    def test_no_schedule_destruct_in_runcmd(self):
-        """schedule-destruct.sh must not be a runcmd entry (runs in provision.sh instead)."""
-        entries = self._get_runcmd_entries()
-        for entry in entries:
-            assert "schedule-destruct" not in entry, (
-                "schedule-destruct.sh is in runcmd and will race the reboot. "
-                "Move to provision.sh pre-reboot section."
-            )
+def _get_runcmd_entries(content):
+    """Extract command entries (not comments) from runcmd section."""
+    runcmd_match = re.search(
+        r"^runcmd:.*?(?=^\w|\Z)", content, re.MULTILINE | re.DOTALL
+    )
+    assert runcmd_match, "No runcmd section found in hatch.yaml"
+    return [
+        line.strip()
+        for line in runcmd_match.group().split("\n")
+        if line.strip().startswith("- ")
+    ]
+
+
+class TestPowerStateArchitecture:
+    """cloud-init power_state must own the reboot, not provision.sh."""
+
+    def test_power_state_present(self):
+        """hatch.yaml must have a power_state section."""
+        content = _load_yaml()
+        assert re.search(
+            r"^power_state:", content, re.MULTILINE
+        ), "hatch.yaml missing power_state section. Cloud-init must own the reboot."
+
+    def test_power_state_mode_reboot(self):
+        """power_state must specify mode: reboot."""
+        content = _load_yaml()
+        ps_match = re.search(
+            r"^power_state:.*?(?=^\w|\Z)", content, re.MULTILINE | re.DOTALL
+        )
+        assert ps_match, "No power_state section"
+        assert re.search(
+            r"mode:\s*reboot", ps_match.group()
+        ), "power_state.mode must be 'reboot'"
+
+    def test_power_state_has_condition(self):
+        """power_state must be gated on provision-complete marker."""
+        content = _load_yaml()
+        ps_match = re.search(
+            r"^power_state:.*?(?=^\w|\Z)", content, re.MULTILINE | re.DOTALL
+        )
+        assert ps_match, "No power_state section"
+        assert "provision-complete" in ps_match.group(), (
+            "power_state must be conditioned on provision-complete marker "
+            "to avoid rebooting on failed provisions"
+        )
+
+    def test_provision_does_not_reboot(self):
+        """provision.sh must NOT call reboot directly."""
+        content = _load_provision()
+        # Look for bare 'reboot' command (not in comments)
+        for i, line in enumerate(content.split("\n"), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if re.match(r"^(sudo\s+)?reboot(\s|$)", stripped):
+                pytest.fail(
+                    f"provision.sh line {i}: calls reboot directly. "
+                    "Cloud-init power_state must own the reboot."
+                )
+
+    def test_provision_does_not_shutdown(self):
+        """provision.sh must NOT call shutdown -r directly."""
+        content = _load_provision()
+        for i, line in enumerate(content.split("\n"), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if re.match(r"^(sudo\s+)?shutdown\s+-r", stripped):
+                pytest.fail(
+                    f"provision.sh line {i}: calls shutdown -r. "
+                    "Cloud-init power_state must own the reboot."
+                )
+
+
+class TestRuncmdModular:
+    """runcmd entries should be modular post-provision tasks."""
+
+    def test_bootstrap_is_first_entry(self):
+        """bootstrap.sh must be the first runcmd entry."""
+        entries = _get_runcmd_entries(_load_yaml())
+        assert len(entries) >= 1, "No runcmd entries found"
+        assert "bootstrap.sh" in entries[0], (
+            f"First runcmd entry must be bootstrap.sh, got: {entries[0]}"
+        )
 
     def test_no_systemctl_enable_now_in_runcmd(self):
-        """systemctl enable --now must not be a runcmd entry (fails during shutdown)."""
-        entries = self._get_runcmd_entries()
+        """systemctl enable --now is redundant (already in provision.sh)."""
+        entries = _get_runcmd_entries(_load_yaml())
         for entry in entries:
             assert "enable --now" not in entry, (
-                "systemctl enable --now in runcmd fails during shutdown. "
-                "Move to provision.sh."
+                "systemctl enable --now in runcmd is redundant with provision.sh. "
+                "Remove it."
             )
 
-    def test_runcmd_only_bootstrap(self):
-        """runcmd should only contain bootstrap.sh (everything else is in provision.sh)."""
-        content = self._load_hatch_yaml()
-        runcmd_match = re.search(r"^runcmd:.*?(?=^\w|\Z)", content, re.MULTILINE | re.DOTALL)
-        runcmd = runcmd_match.group()
-        # Count actual command entries (lines starting with '  -')
-        entries = [
-            line.strip()
-            for line in runcmd.split("\n")
-            if line.strip().startswith("- ")
-        ]
-        assert len(entries) == 1, (
-            f"runcmd has {len(entries)} entries, expected 1 (bootstrap.sh only). "
-            f"Entries: {entries}"
-        )
-        assert "bootstrap.sh" in entries[0]
-
-
-class TestProvisionPreReboot:
-    """provision.sh must call pre-reboot tasks before the reboot."""
-
-    def _load_provision(self):
-        path = os.path.join(REPO_ROOT, "scripts", "provision.sh")
-        with open(path) as f:
-            return f.read()
-
-    def test_rename_bots_before_reboot(self):
-        """rename-bots.sh called before the reboot command."""
-        content = self._load_provision()
-        rename_pos = content.find("rename-bots.sh")
-        reboot_pos = content.rfind("\nreboot")
-        assert rename_pos > 0, "rename-bots.sh not found in provision.sh"
-        assert reboot_pos > 0, "reboot not found in provision.sh"
-        assert rename_pos < reboot_pos, (
-            "rename-bots.sh must be called BEFORE reboot in provision.sh"
+    def test_rename_bots_in_runcmd(self):
+        """rename-bots.sh should be a modular runcmd entry (safe with power_state)."""
+        entries = _get_runcmd_entries(_load_yaml())
+        has_rename = any("rename-bots" in e for e in entries)
+        assert has_rename, (
+            "rename-bots.sh should be in runcmd (safe because power_state owns reboot)"
         )
 
-    def test_schedule_destruct_before_reboot(self):
-        """schedule-destruct.sh called before the reboot command."""
-        content = self._load_provision()
-        destruct_pos = content.find("schedule-destruct.sh")
-        reboot_pos = content.rfind("\nreboot")
-        assert destruct_pos > 0, "schedule-destruct.sh not found in provision.sh"
-        assert reboot_pos > 0, "reboot not found in provision.sh"
-        assert destruct_pos < reboot_pos, (
-            "schedule-destruct.sh must be called BEFORE reboot in provision.sh"
+    def test_schedule_destruct_in_runcmd(self):
+        """schedule-destruct.sh should be a modular runcmd entry."""
+        entries = _get_runcmd_entries(_load_yaml())
+        has_destruct = any("schedule-destruct" in e for e in entries)
+        assert has_destruct, (
+            "schedule-destruct.sh should be in runcmd (safe because power_state owns reboot)"
         )
 
-    def test_post_boot_check_enabled_before_reboot(self):
-        """post-boot-check.service enabled before the reboot command."""
-        content = self._load_provision()
-        enable_pos = content.find("post-boot-check.service")
-        reboot_pos = content.rfind("\nreboot")
-        assert enable_pos > 0, "post-boot-check.service not found in provision.sh"
-        assert reboot_pos > 0
-        assert enable_pos < reboot_pos, (
-            "post-boot-check.service must be enabled BEFORE reboot in provision.sh"
-        )
+
+class TestProvisionClean:
+    """provision.sh should NOT contain tasks that belong in runcmd."""
+
+    def test_no_rename_bots_call(self):
+        """provision.sh should not call rename-bots.sh (it's a runcmd entry)."""
+        content = _load_provision()
+        for i, line in enumerate(content.split("\n"), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if "rename-bots.sh" in stripped:
+                pytest.fail(
+                    f"provision.sh line {i}: calls rename-bots.sh. "
+                    "This is a modular runcmd task, not a provisioning step."
+                )
+
+    def test_no_schedule_destruct_call(self):
+        """provision.sh should not call schedule-destruct.sh (it's a runcmd entry)."""
+        content = _load_provision()
+        for i, line in enumerate(content.split("\n"), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if "schedule-destruct.sh" in stripped:
+                pytest.fail(
+                    f"provision.sh line {i}: calls schedule-destruct.sh. "
+                    "This is a modular runcmd task, not a provisioning step."
+                )

@@ -148,8 +148,20 @@ write_files:
 users:
   - default
 runcmd:
-  # bootstrap.sh extracts hatcheryVersion from HABITAT_B64 before fetching code.
-  # ALL other tasks (api-server, post-boot-check, schedule-destruct, rename-bots)
-  # are now in provision.sh's pre-reboot section. They CANNOT be here because
-  # provision.sh triggers a reboot, and remaining runcmd entries race the shutdown.
+  # provision.sh does stages 1-7 but does NOT reboot.
+  # cloud-init power_state (below) owns the reboot, triggered AFTER all runcmd
+  # entries complete. This guarantees network and systemd are fully operational
+  # for every entry -- no shutdown race conditions.
   - [bash, -lc, "/usr/local/bin/bootstrap.sh>>/var/log/bootstrap.log 2>&1"]
+  - [bash, -lc, "/usr/local/bin/schedule-destruct.sh"]
+  - [bash, -lc, "/usr/local/bin/rename-bots.sh"]
+
+# Reboot AFTER all runcmd entries complete. Gated on provision-complete marker
+# so failed provisions don't trigger a reboot loop.
+# Why reboot: kernel modules (xrdp, chrome sandbox), clean systemd daemon-reload,
+# avoids weird state from halfway-installed packages.
+power_state:
+  delay: "now"
+  mode: reboot
+  message: "Rebooting after provisioning"
+  condition: "test -f /var/lib/init-status/provision-complete"
