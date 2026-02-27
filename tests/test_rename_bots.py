@@ -157,13 +157,25 @@ class TestRenameTelegram:
         assert any("MyHabitat" in c for c in tg_calls)
 
     def test_display_name_format(self):
+        """Display name uses agent name as-is (no Bot suffix) + habitat."""
         rc, stdout, calls = run_rename(
             platform="telegram",
             agents=[{"name": "Claude", "bot_token": "tok"}],
             habitat_name="TestHab",
         )
         tg_calls = [c for c in calls if "setMyName" in c]
+        assert any("Claude (TestHab)" in c for c in tg_calls)
+
+    def test_display_name_no_double_bot(self):
+        """Names already ending in Bot should NOT get Bot appended."""
+        rc, stdout, calls = run_rename(
+            platform="telegram",
+            agents=[{"name": "ClaudeBot", "bot_token": "tok"}],
+            habitat_name="TestHab",
+        )
+        tg_calls = [c for c in calls if "setMyName" in c]
         assert any("ClaudeBot (TestHab)" in c for c in tg_calls)
+        assert not any("ClaudeBotBot" in c for c in tg_calls)
 
     def test_logs_rename_action(self):
         rc, stdout, calls = run_rename(platform="telegram")
