@@ -148,9 +148,8 @@ write_files:
 users:
   - default
 runcmd:
-  # bootstrap.sh extracts hatcheryVersion from HABITAT_B64 before fetching code
+  # bootstrap.sh extracts hatcheryVersion from HABITAT_B64 before fetching code.
+  # ALL other tasks (api-server, post-boot-check, schedule-destruct, rename-bots)
+  # are now in provision.sh's pre-reboot section. They CANNOT be here because
+  # provision.sh triggers a reboot, and remaining runcmd entries race the shutdown.
   - [bash, -lc, "/usr/local/bin/bootstrap.sh>>/var/log/bootstrap.log 2>&1"]
-  - [bash, -lc, "systemctl daemon-reload;systemctl enable --now api-server;ufw allow 8080/tcp"]
-  - [bash, -lc, "systemctl enable post-boot-check.service"]
-  - [bash, -lc, "/usr/local/bin/schedule-destruct.sh"]
-  - [bash, -lc, "/usr/local/bin/rename-bots.sh"]

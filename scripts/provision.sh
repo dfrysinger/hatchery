@@ -482,6 +482,27 @@ else
   chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
 fi
 
+# =============================================================================
+# Pre-reboot tasks (must run while network and systemd are fully operational)
+# =============================================================================
+# These were previously in hatch.yaml runcmd entries AFTER bootstrap.sh, but
+# provision.sh triggers a reboot at the end of Stage 7. The reboot signals
+# systemd but returns immediately, so cloud-init continues executing runcmd
+# entries while systemd is shutting down. This causes:
+#   - systemctl start/enable --now → FAILS (systemd stopping)
+#   - curl (rename-bots) → FAILS (network torn down)
+#   - systemd-run (schedule-destruct) → FAILS (reboot.target queued)
+# Fix: run everything here, before the reboot.
+
+# Enable post-boot health check (runs after reboot to verify services)
+systemctl enable post-boot-check.service 2>/dev/null || true
+
+# Schedule self-destruct timer (persistent unit, survives reboot)
+/usr/local/bin/schedule-destruct.sh || log "Warning: schedule-destruct failed (non-fatal)"
+
+# Rename Telegram bots with habitat-specific display names
+/usr/local/bin/rename-bots.sh || log "Warning: rename-bots failed (non-fatal)"
+
 # Mark provisioning complete (before reboot)
 touch /var/lib/init-status/provision-complete
 touch /var/lib/init-status/needs-post-boot-check
