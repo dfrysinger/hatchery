@@ -3,8 +3,14 @@
 # schedule-destruct.sh -- Schedule droplet self-destruction
 # =============================================================================
 # Creates persistent systemd timer/service that survives reboot.
-# Uses OnBootSec so the countdown starts from boot time.
+# Uses OnBootSec so the countdown starts from (last) boot time.
 # Safe to call during provisioning (before reboot).
+#
+# NOTE: OnBootSec counts from the SECOND boot (after cloud-init power_state
+# reboots). Provisioning time (~7 min) does not count against the timer.
+# For very short DESTRUCT_MINS values, the timer fires shortly after services
+# come up on the second boot. This is intentional -- the destruct window
+# starts when the droplet is usable, not when provisioning began.
 #
 # Inputs:   /etc/droplet.env, /etc/habitat-parsed.env (DESTRUCT_MINS)
 # Outputs:  /etc/systemd/system/self-destruct.{service,timer}

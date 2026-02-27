@@ -1,11 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# provision.sh — Single-phase droplet provisioning
+# provision.sh -- Single-phase droplet provisioning
 # =============================================================================
-# Replaces the phase1-critical.sh → phase2-background.sh background fork.
-# One script, sequential stages, no background fork. Ends with REBOOT.
+# Replaces the phase1-critical.sh -> phase2-background.sh background fork.
+# One script, sequential stages, no background fork. Does NOT reboot.
 #
 # Called by: bootstrap.sh (which is called by cloud-init runcmd)
+# Reboot: handled by cloud-init power_state module AFTER all runcmd entries
+#         complete. Gated on provision-complete marker (not set on failure).
 #
 # Stages:
 #   1. Parse config + install Node/jq + start API server
@@ -15,11 +17,9 @@
 #   5. Install developer tools (apt)
 #   6. Install Chrome, pip packages & helpers
 #   7. Configure desktop + apps + build config + enable services
-#   8. REBOOT
+#   8. Mark complete (or fail) -- cloud-init handles reboot via power_state
 #
-# After reboot: systemd starts enabled services → health check → E2E
-# Reboot is REQUIRED: packages need kernel modules, systemd needs
-# daemon-reload, avoids weird state from halfway-installed packages.
+# After reboot: systemd starts enabled services -> health check -> E2E
 # =============================================================================
 
 set -o pipefail
@@ -485,10 +485,20 @@ fi
 # Enable post-boot health check (runs after reboot to verify services)
 systemctl enable post-boot-check.service 2>/dev/null || true
 
-# Mark provisioning complete
-# This marker gates the cloud-init power_state reboot — without it, no reboot.
-touch /var/lib/init-status/provision-complete
 touch /var/lib/init-status/needs-post-boot-check
+
+# Gate the provision-complete marker on no critical failures.
+# This marker controls the cloud-init power_state reboot -- without it, no
+# reboot occurs and the droplet stays up for debugging.
+if [ -f /var/lib/init-status/build-failed ]; then
+  ELAPSED=$(( $(date +%s) - START ))
+  log "Provisioning FAILED in ${ELAPSED}s — build-failed marker present, skipping provision-complete"
+  log "Droplet will NOT reboot (power_state condition will fail). SSH in to debug."
+  $S 8 "provision-failed"
+  exit 1
+fi
+
+touch /var/lib/init-status/provision-complete
 
 ELAPSED=$(( $(date +%s) - START ))
 log "Provisioning complete in ${ELAPSED}s"

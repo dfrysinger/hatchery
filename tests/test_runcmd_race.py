@@ -141,6 +141,52 @@ class TestRuncmdModular:
         )
 
 
+class TestProvisionCompletionGate:
+    """provision-complete marker must only be set on success."""
+
+    def test_build_failed_skips_completion_marker(self):
+        """If build-failed exists, provision-complete must NOT be touched."""
+        content = _load_provision()
+        # Find the build-failed check and verify it prevents provision-complete
+        assert "build-failed" in content
+        # The provision-complete touch must be AFTER the build-failed gate
+        lines = content.split("\n")
+        build_failed_check_line = None
+        provision_complete_line = None
+        for i, line in enumerate(lines):
+            if "build-failed" in line and "if" in line and not line.strip().startswith("#"):
+                build_failed_check_line = i
+            if "provision-complete" in line and "touch" in line and not line.strip().startswith("#"):
+                provision_complete_line = i
+        assert build_failed_check_line is not None, (
+            "provision.sh must check for build-failed before setting provision-complete"
+        )
+        assert provision_complete_line is not None
+        assert build_failed_check_line < provision_complete_line, (
+            "build-failed check must come BEFORE provision-complete marker"
+        )
+
+    def test_build_failed_exits_nonzero(self):
+        """provision.sh must exit non-zero when build-failed is detected."""
+        content = _load_provision()
+        # Find the build-failed block and verify it exits
+        in_block = False
+        found_exit = False
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if "build-failed" in stripped and "if" in stripped and not stripped.startswith("#"):
+                in_block = True
+            if in_block and "exit 1" in stripped:
+                found_exit = True
+                break
+            if in_block and stripped == "fi":
+                break
+        assert found_exit, (
+            "provision.sh must exit 1 when build-failed is detected, "
+            "preventing provision-complete from being set"
+        )
+
+
 class TestProvisionClean:
     """provision.sh should NOT contain tasks that belong in runcmd."""
 
