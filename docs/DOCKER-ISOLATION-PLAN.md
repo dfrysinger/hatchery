@@ -9,6 +9,7 @@
 > v7 by ClaudeBot (2026-02-24) - delta review: single manifest, secrets policy, self-sufficient examples.
 > v8 by ClaudeBot (2026-02-24) - final cleanup: terminology table, reader contract, last stale refs.
 > v9 by ClaudeBot (2026-02-27) - boot architecture: cloud-init power_state owns reboot, persistent self-destruct timer, modular runcmd.
+> v10 by ClaudeBot (2026-02-27) - auth-profiles golden copy, stop-modify-start pattern, critical stage gating.
 
 ---
 
@@ -16,6 +17,7 @@
 
 1. [Architecture Decision](#architecture-decision)
 2. [Boot Architecture](#boot-architecture)
+3. [Gateway State Persistence](#gateway-state-persistence)
 3. [Current State Assessment](#current-state-assessment)
 3. [SSOT Violations to Fix](#ssot-violations-to-fix)
 4. [Target Architecture](#target-architecture)
@@ -93,6 +95,65 @@ power_state:
 
 ---
 
+## Gateway State Persistence
+
+**The gateway persists in-memory state (config + auth-profiles) to disk on SIGTERM.**
+
+This is OpenClaw behavior we cannot change. When the gateway shuts down (systemd stop, Docker stop, reboot), its SIGTERM handler writes:
+- `openclaw.json` — current in-memory config
+- `auth-profiles.json` — current in-memory auth credentials (with usage stats)
+
+This creates a class of bugs where files modified between gateway restarts get clobbered.
+
+### The Clobber Pattern
+
+```
+1. Gateway running with auth-profiles containing [anthropic, openai-codex, google]
+2. Safe mode triggers → recovery generates Anthropic-only safe-mode config
+3. systemctl restart openclaw
+   └── STOP: gateway persists auth state → may drop unused/failed entries
+   └── START: reads clobbered auth-profiles → openai-codex OAuth token GONE
+4. SafeModeBot changes model to openai-codex → fails (token lost permanently)
+```
+
+This does NOT happen on normal reboots — the gateway persists what it loaded, which includes all entries. The clobber only occurs during **safe mode recovery restarts** where the gateway is running a minimal config that doesn't use all auth entries.
+
+### Three-Layer Defense
+
+**1. Golden copy** (`auth-profiles.provisioned.json`)
+
+`build-full-config.sh` writes a golden copy alongside the live `auth-profiles.json`. The golden copy is never modified by the gateway — it survives any number of restart cycles.
+
+```
+auth-profiles.json              ← live (gateway reads/writes/clobbers)
+auth-profiles.provisioned.json  ← golden (only written by provisioning)
+```
+
+**2. Stop-modify-start pattern** (`hc_stop_modify_start()`)
+
+`lib-health-check.sh` provides a helper that ensures files are modified AFTER the gateway has stopped (and persisted its state), BEFORE the gateway starts again:
+
+```bash
+hc_stop_modify_start() {
+  hc_stop_service "$group"    # gateway persists state here
+  "$callback" "$@"             # safe to modify files now
+  hc_start_service "$group"   # gateway reads modified files
+}
+```
+
+**3. Recovery reads golden copy**
+
+`safe-mode-recovery.sh`'s `check_oauth_profile()` searches `auth-profiles.provisioned.json` before the live copy, ensuring OAuth tokens are always found even after clobber.
+
+### Rules
+
+- **Normal restart/reboot**: `systemctl restart` is fine — gateway persists what it loaded, no data loss.
+- **Safe mode recovery**: MUST use `hc_stop_modify_start()` with a callback that restores auth-profiles from the golden copy.
+- **Config updates while gateway is running**: Stop → modify → start. Never `cp && restart`.
+- **Adding new providers**: Update both `auth-profiles.json` and `auth-profiles.provisioned.json` (or re-run `build-full-config.sh`).
+
+---
+
 ## Current State Assessment
 
 ### What Exists
@@ -134,9 +195,10 @@ The pattern "iterate `AGENT{N}_ISOLATION_GROUP`, match against group name" exist
 
 ### 3. Auth-profiles handling (3 different approaches)
 
-- `build-full-config.sh` creates `agents/main/agent/auth-profiles.json`, symlinks to `agents/agent{N}/agent/`
+- `build-full-config.sh` creates `agents/main/agent/auth-profiles.json` + golden copy `.provisioned.json`, symlinks to `agents/agent{N}/agent/`
 - `generate-session-services.sh` copies auth-profiles into `${state_dir}/agents/agent{N}/agent/`
 - Container mode (planned) would bind-mount from `configs/{group}/`
+- Safe mode recovery restores from golden copy via `hc_stop_modify_start()` callback
 
 ### 4. Port assignment (different base ports, will collide)
 
@@ -1471,6 +1533,8 @@ Which scripts read which files - prevents re-introduction of topology re-parsing
 | `/etc/openclaw-groups.json` | `build-full-config.sh` | `lib-health-check.sh`, `safe-mode-handler.sh`, `sync-openclaw-state.sh`, debugging commands | Group topology: isolation type, ports, paths, service names, agents |
 | `configs/{group}/group.env` | `build-full-config.sh` | systemd `EnvironmentFile=`, compose `env_file:` | Runtime process env: API keys, group name, port, isolation, config/state paths |
 | `configs/{group}/openclaw.session.json` | `generate-config.sh` (called by orchestrator) | OpenClaw gateway (inside container or systemd service) | OpenClaw app config: agents, channels, plugins, auth |
+| `auth-profiles.json` | `build-full-config.sh`, then gateway on SIGTERM | OpenClaw gateway | Live auth credentials (may be clobbered by gateway shutdown) |
+| `auth-profiles.provisioned.json` | `build-full-config.sh` only | `safe-mode-recovery.sh`, `safe-mode-handler.sh` | Golden auth credentials (survives gateway clobber cycles) |
 | `/etc/habitat-parsed.env` | `parse-habitat.py` | `build-full-config.sh`, generators | Raw habitat config as env vars (input to the pipeline) |
 
 **Rule:** Scripts that need to know "what groups exist" or "what port does group X use" read the manifest. Scripts that need to inject env vars into a process use `group.env`. No script should re-derive topology from `/etc/habitat-parsed.env` after `build-full-config.sh` has run.
@@ -1523,7 +1587,8 @@ Live droplet tests at Phase 5 and Phase 7.
 │   │       └── group.env                     # Per-group runtime env: API keys + process config (ALL modes)
 │   └── agents/
 │       └── main/agent/
-│           └── auth-profiles.json            # Master auth-profiles (symlinked everywhere)
+│           ├── auth-profiles.json            # Live auth-profiles (gateway reads/writes/clobbers on SIGTERM)
+│           └── auth-profiles.provisioned.json # Golden copy (never modified by gateway, survives clobber)
 ├── .openclaw-sessions/
 │   └── {group}/                              # Per-group session state (ALL modes)
 │       └── agents/{agent}/
@@ -1627,22 +1692,35 @@ Track implementation status here. Updated as work proceeds.
 - [x] Removed `reboot` from `provision.sh` -- cloud-init `power_state` module owns the reboot
 - [x] Restored modular `runcmd` entries (safe because power_state runs after all runcmd complete)
 - [x] Added `power_state` section to `hatch.yaml` (gated on `provision-complete` marker)
-- [x] 20 new tests: `test_runcmd_race.py` (11) + `test_schedule_destruct.py` (9)
-- [x] Commits: 188d39a, 696b444
+- [x] Critical stage gating: stages 1-3 verify node/openclaw/user, set `build-failed` on failure → no reboot
+- [x] Stale `build-failed` marker cleared on re-run for manual recovery workflows
+- [x] 26 tests: `test_runcmd_race.py` (19) + `test_schedule_destruct.py` (9) — includes 6 critical stage gating tests
+- [x] Commits: 188d39a, 696b444, 007315b, 4447327
+
+### Post-Phase: Auth-Profiles Clobber Prevention
+- [x] Diagnosed gateway SIGTERM persistence clobbering OAuth tokens during safe mode recovery
+- [x] Golden copy: `build-full-config.sh` writes `auth-profiles.provisioned.json` alongside live copy
+- [x] Stop-modify-start: `hc_stop_modify_start()` + `hc_start_service()` in `lib-health-check.sh`
+- [x] Handler updated: `safe-mode-handler.sh` restores auth from golden copy between stop and start
+- [x] Recovery reads golden: `check_oauth_profile()` prefers `.provisioned.json` over live copy
+- [x] 9 new tests: `test_auth_profiles_golden.py`
+- [x] Commit: 86dd62b
 
 ### Live Validation
 - [x] Container isolation: `bot2.frysinger.org` -- Stage 11 READY, both containers healthy
-- [x] Session isolation regression: `jobhunt.frysinger.org` -- Stage 11 READY, both session groups active
-- [x] Code review: R8 + R9 (clean pass, merge-ready)
+- [x] Session isolation regression: `jobhunt.frysinger.org` -- Stage 11 READY, both session groups active, rename-bots 4/4 success
+- [x] None isolation: `frybot.dedyn.io` -- Stage 12 (safe mode, expected: model/provider mismatch in test habitat)
+- [x] Code review: R8 → R12 (all clean, merge-ready)
 - [x] rename-bots display names: BotBot suffix bug fixed (`d252226`)
 
 ### Current Status
-**Phase**: ALL PHASES COMPLETE (1-7) + boot architecture hardening
-**Last updated**: 2026-02-27 03:10 UTC
-**Commits**: da1e775 ... 343d8f8, f545823, d252226, 5c526ad, 69f3317, 188d39a, 696b444
-**Tests**: 1056 passing, 3 skipped, 0 failed (includes 20 new boot architecture tests)
+**Phase**: ALL PHASES COMPLETE (1-7) + boot hardening + auth-profiles clobber fix
+**Last updated**: 2026-02-27 05:45 UTC
+**Commits**: da1e775 ... 343d8f8, f545823, d252226, 5c526ad, 69f3317, 188d39a, 696b444, 007315b, 4447327, 86dd62b
+**Tests**: 1073 passing, 3 skipped, 0 failed
 **All scripts pass bash -n**
 **Branch pushed**: feature/docker-isolation
+**Code reviews**: R8–R12 all pass (merge-ready)
 **Next step**: Merge to main
 
 ---
@@ -1806,7 +1884,7 @@ Standalone Docker installation script:
 
 1. **No live droplet test** — all tests are unit tests with mocked externals. Need a real habitat with `isolation.default: container` to validate end-to-end.
 2. **Browser variant Dockerfile** — `hatchery/agent:full` with Chrome/ffmpeg deferred to future work.
-3. **Safe mode handler not yet updated** to call `hc_*` functions instead of direct `systemctl`/`docker` — the functions exist but the consumers still use legacy calls.
+3. **Safe mode handler updated** to use `hc_stop_modify_start()` for auth-profiles restoration. Remaining `hc_*` migration for other consumers is incremental.
 4. **`sync-openclaw-state.sh`** doesn't yet handle container state paths (rclone syncs only `~/.openclaw/agents/`).
 5. **Compose `user:` directive** — compose file generates `user: "${BOT_UID}:${BOT_GID}"` from build-time env, but these vars aren't in `group.env` yet. The Dockerfile `USER bot` covers it for now, but explicit compose `user:` would be better for UID matching.
 6. **77 pre-existing test failures** in old test suites (`test_session_mode.py`, `test_session_services.py`) — from the state-machine-v2 refactoring, not this branch. These test the old architecture.
@@ -1819,7 +1897,7 @@ The plan identified 6 instances of duplicated logic across the old codebase. All
 |---------|--------|-------|
 | Agent-per-group filtering | 3 independent implementations | `get_group_agents()` in lib-isolation |
 | Config generation | Session generator only | `generate_group_config()` called by orchestrator for ALL modes |
-| Auth-profiles setup | 3 different approaches | `setup_group_auth_profiles()` — symlink to master |
+| Auth-profiles setup | 3 different approaches | `setup_group_auth_profiles()` — symlink to master + golden copy `.provisioned.json` survives gateway clobber |
 | Port assignment | Inconsistent (computed vs env file vs hardcoded) | `generate_groups_manifest()` — alphabetical, deterministic, single file |
 | Safeguard/E2E units | Session generator only | `generate_safeguard_units()`/`generate_e2e_unit()` called by orchestrator for ALL modes |
 | Directory setup | Scattered across generators | `setup_group_directories()` — one function, all modes |
