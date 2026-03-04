@@ -1,0 +1,61 @@
+{
+  "_test": "2A \u2014 Mixed mode: one session group + one container group on the same droplet. Primary validation of container isolation alongside session isolation.",
+  "name": "Test-2A-MixedMode",
+  "hatcheryVersion": "feature/docker-isolation",
+  "domain": "bot2.frysinger.org",
+  "bgColor": "319795",
+  "destructMinutes": 120,
+  "remoteApi": true,
+  "platform": "both",
+  "platforms": {
+    "telegram": {
+      "ownerId": "5874850284"
+    },
+    "discord": {
+      "ownerId": "795380005466800159",
+      "serverId": "1468992121901027582"
+    }
+  },
+  "isolation": "container",
+  "sharedPaths": [
+    "/home/bot/clawd/shared"
+  ],
+  "globalIdentity": "You are a test bot validating mixed session+container isolation.",
+  "globalUser": "- Name: Daniel Frysinger",
+  "agents": [
+    {
+      "agent": "Claude",
+      "model": "anthropic/claude-sonnet-4",
+      "isolation": "session",
+      "isolationGroup": "session-group",
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]",
+        "discord": "[[DISCORD_TOKEN]]"
+      }
+    },
+    {
+      "agent": "ChatGPT",
+      "model": "anthropic/claude-sonnet-4",
+      "isolation": "session",
+      "isolationGroup": "session-group",
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]",
+        "discord": "[[DISCORD_TOKEN]]"
+      }
+    },
+    {
+      "agent": "Gemini",
+      "model": "google/gemini-2.5-flash",
+      "isolationGroup": "container-group",
+      "network": "host",
+      "resources": {
+        "memory": "1g",
+        "cpu": "1.0"
+      },
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]",
+        "discord": "[[DISCORD_TOKEN]]"
+      }
+    }
+  ]
+}

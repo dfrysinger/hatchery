@@ -217,7 +217,7 @@ Restart=always
 RestartSec=5
 RestartPreventExitStatus=2
 Environment=NODE_ENV=production
-Environment=NODE_OPTIONS=--experimental-sqlite
+Environment=PATH=/usr/local/bin:/usr/bin
 Environment=ANTHROPIC_API_KEY=${AK}
 $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
 $([ -n "$GK" ] && echo "Environment=GEMINI_API_KEY=${GK}")

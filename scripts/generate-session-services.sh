@@ -99,8 +99,7 @@ TimeoutStartSec=180
 EnvironmentFile=${env_file}
 Environment=CI=true
 Environment=NODE_ENV=production
-Environment=NODE_OPTIONS=--experimental-sqlite
-Environment=PATH=/usr/bin:/usr/local/bin
+Environment=PATH=/usr/local/bin:/usr/bin
 Environment=DISPLAY=:10
 Environment=OPENCLAW_CONFIG_PATH=${config_path}
 Environment=OPENCLAW_STATE_DIR=${state_path}

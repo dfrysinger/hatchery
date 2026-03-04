@@ -1,0 +1,72 @@
+{
+  "_test": "2C: Container safe mode trigger \u2014 healthy-grp works, broken-grp enters safe mode",
+  "_checklist": [
+    "Stage 11 or 12 (one group healthy, one in safe mode)",
+    "healthy-grp: container healthy, bot responds",
+    "broken-grp: safe mode marker at /var/lib/init-status/safe-mode-broken-grp OR unhealthy-broken-grp",
+    "SafeModeBot notification sent on Telegram",
+    "Manual: docker exec openclaw-healthy-grp kill 1 \u2192 Docker restart: on-failure brings it back",
+    "Manual: try-full-config.sh recovery for broken-grp",
+    "Manual: time docker compose -p openclaw-broken-grp down \u2192 should be <10s"
+  ],
+  "_instructions": [
+    "OpenClaw auto-failover means a broken model name alone won't trigger safe mode.",
+    "To force broken-grp to fail: in the iOS Shortcut, set ALL THREE LLM API keys to broken values",
+    "(ANTHROPIC_KEY=sk-ant-BROKEN, OPENAI_KEY=BROKEN, GOOGLE_KEY=BROKEN).",
+    "healthy-grp will also fail E2E (same keys), but that's expected for this test.",
+    "Alternative: deploy normally, then SSH in and manually break broken-grp's group.env + restart."
+  ],
+  "_manual_break_steps": [
+    "1. SSH to droplet: ssh bot@bot3.frysinger.org",
+    "2. Edit: sudo nano /home/bot/.openclaw/configs/broken-grp/group.env",
+    "3. Set ANTHROPIC_API_KEY=BROKEN, GOOGLE_API_KEY=BROKEN, GEMINI_API_KEY=BROKEN",
+    "4. Restart: sudo docker compose -f /home/bot/.openclaw/compose/broken-grp/docker-compose.yaml -p openclaw-broken-grp down && sudo docker compose -f /home/bot/.openclaw/compose/broken-grp/docker-compose.yaml -p openclaw-broken-grp up -d",
+    "5. Wait for E2E check to fail \u2192 safe mode triggers for broken-grp",
+    "6. Verify: ls /var/lib/init-status/safe-mode-* unhealthy-*"
+  ],
+  "name": "Test-2C-ContainerSafeMode",
+  "hatcheryVersion": "feature/docker-isolation",
+  "domain": "bot3.frysinger.org",
+  "bgColor": "C53030",
+  "destructMinutes": 90,
+  "remoteApi": true,
+  "platform": "telegram",
+  "platforms": {
+    "telegram": {
+      "ownerId": "5874850284"
+    }
+  },
+  "isolation": "container",
+  "sharedPaths": [
+    "/home/bot/clawd/shared"
+  ],
+  "description": "Pre-merge test: container safe mode. Deploy healthy, then manually break one group's API keys to trigger safe mode.",
+  "agents": [
+    {
+      "agent": "Claude",
+      "model": "anthropic/claude-sonnet-4-5",
+      "isolationGroup": "healthy-grp",
+      "network": "host",
+      "resources": {
+        "memory": "1g",
+        "cpu": "1.0"
+      },
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]"
+      }
+    },
+    {
+      "agent": "Gemini",
+      "model": "google/gemini-2.5-flash",
+      "isolationGroup": "broken-grp",
+      "network": "host",
+      "resources": {
+        "memory": "512m",
+        "cpu": "0.5"
+      },
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]"
+      }
+    }
+  ]
+}

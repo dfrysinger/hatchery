@@ -1,0 +1,61 @@
+{
+  "_test": "2B \u2014 Session-only regression test. Validates that session isolation is unbroken on the docker-isolation branch. No Docker should be installed.",
+  "name": "Test-2B-SessionRegression",
+  "hatcheryVersion": "feature/docker-isolation",
+  "domain": "bot1.frysinger.org",
+  "bgColor": "3182CE",
+  "destructMinutes": 90,
+  "remoteApi": true,
+  "platform": "both",
+  "platforms": {
+    "telegram": {
+      "ownerId": "5874850284"
+    },
+    "discord": {
+      "ownerId": "795380005466800159",
+      "serverId": "1468992121901027582"
+    }
+  },
+  "isolation": "session",
+  "sharedPaths": [
+    "/home/bot/clawd/shared"
+  ],
+  "globalIdentity": "You are a test bot validating session isolation on the docker-isolation branch.",
+  "globalUser": "- Name: Daniel Frysinger",
+  "agents": [
+    {
+      "agent": "Claude",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "group-alpha",
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]",
+        "discord": "[[DISCORD_TOKEN]]"
+      }
+    },
+    {
+      "agent": "ChatGPT",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "group-alpha",
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]",
+        "discord": "[[DISCORD_TOKEN]]"
+      }
+    },
+    {
+      "agent": "Gemini",
+      "model": "google/gemini-2.5-flash",
+      "isolationGroup": "group-beta",
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]"
+      }
+    },
+    {
+      "agent": "Opus",
+      "model": "anthropic/claude-sonnet-4",
+      "isolationGroup": "group-beta",
+      "tokens": {
+        "telegram": "[[TELEGRAM_TOKEN]]"
+      }
+    }
+  ]
+}

@@ -180,7 +180,6 @@ ${network_section}
       - ${env_file}
     environment:
       - NODE_ENV=production
-      - NODE_OPTIONS=--experimental-sqlite
       # Override host paths from group.env to match container mount points
       - OPENCLAW_CONFIG_PATH=/home/${SVC_USER}/.openclaw/openclaw.json
       - OPENCLAW_STATE_DIR=/home/${SVC_USER}/.openclaw-sessions/${group}

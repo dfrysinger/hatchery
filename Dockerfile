@@ -38,7 +38,6 @@ USER bot
 WORKDIR /home/bot
 
 ENV NODE_ENV=production
-ENV NODE_OPTIONS=--experimental-sqlite
 
 # Health check for compose --wait
 # Shell form required: GROUP_PORT is a runtime env var, not a build arg

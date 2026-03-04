@@ -120,6 +120,11 @@ else
 fi
 apt-get install -y jq >> "$LOG" 2>&1 || true
 
+# Remove ancient system nodejs (Ubuntu 22.04 ships v12) to prevent PATH shadowing.
+# Our Node 22 lives in /usr/local/bin; /usr/bin/node from apt shadows it when PATH
+# has /usr/bin first. Belt-and-suspenders: service units also set PATH=/usr/local/bin first.
+apt-get remove -y nodejs 2>/dev/null || true
+
 # Verify critical: Node binary must exist for npm/OpenClaw installation.
 # Without Node, stages 2+ are all broken.
 if ! command -v node &>/dev/null; then
