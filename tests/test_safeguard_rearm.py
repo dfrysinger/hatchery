@@ -82,14 +82,14 @@ class TestFailureNotification:
         """Exhausted-attempts path (exit 2 early) must call notification."""
         # Find the exhausted-attempts section
         exhausted_idx = handler_source.index("exhausted")
-        # The notification call should be nearby (within ~20 lines)
-        nearby = handler_source[exhausted_idx:exhausted_idx + 600]
+        # The notification call should be nearby (within ~30 lines)
+        nearby = handler_source[exhausted_idx:exhausted_idx + 900]
         assert "_notify_critical_failure" in nearby
 
     def test_restart_failure_notifies(self, handler_source):
         """restart_and_verify failure path must call notification."""
         failure_idx = handler_source.index("SERVICE WON'T START")
-        nearby = handler_source[failure_idx:failure_idx + 300]
+        nearby = handler_source[failure_idx:failure_idx + 600]
         assert "_notify_critical_failure" in nearby
 
     def test_lockout_on_all_failure_paths(self, handler_source):

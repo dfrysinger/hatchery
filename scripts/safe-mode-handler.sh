@@ -90,6 +90,11 @@ if [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECO
   touch /var/lib/init-status/gateway-failed${GROUP:+-$GROUP}
   set_stage 13
 
+  # KILL the service/container — don't leave a safe-mode bot running
+  # that will respond to every message indefinitely
+  log "Stopping service to prevent safe-mode bot message flood..."
+  hc_stop_service "${GROUP:-}" >> "$HC_LOG" 2>&1 || true
+
   # Remove unhealthy marker to break .path re-trigger loop
   # (gateway-failed marker records the terminal state)
   rm -f "$HC_UNHEALTHY_MARKER"
@@ -377,6 +382,9 @@ if restart_and_verify; then
   exit 0
 else
   log "========== SAFE MODE HANDLER FAILED — SERVICE WON'T START =========="
+  # Kill the service to prevent a half-alive bot from spamming
+  log "Stopping failed service..."
+  hc_stop_service "${GROUP:-}" >> "$HC_LOG" 2>&1 || true
   lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
   if [ ! -f "$lockout_file" ]; then
     _notify_critical_failure "service won't start after config swap"

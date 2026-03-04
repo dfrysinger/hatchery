@@ -173,7 +173,7 @@ services:
     image: ${BASE_IMAGE}
     container_name: openclaw-${group}
     user: "${bot_uid}:${bot_gid}"
-    restart: on-failure
+    restart: on-failure:5
 ${network_section}
     command: ["--bind", "loopback", "--port", "${port}"]
     env_file:
