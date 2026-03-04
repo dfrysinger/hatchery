@@ -121,6 +121,20 @@ get_owner_id_for_platform() {
         echo "$raw_id"
       fi
       ;;
+    both)
+      # Prefer telegram (simpler ID format), fall back to discord
+      local tg_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      if [ -n "$tg_id" ]; then
+        echo "$tg_id"
+      else
+        local raw_id="${DISCORD_OWNER_ID:-}"
+        if [ "$with_prefix" = "with_prefix" ] && [ -n "$raw_id" ]; then
+          echo "user:${raw_id}"
+        else
+          echo "$raw_id"
+        fi
+      fi
+      ;;
     *)
       echo ""
       ;;
