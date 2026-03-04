@@ -44,46 +44,38 @@ log "========== SAFE MODE HANDLER STARTING =========="
 log "============================================================"
 log "RUN_ID=$HC_RUN_ID | MODE=$RUN_MODE | GROUP=${GROUP:-none}"
 
-# --- EXIT trap: re-arm .path watcher + notify on failure ---
-# Runs on EVERY exit (success or failure). This ensures:
-#   1. The .path unit is always restarted so it watches for the next failure
-#   2. On non-zero exit, a critical notification is sent with the actual error
+# --- EXIT trap: re-arm .path watcher ---
+# The .path unit deactivates after triggering (Type=oneshot). Without re-arming,
+# it silently stops watching and future failures go undetected. (Bug: 2026-03-04)
 _handler_exit() {
-  local exit_code=$?
-
-  # Always re-arm the safeguard .path unit.
-  # Without this, the path unit deactivates after triggering once and
-  # never watches for future failures. (Bug discovered 2026-03-04)
   local path_unit="openclaw-safeguard${GROUP:+-$GROUP}.path"
   systemctl restart "$path_unit" 2>/dev/null || \
     systemctl start "$path_unit" 2>/dev/null || \
     log "WARNING: Could not re-arm $path_unit"
+}
+trap _handler_exit EXIT
 
-  # On failure, send a critical notification with the actual error.
-  # Skip if the exhausted-attempts path already sent one (lockout marker).
-  if [ "$exit_code" -ne 0 ]; then
-    local lockout="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
-    if [ ! -f "$lockout" ]; then
-      local error_lines
-      error_lines=$(hc_service_logs "${GROUP:-}" 20 2>/dev/null \
-        | grep -v "^$" | tail -10 || echo "(could not read logs)")
+# --- Critical failure notification ---
+# Single function for all failure paths. Includes journal errors so the user
+# knows what's actually wrong without SSHing in.
+_notify_critical_failure() {
+  local reason="${1:-unknown}"
+  local error_lines
+  error_lines=$(hc_service_logs "${GROUP:-}" 20 2>/dev/null \
+    | grep -v "^$" | tail -8 || echo "(could not read logs)")
 
-      { notify_find_token 2>/dev/null && notify_send_message \
-"🔴 <b>[${HC_HABITAT_NAME:-$(hostname)}] CRITICAL</b>
+  { notify_find_token && notify_send_message \
+"🔴 <b>[${HC_HABITAT_NAME}] CRITICAL</b>
 
-Safe mode recovery failed (exit $exit_code).
+Recovery failed: ${reason}.
 Bot is OFFLINE.
 
 <b>Last errors:</b>
-<code>$(echo "$error_lines" | head -8)</code>
+<code>${error_lines}</code>
 
-SSH: <code>ssh bot@$(curl -sf --max-time 3 ifconfig.me 2>/dev/null || echo '?')</code>"; } \
-        || log "WARNING: Could not send failure notification"
-      touch "$lockout"
-    fi
-  fi
+SSH: <code>ssh bot@$(curl -sf --max-time 3 ifconfig.me 2>/dev/null || hostname)</code>"; } \
+    || log "WARNING: Failed to send critical notification"
 }
-trap _handler_exit EXIT
 
 # --- Recovery attempt tracking ---
 
@@ -105,12 +97,7 @@ if [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECO
   # Only notify once — check for lockout marker
   lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
   if [ ! -f "$lockout_file" ]; then
-    { notify_find_token && notify_send_message "🔴 <b>[${HC_HABITAT_NAME}] CRITICAL FAILURE</b>
-
-Gateway failed after $MAX_RECOVERY_ATTEMPTS recovery attempts.
-Bot is OFFLINE.
-
-Check logs: <code>journalctl -u $HC_SERVICE_NAME -n 50</code>"; } || log "WARNING: Failed to send critical notification"
+    _notify_critical_failure "after $MAX_RECOVERY_ATTEMPTS recovery attempts"
     touch "$lockout_file"
   else
     log "CRITICAL FAILURE notification already sent — suppressing duplicate"
@@ -390,5 +377,10 @@ if restart_and_verify; then
   exit 0
 else
   log "========== SAFE MODE HANDLER FAILED — SERVICE WON'T START =========="
+  lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
+  if [ ! -f "$lockout_file" ]; then
+    _notify_critical_failure "service won't start after config swap"
+    touch "$lockout_file"
+  fi
   exit 2
 fi

@@ -41,33 +41,63 @@ class TestHandlerExitTrap:
 
     def test_trap_restarts_path_unit(self, handler_source):
         """EXIT trap must restart the safeguard .path unit."""
-        # Find the trap function body
         assert "openclaw-safeguard" in handler_source
         assert "systemctl restart" in handler_source or "systemctl start" in handler_source
 
     def test_trap_handles_group_suffix(self, handler_source):
         """Path unit name must include GROUP suffix when set."""
-        # The pattern openclaw-safeguard${GROUP:+-$GROUP}.path handles both
-        # single mode (openclaw-safeguard.path) and isolation (openclaw-safeguard-browser.path)
         assert "openclaw-safeguard${GROUP:+-$GROUP}.path" in handler_source
 
-    def test_trap_sends_notification_on_failure(self, handler_source):
-        """EXIT trap must send notification when exit code is non-zero."""
-        assert "notify_send_message" in handler_source or "notify_find_token" in handler_source
-        # Must check exit code
-        assert "exit_code" in handler_source
+    def test_trap_is_rearm_only(self, handler_source):
+        """EXIT trap should ONLY re-arm — notifications belong in failure paths."""
+        trap_match = re.search(
+            r"_handler_exit\(\)\s*\{(.+?)\n\}",
+            handler_source,
+            re.DOTALL,
+        )
+        assert trap_match, "Could not find _handler_exit function"
+        trap_body = trap_match.group(1)
+        assert "notify_send_message" not in trap_body, \
+            "Trap should not send notifications — failure paths handle that"
+        assert "systemctl" in trap_body, \
+            "Trap must re-arm the .path unit"
 
-    def test_trap_respects_lockout(self, handler_source):
-        """EXIT trap must check lockout marker to prevent duplicate notifications."""
-        assert "critical-notified" in handler_source
 
-    def test_trap_includes_error_context(self, handler_source):
+class TestFailureNotification:
+    """All failure paths must notify with journal errors and lockout."""
+
+    def test_has_shared_notify_function(self, handler_source):
+        """Handler should have a single notification function for all failure paths."""
+        assert "_notify_critical_failure" in handler_source
+
+    def test_notify_includes_journal_errors(self, handler_source):
         """Notification must include actual error lines from the journal."""
         assert "hc_service_logs" in handler_source
 
-    def test_trap_includes_ssh_command(self, handler_source):
+    def test_notify_includes_ssh_command(self, handler_source):
         """Notification must include SSH command for manual recovery."""
         assert "ssh bot@" in handler_source or "ssh " in handler_source
+
+    def test_exhausted_attempts_notifies(self, handler_source):
+        """Exhausted-attempts path (exit 2 early) must call notification."""
+        # Find the exhausted-attempts section
+        exhausted_idx = handler_source.index("exhausted")
+        # The notification call should be nearby (within ~20 lines)
+        nearby = handler_source[exhausted_idx:exhausted_idx + 600]
+        assert "_notify_critical_failure" in nearby
+
+    def test_restart_failure_notifies(self, handler_source):
+        """restart_and_verify failure path must call notification."""
+        failure_idx = handler_source.index("SERVICE WON'T START")
+        nearby = handler_source[failure_idx:failure_idx + 300]
+        assert "_notify_critical_failure" in nearby
+
+    def test_lockout_on_all_failure_paths(self, handler_source):
+        """All notification paths must use lockout marker."""
+        # Count lockout checks — should be at least 2 (exhausted + restart failure)
+        lockout_count = handler_source.count("critical-notified")
+        assert lockout_count >= 2, \
+            f"Expected lockout checks on at least 2 failure paths, found {lockout_count}"
 
 
 class TestHealthCheckRearm:
