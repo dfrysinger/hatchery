@@ -92,8 +92,10 @@ User=${SVC_USER}
 WorkingDirectory=${HOME_DIR}
 ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port ${port}
 ExecStartPost=+/bin/bash -c 'source ${env_file} && RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
-Restart=always
+Restart=on-failure
 RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=300
 RestartPreventExitStatus=2
 TimeoutStartSec=180
 EnvironmentFile=${env_file}

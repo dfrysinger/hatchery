@@ -161,7 +161,8 @@ class TestServiceUnit:
     def test_restart_policy(self, tmp_path):
         r, ud, _ = run_generator(tmp_path, {'browser': {'port': 18790}})
         unit = read_unit(ud, 'browser')
-        assert 'Restart=always' in unit
+        assert 'Restart=on-failure' in unit
+        assert 'StartLimitBurst=5' in unit
 
     def test_service_naming(self, tmp_path):
         """Service name is openclaw-{group}, not numbered."""
