@@ -6,9 +6,9 @@
 set -euo pipefail
 
 PASS=0; FAIL=0; WARN=0
-pass() { echo "  ✅ $1"; ((PASS++)); }
-fail() { echo "  ❌ $1"; ((FAIL++)); }
-warn() { echo "  ⚠️  $1"; ((WARN++)); }
+pass() { echo "  ✅ $1"; ((PASS++)) || true; }
+fail() { echo "  ❌ $1"; ((FAIL++)) || true; }
+warn() { echo "  ⚠️  $1"; ((WARN++)) || true; }
 
 echo "═══════════════════════════════════════════════════"
 echo "  Test 2B: Session-Only Regression"
@@ -136,14 +136,14 @@ done
 # --- 7. No Safe Mode ---
 echo
 echo "▸ No Safe Mode Markers"
-SM_COUNT=$(ls /var/lib/init-status/safe-mode-* 2>/dev/null | wc -l)
+SM_COUNT=$(ls /var/lib/init-status/safe-mode-* 2>/dev/null | wc -l || true)
 if [ "$SM_COUNT" = "0" ]; then
   pass "No safe mode markers"
 else
   fail "$SM_COUNT safe mode marker(s) found"
 fi
 
-UNHEALTHY=$(ls /var/lib/init-status/unhealthy-* 2>/dev/null | wc -l)
+UNHEALTHY=$(ls /var/lib/init-status/unhealthy-* 2>/dev/null | wc -l || true)
 if [ "$UNHEALTHY" = "0" ]; then
   pass "No unhealthy markers"
 else

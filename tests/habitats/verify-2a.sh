@@ -6,9 +6,9 @@
 set -euo pipefail
 
 PASS=0; FAIL=0; WARN=0
-pass() { echo "  ✅ $1"; ((PASS++)); }
-fail() { echo "  ❌ $1"; ((FAIL++)); }
-warn() { echo "  ⚠️  $1"; ((WARN++)); }
+pass() { echo "  ✅ $1"; ((PASS++)) || true; }
+fail() { echo "  ❌ $1"; ((FAIL++)) || true; }
+warn() { echo "  ⚠️  $1"; ((WARN++)) || true; }
 
 echo "═══════════════════════════════════════════════════"
 echo "  Test 2A: Mixed Mode (Session + Container)"
@@ -262,7 +262,7 @@ fi
 # --- 12. No Safe Mode ---
 echo
 echo "▸ No Safe Mode Markers"
-SM_COUNT=$(ls /var/lib/init-status/safe-mode-* 2>/dev/null | wc -l)
+SM_COUNT=$(ls /var/lib/init-status/safe-mode-* 2>/dev/null | wc -l || true)
 if [ "$SM_COUNT" = "0" ]; then
   pass "No safe mode markers"
 else

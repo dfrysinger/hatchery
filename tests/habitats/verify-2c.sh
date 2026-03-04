@@ -9,9 +9,9 @@
 set -euo pipefail
 
 PASS=0; FAIL=0; WARN=0
-pass() { echo "  ✅ $1"; ((PASS++)); }
-fail() { echo "  ❌ $1"; ((FAIL++)); }
-warn() { echo "  ⚠️  $1"; ((WARN++)); }
+pass() { echo "  ✅ $1"; ((PASS++)) || true; }
+fail() { echo "  ❌ $1"; ((FAIL++)) || true; }
+warn() { echo "  ⚠️  $1"; ((WARN++)) || true; }
 
 echo "═══════════════════════════════════════════════════"
 echo "  Test 2C: Container Safe Mode Trigger & Recovery"
