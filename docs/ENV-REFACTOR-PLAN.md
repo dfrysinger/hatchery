@@ -18,6 +18,8 @@ Environment variables flow from habitat JSON to runtime scripts through 3 overla
 |---------|-----------|
 | Intros never worked with `platform=both` | `get_owner_id_for_platform()` case statement didn't handle `both` |
 | `group.env` missing owner IDs | Hand-curated allowlist in `generate_group_env()` |
+| Session service never generated in mixed-mode | `generate-session-services.sh` gated on `ISOLATION_DEFAULT` instead of trusting caller's pre-filtered groups |
+| Container OOM on reprovision didn't pick up Dropbox fix | Compose file is a static artifact baked at provision time — no runtime re-read |
 | `gateway-e2e-check.sh` sources `habitat-parsed.env` 4 times | Scripts don't trust the env they were given |
 | `notify_find_token()` has its own owner-resolution logic | Parallel implementation of "find the owner" |
 | Every new env var requires touching `lib-isolation.sh` | Allowlist pattern guarantees future regressions |
@@ -389,6 +391,22 @@ Runtime consumers never see "both" — they see an ordered list.
 - **Phase 3 is cleanup.** No new behavior, just removing branching.
 - Each phase is a separate PR. Each gets a test droplet provision before merge.
 
+## Design Principles (learned from pre-merge testing)
+
+### 1. No global defaults in per-group contexts
+
+`ISOLATION_DEFAULT` leaked into `generate-session-services.sh` and `generate-docker-compose.sh` via a guard that checked the global default instead of trusting the caller's pre-filtered group list. This is the same class of bug as `platform=both` leaking into consumers.
+
+**Rule:** Generators and runtime scripts receive explicit per-group values. They never read global defaults to decide whether to act. The orchestrator (`build-full-config.sh`) is the only place that reads global defaults and dispatches.
+
+This applies to the refactoring too: `group.env` should contain resolved per-group values, not raw globals that downstream scripts must interpret.
+
+### 2. Static artifacts are a separate staleness class
+
+Compose files, systemd units, and config JSONs are baked at provision time. Updating `group.env` or Dropbox after provision doesn't fix them — you need to re-run the generator or reprovision.
+
+**Rule:** Generators should be idempotent and cheap to re-run. A single `rebuild-group <group>` command should regenerate all artifacts for a group from `group.env` + manifest. Phase 1 should consider whether this is worth building or if "reprovision" is good enough for now.
+
 ## Risks
 
 | Risk | Mitigation |
@@ -397,6 +415,7 @@ Runtime consumers never see "both" — they see an ordered list.
 | Decoded secrets in `group.env` (currently they're in `habitat-parsed.env` as base64) | Secrets are already decoded in the current `group.env`. No change in exposure. `chmod 600` is the defense |
 | `env_load()` has side effects beyond sourcing (e.g., `env_decode_keys`) | Phase 1 must ensure decoded keys end up in `group.env` so `env_decode_keys()` is not needed at runtime |
 | Breaking safe-mode notification during Phase 2 | Test by deliberately breaking API keys on a test droplet and verifying DM arrives |
+| Static artifacts (compose, units) drift from env after hot-fix | Document "reprovision vs rebuild" decision; consider `rebuild-group` command in Phase 1 |
 
 ## Success Criteria
 
