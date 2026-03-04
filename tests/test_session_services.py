@@ -102,17 +102,19 @@ class TestThinGenerator:
         assert os.path.exists(os.path.join(ud, 'openclaw-browser.service'))
         assert os.path.exists(os.path.join(ud, 'openclaw-workers.service'))
 
-    def test_skips_non_session_mode(self, tmp_path):
+    def test_skips_when_no_groups(self, tmp_path):
+        """Script should skip when ISOLATION_GROUPS is empty."""
         r, ud, _ = run_generator(tmp_path, {'browser': {'port': 18790}},
-                                  extra_env={'ISOLATION_DEFAULT': 'container'})
+                                  extra_env={'ISOLATION_GROUPS': ''})
         assert r.returncode == 0
         assert not os.path.exists(os.path.join(ud, 'openclaw-browser.service'))
 
-    def test_skips_none_mode(self, tmp_path):
+    def test_works_with_non_session_isolation_default(self, tmp_path):
+        """Mixed mode: ISOLATION_DEFAULT=container but caller passes session groups."""
         r, ud, _ = run_generator(tmp_path, {'browser': {'port': 18790}},
-                                  extra_env={'ISOLATION_DEFAULT': 'none'})
+                                  extra_env={'ISOLATION_DEFAULT': 'container'})
         assert r.returncode == 0
-        assert not os.path.exists(os.path.join(ud, 'openclaw-browser.service'))
+        assert os.path.exists(os.path.join(ud, 'openclaw-browser.service'))
 
 
 class TestServiceUnit:

@@ -36,6 +36,12 @@ Environment variables flow from habitat JSON to runtime scripts through 3 overla
 
 5. **Testable.** Every function has a unit test. The test suite catches missing vars before a droplet provision does.
 
+> **[ChatGPT inline review]**
+> Strong goal set. Recommend explicitly naming two SSOTs to avoid ambiguity later:
+> - **Topology SSOT:** `/etc/openclaw-groups.json`
+> - **Runtime env SSOT:** `group.env`
+> This keeps "single source of truth" precise instead of overloaded.
+
 ---
 
 ## Current Architecture (Before)
@@ -170,6 +176,15 @@ NOTIFY_TELEGRAM_TOKEN=...               ← Token for notifications (may differ 
 NOTIFY_DISCORD_TOKEN=...
 ```
 
+> **[ChatGPT inline review — important]**
+> I would **not** collapse to a single `OWNER_ID` for multi-platform fallback.
+> Telegram and Discord IDs are different namespaces/formats; a single ID can point to the wrong destination when fallback occurs.
+> Prefer:
+> - `TELEGRAM_OWNER_ID`
+> - `DISCORD_OWNER_ID`
+> - `NOTIFY_PLATFORMS=telegram,discord` (ordered preference)
+> Then resolve owner ID **per platform attempt** inside `notify_owner()`.
+
 **Key changes:**
 - `platform=both` is resolved at parse time into `NOTIFY_PLATFORMS=telegram,discord`
 - `OWNER_ID` is a single var (not per-platform) — it's the Telegram chat ID or Discord user ID depending on the first available platform
@@ -228,6 +243,12 @@ Runtime consumers never see "both" — they see an ordered list.
    }
    ```
 
+> **[ChatGPT inline review]**
+> Add implementation constraints here:
+> 1) Write `GROUP_ENV_VERSION=1` into every generated file for future migrations.
+> 2) Document escaping/serialization guarantees (values with spaces/newlines/`#` should round-trip safely).
+> 3) Decide whether non-isolated mode also gets a generated `group.env` (preferred for consistency), or clearly document fallback behavior as an exception.
+
 2. **Simplify `hc_load_environment()`** — source group.env only:
    ```bash
    hc_load_environment() {
@@ -283,6 +304,10 @@ Runtime consumers never see "both" — they see an ordered list.
        f.write('NOTIFY_PLATFORMS="{}"\n'.format(platform))
    ```
 
+> **[ChatGPT inline review]**
+> Keep per-platform owner IDs as first-class outputs from parse-habitat (`TELEGRAM_OWNER_ID`, `DISCORD_OWNER_ID`).
+> `NOTIFY_PLATFORMS` should select routing order; owner ID should still be resolved by selected platform.
+
 2. **Rewrite `notify_owner()` in `lib-notify.sh`:**
    ```bash
    # notify_owner "message"
@@ -309,6 +334,12 @@ Runtime consumers never see "both" — they see an ordered list.
      return 1
    }
    ```
+
+> **[ChatGPT inline review]**
+> Nice direction. Add explicit behavior contract:
+> - timeout/retry/backoff per platform
+> - return reason codes (`no_token`, `no_owner`, `send_failed`) for diagnostics
+> - no mutable global notify state (`NOTIFY_*`) outside function scope
 
 3. **Replace all callers:**
    - `safe-mode-handler.sh`: `notify_send_message "$msg"` → `notify_owner "$msg"`
@@ -373,6 +404,7 @@ Runtime consumers never see "both" — they see an ordered list.
 - [ ] No runtime script contains `source.*droplet.env`
 - [ ] `grep -r "get_owner_id_for_platform" scripts/` returns 0 results
 - [ ] `grep -r '= "both"' scripts/` only matches `parse-habitat.py`
+- [ ] `grep -r "\bOWNER_ID\b" scripts/` is either 0 results OR only in explicitly approved compatibility shim
 - [ ] Adding a new var to `parse-habitat.py` requires ZERO changes to `lib-isolation.sh`
 - [ ] Test droplet with `platform=both` sends intros on first try
 - [ ] Test droplet with broken API keys sends critical notification on first try

@@ -117,11 +117,12 @@ class TestSessionIntegration:
         assert manifest['groups']['mike']['port'] == 18791
         assert manifest['groups']['zulu']['port'] == 18792
 
-    def test_none_mode_generates_nothing(self, tmp_path):
+    def test_no_groups_generates_nothing(self, tmp_path):
         env, mp, ud, _ = build_env(tmp_path, {
             'browser': {'agents': ['agent1']},
         }, isolation_default='none')
-        # No manifest needed for none mode — generator just exits early
+        # With no groups, generator exits early
+        env['ISOLATION_GROUPS'] = ''
         result = subprocess.run(['bash', SESSION_SCRIPT], capture_output=True, text=True, env=env)
         assert result.returncode == 0
         assert not any(f.endswith('.service') for f in os.listdir(ud))

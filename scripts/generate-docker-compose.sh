@@ -44,11 +44,11 @@ HABITAT="${HABITAT_NAME:-default}"
 BASE_IMAGE="${CONTAINER_IMAGE:-hatchery/agent:latest}"
 SYSTEMD_DIR="${COMPOSE_SYSTEMD_DIR:-${UNIT_OUTPUT_DIR:-/etc/systemd/system}}"
 
-# --- Skip if not container mode or no groups ---
-if [ "$ISOLATION" != "container" ]; then
-    echo "Isolation mode is '$ISOLATION' — no docker-compose needed."
-    exit 0
-fi
+# --- Skip if no groups ---
+# NOTE: Do NOT gate on ISOLATION_DEFAULT here. In mixed-mode habitats,
+# ISOLATION_DEFAULT may be "session" but some groups use "container".
+# The caller (build-full-config.sh) pre-filters and only passes container
+# groups via ISOLATION_GROUPS. Trust the caller.
 
 if [ -z "$ISO_GROUPS" ]; then
     echo "No isolation groups defined — no docker-compose needed."

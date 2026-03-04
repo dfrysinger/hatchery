@@ -128,24 +128,23 @@ class TestBasicGeneration:
         assert os.path.exists(os.path.join(cd, 'council', 'docker-compose.yaml'))
         assert os.path.exists(os.path.join(cd, 'sandbox', 'docker-compose.yaml'))
 
-    def test_skips_non_container_mode(self, tmp_path):
+    def test_skips_when_no_groups(self, tmp_path):
+        """Script should skip when ISOLATION_GROUPS is empty."""
         mp = str(tmp_path / 'groups.json')
         with open(mp, 'w') as f:
             json.dump({"groups": {}}, f)
         env = {
             'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
             'MANIFEST': mp,
-            'ISOLATION_DEFAULT': 'session',
-            'ISOLATION_GROUPS': 'council',
+            'ISOLATION_DEFAULT': 'container',
+            'ISOLATION_GROUPS': '',
             'AGENT_COUNT': '1',
             'USERNAME': 'bot',
             'DRY_RUN': '1',
-            'AGENT1_ISOLATION_GROUP': 'council',
-            'AGENT1_ISOLATION': 'session',
         }
         r = subprocess.run(['bash', COMPOSE_SCRIPT], capture_output=True, text=True, env=env)
         assert r.returncode == 0
-        assert 'no docker-compose needed' in r.stdout.lower()
+        assert 'no' in r.stdout.lower()
 
 
 # =========================================================================

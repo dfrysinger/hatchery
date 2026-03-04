@@ -41,11 +41,11 @@ HOME_DIR="${HOME_DIR:-/home/${SVC_USER}}"
 HABITAT="${HABITAT_NAME:-default}"
 OUTPUT_DIR="${SESSION_OUTPUT_DIR:-/etc/systemd/system}"
 
-# --- Skip if not session mode or no groups ---
-if [ "$ISOLATION" != "session" ]; then
-    echo "Isolation mode is '$ISOLATION' — no session services needed."
-    exit 0
-fi
+# --- Skip if no groups ---
+# NOTE: Do NOT gate on ISOLATION_DEFAULT here. In mixed-mode habitats,
+# ISOLATION_DEFAULT may be "container" but some groups use "session".
+# The caller (build-full-config.sh) pre-filters and only passes session
+# groups via ISOLATION_GROUPS. Trust the caller.
 
 if [ -z "$ISO_GROUPS" ]; then
     echo "No isolation groups defined — no session services needed."
