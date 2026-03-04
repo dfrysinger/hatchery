@@ -25,7 +25,7 @@
   "agents": [
     {
       "agent": "Claude",
-      "model": "anthropic/claude-sonnet-4",
+      "model": "anthropic/claude-sonnet-4-5",
       "isolationGroup": "group-alpha",
       "tokens": {
         "telegram": "[[TELEGRAM_TOKEN]]",
@@ -34,7 +34,7 @@
     },
     {
       "agent": "ChatGPT",
-      "model": "anthropic/claude-sonnet-4",
+      "model": "anthropic/claude-sonnet-4-5",
       "isolationGroup": "group-alpha",
       "tokens": {
         "telegram": "[[TELEGRAM_TOKEN]]",
@@ -51,7 +51,7 @@
     },
     {
       "agent": "Opus",
-      "model": "anthropic/claude-sonnet-4",
+      "model": "anthropic/claude-sonnet-4-5",
       "isolationGroup": "group-beta",
       "tokens": {
         "telegram": "[[TELEGRAM_TOKEN]]"
