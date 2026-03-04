@@ -99,6 +99,27 @@ else
   warn "No safeguard handler evidence in logs"
 fi
 
+# Check .path units are re-armed (not dead) after handler ran
+for grp in broken-grp healthy-grp; do
+  if systemctl is-active --quiet "openclaw-safeguard-${grp}.path" 2>/dev/null; then
+    pass "openclaw-safeguard-${grp}.path re-armed (active)"
+  else
+    fail "openclaw-safeguard-${grp}.path dead after handler — re-arm bug"
+  fi
+done
+
+# Check critical notification lockout (only for broken group)
+if [ -f "/var/lib/init-status/critical-notified-broken-grp" ]; then
+  pass "Critical notification lockout set for broken-grp"
+else
+  warn "No critical notification lockout for broken-grp (recovery may have succeeded)"
+fi
+if [ -f "/var/lib/init-status/critical-notified-healthy-grp" ]; then
+  fail "Unexpected critical lockout for healthy-grp"
+else
+  pass "No false lockout for healthy-grp"
+fi
+
 # --- 6. Cross-Group Isolation ---
 echo
 echo "▸ Cross-Group Isolation"

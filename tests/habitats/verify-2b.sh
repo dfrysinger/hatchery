@@ -96,6 +96,12 @@ for group in group-alpha group-beta; do
     fail "openclaw-safeguard-${group}.path not enabled"
   fi
 
+  if systemctl is-active --quiet "openclaw-safeguard-${group}.path" 2>/dev/null; then
+    pass "openclaw-safeguard-${group}.path active (watching)"
+  else
+    fail "openclaw-safeguard-${group}.path not active (dead — re-arm bug)"
+  fi
+
   if [ -f "/etc/systemd/system/openclaw-e2e-${group}.service" ]; then
     pass "openclaw-e2e-${group}.service exists"
   else

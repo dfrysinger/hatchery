@@ -1,7 +1,7 @@
 # Pre-Merge Test Runbook: Docker Isolation
 
 Branch: `feature/docker-isolation`
-Date: 2026-03-04
+Date: 2026-03-04 (updated: safeguard re-arm + failure notification)
 
 ## Overview
 
@@ -42,11 +42,19 @@ $SSH "ls /etc/systemd/system/openclaw-container-* 2>/dev/null && echo 'FAIL' || 
 $SSH "jq '.groups | to_entries[] | \"\(.key): \(.value.isolation) port=\(.value.port)\"' /etc/openclaw-groups.json"
 # Expect: group-a: session port=18790, group-b: session port=18791
 
-# 6. Safeguard .path units
+# 6. Safeguard .path units active (re-arm fix: 2026-03-04)
 $SSH "systemctl is-active openclaw-safeguard-group-a.path openclaw-safeguard-group-b.path"
-# Expect: active / active
+# Expect: active / active (NOT inactive/dead)
 
-# 7. Bots respond
+# 7. Handler has EXIT trap for re-arming
+$SSH "grep -c '_handler_exit' /usr/local/bin/safe-mode-handler.sh"
+# Expect: >= 2 (function def + trap registration)
+
+# 8. Health check has belt-and-suspenders re-arm
+$SSH "grep -c 'openclaw-safeguard' /usr/local/bin/gateway-health-check.sh"
+# Expect: >= 1
+
+# 9. Bots respond
 # → Send a message to each bot on Telegram, verify response
 ```
 
@@ -56,7 +64,9 @@ $SSH "systemctl is-active openclaw-safeguard-group-a.path openclaw-safeguard-gro
 - [ ] No Docker installed
 - [ ] No container units
 - [ ] Manifest correct (session type, unique ports)
-- [ ] Safeguard .path active for both groups
+- [ ] Safeguard .path active for both groups (not dead)
+- [ ] Handler has EXIT trap with re-arm
+- [ ] Health check has safeguard re-arm on success
 - [ ] Both bots respond on Telegram
 
 ---
@@ -103,9 +113,9 @@ $SSH "docker inspect openclaw-container-grp --format='CapDrop={{.HostConfig.CapD
 $SSH "docker stats --no-stream --format '{{.Name}} MEM={{.MemUsage}} CPU={{.CPUPerc}}' openclaw-container-grp"
 # Also: docker inspect openclaw-container-grp --format='MemLimit={{.HostConfig.Memory}} CPUs={{.HostConfig.NanoCpus}}'
 
-# 9. Safeguard .path active for BOTH
+# 9. Safeguard .path active for BOTH (re-arm fix: 2026-03-04)
 $SSH "systemctl is-active openclaw-safeguard-session-grp.path openclaw-safeguard-container-grp.path"
-# Expect: active / active
+# Expect: active / active (NOT inactive/dead)
 
 # 10. UID inside container matches host
 $SSH "docker exec openclaw-container-grp id"
@@ -166,7 +176,7 @@ $SSH "sudo docker compose -f /home/bot/.openclaw/compose/broken-grp/docker-compo
 $SSH "sleep 180 && ls -la /var/lib/init-status/safe-mode-* /var/lib/init-status/unhealthy-* 2>/dev/null"
 ```
 
-### Phase 3: Verify safe mode
+### Phase 3: Verify safe mode + notification
 ```bash
 # 1. Safe mode marker for broken-grp
 $SSH "ls /var/lib/init-status/*broken-grp*"
@@ -178,6 +188,18 @@ $SSH "docker inspect openclaw-healthy-grp --format='{{.State.Health.Status}}'"
 
 # 3. SafeModeBot notification
 # → Check Telegram for safe mode boot report
+
+# 4. Safeguard .path re-armed after handler ran (re-arm fix: 2026-03-04)
+$SSH "systemctl is-active openclaw-safeguard-broken-grp.path openclaw-safeguard-healthy-grp.path"
+# Expect: active / active (the broken-grp .path must be re-armed, not dead)
+
+# 5. If recovery FAILED: critical notification received
+# → Check Telegram/Discord for "🔴 CRITICAL" DM with journal errors + SSH command
+# → Verify lockout marker exists:
+$SSH "ls /var/lib/init-status/critical-notified-broken-grp 2>/dev/null && echo 'lockout set' || echo 'no lockout'"
+
+# 6. No lockout for healthy-grp (should not have failed)
+$SSH "ls /var/lib/init-status/critical-notified-healthy-grp 2>/dev/null && echo 'FAIL: unexpected lockout' || echo 'PASS'"
 ```
 
 ### Phase 4: Test Docker restart recovery
@@ -199,7 +221,10 @@ $SSH "time sudo docker compose -f /home/bot/.openclaw/compose/healthy-grp/docker
 - [ ] Both containers start healthy
 - [ ] Breaking API keys + restart triggers safe mode for broken-grp only
 - [ ] healthy-grp remains unaffected
-- [ ] SafeModeBot notification received
+- [ ] SafeModeBot notification received (or critical failure DM with errors)
+- [ ] Safeguard .path re-armed for BOTH groups after handler ran (not dead)
+- [ ] Critical notification includes actual journal errors (if recovery failed)
+- [ ] Lockout marker only for broken-grp (not healthy-grp)
 - [ ] Docker auto-restarts after kill (transient failure recovery)
 - [ ] Graceful shutdown completes in <10s
 
