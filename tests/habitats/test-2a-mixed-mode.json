@@ -49,7 +49,7 @@
       "isolationGroup": "container-group",
       "network": "host",
       "resources": {
-        "memory": "1g",
+        "memory": "2g",
         "cpu": "1.0"
       },
       "tokens": {
