@@ -242,8 +242,17 @@ build_discord_channel() {
     fi
     local tok_var="AGENT${i}_DISCORD_BOT_TOKEN"; local tok="${!tok_var:-}"
     [ -z "$tok" ] && continue
-    accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" \
-      '. + {($id): {token: $tok}}')
+    # Derive applicationId from token (first segment is base64-encoded bot user ID,
+    # which equals the application ID for bot accounts)
+    local app_id
+    app_id=$(echo "$tok" | cut -d. -f1 | base64 -d 2>/dev/null) || app_id=""
+    if [ -n "$app_id" ]; then
+      accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" --arg aid "$app_id" \
+        '. + {($id): {token: $tok, applicationId: $aid}}')
+    else
+      accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" \
+        '. + {($id): {token: $tok}}')
+    fi
   done
 
   # Build guilds if guild ID set
