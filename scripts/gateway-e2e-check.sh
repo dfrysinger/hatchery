@@ -261,19 +261,44 @@ send_agent_intros() {
 
   local intro_prompt="You just came online after a reboot. Reply with a brief introduction (2-3 sentences) - your name, model, and role. Be friendly but concise. Your reply will be automatically delivered."
 
+  # Resolve platform list — "both" means try each available platform
+  local intro_platforms=()
+  if [ "$HC_PLATFORM" = "both" ]; then
+    [ -n "${TELEGRAM_OWNER_ID:-}" ] && intro_platforms+=("telegram")
+    [ -n "${DISCORD_OWNER_ID:-}" ] && intro_platforms+=("discord")
+    # Fallback if neither owner ID is set (shouldn't happen with platform=both)
+    [ ${#intro_platforms[@]} -eq 0 ] && intro_platforms=("telegram")
+  else
+    intro_platforms=("$HC_PLATFORM")
+  fi
+
   for agent_id in "${agents_to_intro[@]}"; do
     local num="${agent_id#agent}"
     local name_var="AGENT${num}_NAME"; local agent_name="${!name_var:-$agent_id}"
-    log "  Sending intro for $agent_id ($agent_name)..."
 
     local env_prefix=""
     [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
 
-    # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
-    timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
-      --agent "$agent_id" --message "$intro_prompt" --deliver \
-      --reply-channel "$HC_PLATFORM" --reply-account "$agent_id" --reply-to "$owner_id" \
-      --timeout 60 --json >> "$HC_LOG" 2>&1 && log "  ✓ $agent_name intro sent" || log "  ✗ $agent_name intro failed"
+    local intro_ok=false
+    for intro_plat in "${intro_platforms[@]}"; do
+      local plat_owner
+      plat_owner=$(get_owner_id_for_platform "$intro_plat" "with_prefix")
+      [ -z "$plat_owner" ] || [ "$plat_owner" = "user:" ] && continue
+
+      log "  Sending intro for $agent_id ($agent_name) via $intro_plat..."
+
+      # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
+      if timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+        --agent "$agent_id" --message "$intro_prompt" --deliver \
+        --reply-channel "$intro_plat" --reply-account "$agent_id" --reply-to "$plat_owner" \
+        --timeout 60 --json >> "$HC_LOG" 2>&1; then
+        log "  ✓ $agent_name intro sent via $intro_plat"
+        intro_ok=true
+      else
+        log "  ✗ $agent_name intro failed via $intro_plat"
+      fi
+    done
+    $intro_ok || log "  ⚠ $agent_name intro failed on all platforms"
   done
 
   touch "$INTRO_SENT_MARKER"
