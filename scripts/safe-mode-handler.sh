@@ -44,6 +44,47 @@ log "========== SAFE MODE HANDLER STARTING =========="
 log "============================================================"
 log "RUN_ID=$HC_RUN_ID | MODE=$RUN_MODE | GROUP=${GROUP:-none}"
 
+# --- EXIT trap: re-arm .path watcher + notify on failure ---
+# Runs on EVERY exit (success or failure). This ensures:
+#   1. The .path unit is always restarted so it watches for the next failure
+#   2. On non-zero exit, a critical notification is sent with the actual error
+_handler_exit() {
+  local exit_code=$?
+
+  # Always re-arm the safeguard .path unit.
+  # Without this, the path unit deactivates after triggering once and
+  # never watches for future failures. (Bug discovered 2026-03-04)
+  local path_unit="openclaw-safeguard${GROUP:+-$GROUP}.path"
+  systemctl restart "$path_unit" 2>/dev/null || \
+    systemctl start "$path_unit" 2>/dev/null || \
+    log "WARNING: Could not re-arm $path_unit"
+
+  # On failure, send a critical notification with the actual error.
+  # Skip if the exhausted-attempts path already sent one (lockout marker).
+  if [ "$exit_code" -ne 0 ]; then
+    local lockout="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
+    if [ ! -f "$lockout" ]; then
+      local error_lines
+      error_lines=$(hc_service_logs "${GROUP:-}" 20 2>/dev/null \
+        | grep -v "^$" | tail -10 || echo "(could not read logs)")
+
+      { notify_find_token 2>/dev/null && notify_send_message \
+"🔴 <b>[${HC_HABITAT_NAME:-$(hostname)}] CRITICAL</b>
+
+Safe mode recovery failed (exit $exit_code).
+Bot is OFFLINE.
+
+<b>Last errors:</b>
+<code>$(echo "$error_lines" | head -8)</code>
+
+SSH: <code>ssh bot@$(curl -sf --max-time 3 ifconfig.me 2>/dev/null || echo '?')</code>"; } \
+        || log "WARNING: Could not send failure notification"
+      touch "$lockout"
+    fi
+  fi
+}
+trap _handler_exit EXIT
+
 # --- Recovery attempt tracking ---
 
 RECOVERY_ATTEMPTS=$(hc_get_recovery_attempts)

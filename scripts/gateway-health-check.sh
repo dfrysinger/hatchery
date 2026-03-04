@@ -81,6 +81,12 @@ while true; do
   if hc_curl_gateway "${GROUP:-}" "/" >/dev/null 2>&1; then
     log "✓ HTTP responding at ${elapsed}s"
     rm -f "$HC_UNHEALTHY_MARKER"
+    # Re-arm the safeguard .path unit if it's dead (belt-and-suspenders).
+    # The handler's EXIT trap also does this, but if systemd killed the
+    # handler or it crashed, the path unit may still be inactive.
+    local _sg="openclaw-safeguard${GROUP:+-$GROUP}.path"
+    systemctl is-active --quiet "$_sg" 2>/dev/null || \
+      systemctl restart "$_sg" 2>/dev/null || true
     log "========== HTTP CHECK PASSED =========="
     exit 0
   fi
