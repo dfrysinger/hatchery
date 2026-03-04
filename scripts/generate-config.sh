@@ -471,16 +471,11 @@ generate_safe_mode() {
     esac
   fi
 
-  # Use explicitly passed model, or fall back to provider default
+  # Use explicitly passed model, or omit to let OpenClaw use its built-in default.
+  # NOT hardcoding a model name here — hardcoded names become invalid when
+  # OpenClaw updates its model registry. The built-in default is always valid
+  # for the installed version and is typically the most capable model available.
   local model="${SM_MODEL:-}"
-  if [ -z "$model" ]; then
-    if type get_default_model_for_provider &>/dev/null; then
-      model=$(get_default_model_for_provider "$SM_PROVIDER")
-    else
-      # Fallback if lib-auth.sh not available (shouldn't happen in production)
-      model="anthropic/claude-sonnet-4-5"
-    fi
-  fi
 
   # Build channel config — only include the active platform.
   # The plugins.entries section controls which providers actually load;
@@ -547,7 +542,12 @@ generate_safe_mode() {
       gateway: $gateway,
       plugins: $plugins,
       channels: $channels
-    }'
+    }
+    # When no model is specified, remove model fields entirely so OpenClaw
+    # uses its built-in default (always valid for the installed version).
+    | if $model == "" then
+        del(.agents.defaults.model) | .agents.list[0] |= del(.model)
+      else . end'
 }
 
 # =============================================================================
