@@ -155,18 +155,18 @@ class TestPlatformTelegram:
         config = run_generate_config(platform="telegram")
         assert config["plugins"]["entries"]["discord"]["enabled"] is False
 
-    def test_telegram_accounts(self):
+    def test_telegram_single_account(self):
+        """Single agent uses flat top-level config (no accounts object)."""
         config = run_generate_config(platform="telegram")
-        # Single account uses "default" name to avoid Doctor migration
-        assert "default" in config["channels"]["telegram"]["accounts"]
-        assert config["channels"]["telegram"]["accounts"]["default"]["botToken"] == "tg-token-1"
+        tg = config["channels"]["telegram"]
+        assert tg["botToken"] == "tg-token-1"
+        assert "accounts" not in tg
 
     def test_telegram_dm_policy(self):
         config = run_generate_config(platform="telegram")
-        # dmPolicy/allowFrom live inside each account for multi-account Telegram
-        acct = config["channels"]["telegram"]["accounts"]["default"]
-        assert acct["dmPolicy"] == "allowlist"
-        assert "12345" in acct["allowFrom"]
+        tg = config["channels"]["telegram"]
+        assert tg["dmPolicy"] == "allowlist"
+        assert "12345" in tg["allowFrom"]
 
     def test_default_platform_is_telegram(self):
         """When PLATFORM is telegram, should enable telegram and disable discord."""
@@ -194,11 +194,12 @@ class TestPlatformDiscord:
         config = run_generate_config(platform="discord")
         assert config["plugins"]["entries"]["telegram"]["enabled"] is False
 
-    def test_discord_accounts(self):
+    def test_discord_single_account(self):
+        """Single agent uses flat top-level token (no accounts object)."""
         config = run_generate_config(platform="discord")
-        # Single account uses "default" name
-        assert "default" in config["channels"]["discord"]["accounts"]
-        assert config["channels"]["discord"]["accounts"]["default"]["token"] == "dc-token-1"
+        dc = config["channels"]["discord"]
+        assert dc["token"] == "dc-token-1"
+        assert "accounts" not in dc
 
     def test_discord_dm_config(self):
         """DM config uses flat keys (dmPolicy, allowFrom), not nested dm object."""
@@ -246,11 +247,13 @@ class TestPlatformBoth:
         assert config["plugins"]["entries"]["telegram"]["enabled"] is True
         assert config["plugins"]["entries"]["discord"]["enabled"] is True
 
-    def test_both_have_accounts(self):
+    def test_both_single_agent_flat(self):
+        """Single agent with both platforms uses flat top-level config."""
         config = run_generate_config(platform="both")
-        # Single agent → "default" account name
-        assert "default" in config["channels"]["telegram"]["accounts"]
-        assert "default" in config["channels"]["discord"]["accounts"]
+        assert "botToken" in config["channels"]["telegram"]
+        assert "accounts" not in config["channels"]["telegram"]
+        assert "token" in config["channels"]["discord"]
+        assert "accounts" not in config["channels"]["discord"]
 
 
 class TestBindings:
@@ -431,8 +434,7 @@ class TestJSONEscaping:
 
     def test_telegram_user_id_with_leading_zero(self):
         config = run_generate_config(platform="telegram", telegram_user_id="0123456789")
-        acct = config["channels"]["telegram"]["accounts"]["default"]
-        assert "0123456789" in acct["allowFrom"]
+        assert "0123456789" in config["channels"]["telegram"]["allowFrom"]
 
 
 class TestJSONValidation:
@@ -560,7 +562,7 @@ class TestSafeModeConfig:
         assert agents[0]["name"] == "SafeModeBot"
 
     def test_safe_mode_telegram_account_matches_agent(self):
-        """Telegram account key should match the agent id 'safe-mode'."""
+        """Safe-mode Telegram uses flat top-level config (single bot)."""
         config = run_generate_config(
             mode="safe-mode",
             sm_bot_token="test-bot-token-123",
@@ -569,12 +571,12 @@ class TestSafeModeConfig:
             sm_token="sk-ant-test",
             sm_owner_id="12345",
         )
-        accounts = config["channels"]["telegram"]["accounts"]
-        assert "safe-mode" in accounts
-        assert accounts["safe-mode"]["botToken"] == "test-bot-token-123"
+        tg = config["channels"]["telegram"]
+        assert tg["botToken"] == "test-bot-token-123"
+        assert "accounts" not in tg
 
-    def test_safe_mode_discord_account_matches_agent(self):
-        """Discord account key should match the agent id 'safe-mode'."""
+    def test_safe_mode_discord_flat_config(self):
+        """Safe-mode Discord uses flat top-level config (single bot)."""
         config = run_generate_config(
             mode="safe-mode",
             sm_bot_token="discord-bot-token-123",
@@ -583,9 +585,9 @@ class TestSafeModeConfig:
             sm_token="sk-ant-test",
             sm_owner_id="12345",
         )
-        accounts = config["channels"]["discord"]["accounts"]
-        assert "safe-mode" in accounts
-        assert accounts["safe-mode"]["token"] == "discord-bot-token-123"
+        dc = config["channels"]["discord"]
+        assert dc["token"] == "discord-bot-token-123"
+        assert "accounts" not in dc
 
     def test_safe_mode_dm_policy(self):
         """Safe-mode config should have allowlist dmPolicy with owner."""
@@ -598,10 +600,9 @@ class TestSafeModeConfig:
             sm_owner_id="99999",
         )
         tg = config["channels"]["telegram"]
-        # For telegram, dmPolicy/allowFrom are per-account
-        acct = tg["accounts"]["safe-mode"]
-        assert acct["dmPolicy"] == "allowlist"
-        assert "99999" in acct["allowFrom"]
+        # Safe-mode uses single account → flat top-level config
+        assert tg["dmPolicy"] == "allowlist"
+        assert "99999" in tg["allowFrom"]
 
     def test_safe_mode_anthropic_env(self):
         """Anthropic provider should set ANTHROPIC_API_KEY in env."""

@@ -193,8 +193,7 @@ build_telegram_channel() {
   local filter_agents="${1:-}"
   local owner_id="${TELEGRAM_OWNER_ID:-$(d "${TELEGRAM_USER_ID_B64:-}")}"
 
-  # Build accounts object
-  # Collect matching agents first to determine account naming
+  # Collect matching agents
   local agent_ids=() agent_tokens=()
   for i in $(seq 1 "$AGENT_COUNT"); do
     local agent_id="agent${i}"
@@ -207,18 +206,6 @@ build_telegram_channel() {
     agent_tokens+=("$tok")
   done
 
-  # Single account → name it "default" to avoid Doctor migration.
-  # Multiple accounts → use agent IDs (agent1, agent2, etc.)
-  local accounts="{}"
-  for idx in "${!agent_ids[@]}"; do
-    local acct_name="${agent_ids[$idx]}"
-    if [ "${#agent_ids[@]}" -eq 1 ]; then
-      acct_name="default"
-    fi
-    accounts=$(echo "$accounts" | jq --arg id "$acct_name" --arg tok "${agent_tokens[$idx]}" --arg oid "$owner_id" \
-      '. + {($id): {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}')
-  done
-
   # Build groups if council group configured
   local groups="null"
   local cgi="${COUNCIL_GROUP_ID:-}"
@@ -226,14 +213,41 @@ build_telegram_channel() {
     groups=$(jq -n --arg gid "$cgi" '{($gid): {requireMention: true}, "*": {requireMention: true}}')
   fi
 
-  jq -n \
-    --argjson enabled "$_tg_enabled" \
-    --argjson accounts "$accounts" \
-    --argjson groups "$groups" \
-    '{
-      enabled: $enabled,
-      accounts: $accounts
-    } + (if $groups != null then {groups: $groups} else {} end)'
+  # Single account → flat top-level config (botToken, dmPolicy at channel root).
+  # Multiple accounts → accounts object with per-account dmPolicy.
+  # Ref: https://docs.openclaw.ai/channels/telegram (single) vs
+  #      https://docs.openclaw.ai/concepts/multi-agent (multi)
+  if [ "${#agent_ids[@]}" -le 1 ]; then
+    local tok="${agent_tokens[0]:-}"
+    jq -n \
+      --argjson enabled "$_tg_enabled" \
+      --arg botToken "$tok" \
+      --arg owner_id "$owner_id" \
+      --argjson groups "$groups" \
+      '{
+        enabled: $enabled,
+        botToken: $botToken,
+        dmPolicy: "allowlist",
+        allowFrom: [$owner_id]
+      } + (if $groups != null then {groups: $groups} else {} end)'
+  else
+    local accounts="{}"
+    for idx in "${!agent_ids[@]}"; do
+      accounts=$(echo "$accounts" | jq \
+        --arg id "${agent_ids[$idx]}" \
+        --arg tok "${agent_tokens[$idx]}" \
+        --arg oid "$owner_id" \
+        '. + {($id): {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}')
+    done
+    jq -n \
+      --argjson enabled "$_tg_enabled" \
+      --argjson accounts "$accounts" \
+      --argjson groups "$groups" \
+      '{
+        enabled: $enabled,
+        accounts: $accounts
+      } + (if $groups != null then {groups: $groups} else {} end)'
+  fi
 }
 
 # Build discord channel config
@@ -243,7 +257,7 @@ build_discord_channel() {
   local owner_id="${DISCORD_OWNER_ID:-$(d "${DISCORD_OWNER_ID_B64:-}")}"
   local guild_id="${DISCORD_GUILD_ID:-$(d "${DISCORD_GUILD_ID_B64:-}")}"
 
-  # Build accounts object — same single-account→default pattern as Telegram
+  # Collect matching agents
   local dc_agent_ids=() dc_agent_tokens=()
   for i in $(seq 1 "$AGENT_COUNT"); do
     local agent_id="agent${i}"
@@ -256,25 +270,14 @@ build_discord_channel() {
     dc_agent_tokens+=("$tok")
   done
 
-  local accounts="{}"
-  for idx in "${!dc_agent_ids[@]}"; do
-    local acct_name="${dc_agent_ids[$idx]}"
-    if [ "${#dc_agent_ids[@]}" -eq 1 ]; then
-      acct_name="default"
-    fi
-    accounts=$(echo "$accounts" | jq --arg id "$acct_name" --arg tok "${dc_agent_tokens[$idx]}" \
-      '. + {($id): {token: $tok}}')
-  done
-
   # Build guilds if guild ID set
   local guilds="null"
   if [ -n "$guild_id" ]; then
     guilds=$(jq -n --arg gid "$guild_id" '{($gid): {requireMention: true}}')
   fi
 
-  # Build DM config — flat keys (dmPolicy, allowFrom), not nested dm object.
-  # OpenClaw expects flat format; nested dm.policy triggers Doctor migration prompt
-  # which hangs in non-interactive systemd service context.
+  # DM config — flat keys at channel level (dmPolicy, allowFrom).
+  # Discord dmPolicy/allowFrom are always channel-level, not per-account.
   local dm_flat
   if [ -n "$owner_id" ]; then
     dm_flat=$(jq -n --arg oid "$owner_id" '{dmPolicy: "pairing", allowFrom: [$oid]}')
@@ -282,16 +285,40 @@ build_discord_channel() {
     dm_flat=$(jq -n '{dmPolicy: "pairing"}')
   fi
 
-  jq -n \
-    --argjson enabled "$_dc_enabled" \
-    --argjson accounts "$accounts" \
-    --argjson dm_flat "$dm_flat" \
-    --argjson guilds "$guilds" \
-    '({
-      enabled: $enabled,
-      groupPolicy: "allowlist",
-      accounts: $accounts
-    } + $dm_flat + (if $guilds != null then {guilds: $guilds} else {} end))'
+  # Single account → top-level token, no accounts object.
+  # Multiple accounts → accounts object with named entries.
+  if [ "${#dc_agent_ids[@]}" -le 1 ]; then
+    local tok="${dc_agent_tokens[0]:-}"
+    jq -n \
+      --argjson enabled "$_dc_enabled" \
+      --arg token "$tok" \
+      --argjson dm_flat "$dm_flat" \
+      --argjson guilds "$guilds" \
+      '({
+        enabled: $enabled,
+        groupPolicy: "allowlist"
+      } + (if $token != "" then {token: $token} else {} end)
+        + $dm_flat
+        + (if $guilds != null then {guilds: $guilds} else {} end))'
+  else
+    local accounts="{}"
+    for idx in "${!dc_agent_ids[@]}"; do
+      accounts=$(echo "$accounts" | jq \
+        --arg id "${dc_agent_ids[$idx]}" \
+        --arg tok "${dc_agent_tokens[$idx]}" \
+        '. + {($id): {token: $tok}}')
+    done
+    jq -n \
+      --argjson enabled "$_dc_enabled" \
+      --argjson accounts "$accounts" \
+      --argjson dm_flat "$dm_flat" \
+      --argjson guilds "$guilds" \
+      '({
+        enabled: $enabled,
+        groupPolicy: "allowlist",
+        accounts: $accounts
+      } + $dm_flat + (if $guilds != null then {guilds: $guilds} else {} end))'
+  fi
 }
 
 # Build bindings array (maps non-default agents to their channel accounts)
@@ -501,12 +528,13 @@ generate_safe_mode() {
   # The plugins.entries section controls which providers actually load;
   # channels not present are simply ignored.
   local tg_config="null" dc_config="null"
+  # Safe-mode always has one bot → use flat top-level config (no accounts object)
   if [ "$SM_PLATFORM" = "telegram" ]; then
     tg_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, accounts: {"safe-mode": {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}}')
+      '{enabled: true, botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}')
   elif [ "$SM_PLATFORM" = "discord" ]; then
     dc_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {"safe-mode": {token: $tok}}}')
+      '{enabled: true, token: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}')
   fi
 
   # Build plugins — only enable the active platform's provider
