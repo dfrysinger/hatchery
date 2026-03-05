@@ -85,6 +85,8 @@ for group in "${SESSION_GROUPS[@]}"; do
 Description=OpenClaw Session - ${group} (${HABITAT})
 After=network.target desktop.service
 Wants=desktop.service
+StartLimitBurst=5
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
@@ -94,8 +96,6 @@ ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port ${port}
 ExecStartPost=+/bin/bash -c 'source ${env_file} && RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 Restart=on-failure
 RestartSec=10
-StartLimitBurst=5
-StartLimitIntervalSec=300
 RestartPreventExitStatus=2
 TimeoutStartSec=180
 EnvironmentFile=${env_file}
