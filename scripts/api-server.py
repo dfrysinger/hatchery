@@ -60,44 +60,22 @@ def get_status():
   except:pass
   if s>=9:p=2
   
-  # Check bot status based on isolation mode
-  # Read isolation config from habitat-parsed.env
-  isolation_mode="none"
-  isolation_groups=[]
+  # Check bot status from manifest (SSOT for group topology + service names)
+  bot_online=False
+  svc={}
   try:
-    with open('/etc/habitat-parsed.env','r') as f:
-      for line in f:
-        if line.startswith('ISOLATION_DEFAULT='):
-          isolation_mode=line.split('=',1)[1].strip().strip('"')
-        elif line.startswith('ISOLATION_GROUPS='):
-          groups_str=line.split('=',1)[1].strip().strip('"')
-          if groups_str:
-            isolation_groups=groups_str.split(',')
+    with open('/etc/openclaw-groups.json','r') as f:
+      manifest=json.load(f)
+    for g in manifest.get('groups',{}).values():
+      sn=g.get('serviceName')
+      if sn:
+        active=check_service(sn)
+        svc[sn]=active
+        if active:bot_online=True
   except:pass
   
-  # Determine bot_online based on isolation mode
-  if isolation_mode=="session" and isolation_groups:
-    # Session isolation: check if ANY session service is running
-    bot_online=any(check_service(f'openclaw-{g}') for g in isolation_groups)
-  elif isolation_mode=="container":
-    # Container isolation: check containers service
-    bot_online=check_service('openclaw-containers')
-  else:
-    # No isolation: check main openclaw
-    bot_online=check_service('openclaw')
-  
-  svc={}
   if p2_done or setup_done:
-    # Include isolation services in status
-    base_services=['xrdp','desktop','x11vnc']
-    if isolation_mode=="session" and isolation_groups:
-      for g in isolation_groups:
-        svc[f'openclaw-{g}']=check_service(f'openclaw-{g}')
-    elif isolation_mode=="container":
-      svc['openclaw-containers']=check_service('openclaw-containers')
-    else:
-      svc['openclaw']=check_service('openclaw')
-    for sv in base_services:
+    for sv in ['xrdp','desktop','x11vnc']:
       svc[sv]=check_service(sv)
   desc=ALL_STAGES.get(s) or P2_STAGES.get(s,f"stage-{s}")
   # Check for safe mode: either the generic marker or any group-specific marker
@@ -494,7 +472,15 @@ class H(http.server.BaseHTTPRequestHandler):
         self.wfile.write(f"ERROR: {e}\n".encode())
       
       self.wfile.write(b"\n=== SESSION SERVICE STATUS ===\n")
-      for svc in ['openclaw','openclaw-browser','openclaw-documents','openclaw-containers']:
+      # Discover service names from manifest
+      log_services=[]
+      try:
+        with open('/etc/openclaw-groups.json','r') as f:
+          manifest=json.load(f)
+        log_services=[g['serviceName'] for g in manifest.get('groups',{}).values() if g.get('serviceName')]
+      except:
+        log_services=['openclaw']
+      for svc in log_services:
         try:
           r=subprocess.run(['systemctl','status',svc,'--no-pager'],capture_output=True,timeout=5)
           self.wfile.write(f"\n--- {svc} ---\n".encode())
@@ -504,7 +490,10 @@ class H(http.server.BaseHTTPRequestHandler):
       
       self.wfile.write(b"\n=== SESSION SERVICE LOGS (journalctl) ===\n")
       try:
-        r=subprocess.run(['journalctl','-u','openclaw-browser','-u','openclaw-documents','-u','openclaw-containers','--since','30 min ago','-n','100','--no-pager'],capture_output=True,timeout=10)
+        journal_args=['journalctl','--since','30 min ago','-n','100','--no-pager']
+        for svc in log_services:
+          journal_args.extend(['-u',svc])
+        r=subprocess.run(journal_args,capture_output=True,timeout=10)
         self.wfile.write(r.stdout[-8192:])
       except Exception as e:
         self.wfile.write(f"ERROR: {e}\n".encode())
