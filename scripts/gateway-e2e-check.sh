@@ -287,10 +287,14 @@ send_agent_intros() {
 
       log "  Sending intro for $agent_id ($agent_name) via $intro_plat..."
 
+      # Account name: single-agent → "default" (Doctor enforces), multi → agent ID
+      local reply_acct="$agent_id"
+      [ "${#agents_to_intro[@]}" -eq 1 ] && reply_acct="default"
+
       # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
       if timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
         --agent "$agent_id" --message "$intro_prompt" --deliver \
-        --reply-channel "$intro_plat" --reply-account "$agent_id" --reply-to "$plat_owner" \
+        --reply-channel "$intro_plat" --reply-account "$reply_acct" --reply-to "$plat_owner" \
         --timeout 60 --json >> "$HC_LOG" 2>&1; then
         log "  ✓ $agent_name intro sent via $intro_plat"
         intro_ok=true

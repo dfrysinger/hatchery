@@ -82,8 +82,8 @@ notify_find_token() {
   # these may differ from env vars if recovery swapped configs)
   if [ -f "${HC_SAFE_MODE_FILE:-}" ] && [ -f "$config_file" ]; then
     local tg_token dc_token
-    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.accounts.default.botToken // empty' "$config_file" 2>/dev/null)
-    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // empty' "$config_file" 2>/dev/null)
+    tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.accounts.default.botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
 
     local preferred="${HC_PLATFORM:-telegram}"
 

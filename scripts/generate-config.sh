@@ -213,9 +213,8 @@ build_telegram_channel() {
     groups=$(jq -n --arg gid "$cgi" '{($gid): {requireMention: true}, "*": {requireMention: true}}')
   fi
 
-  # Always use accounts object with per-account dmPolicy/allowFrom.
-  # Single account uses "default" as the account name.
-  # Ref: https://docs.openclaw.ai/concepts/multi-agent
+  # Always use accounts object. Single agent → "default" (Doctor enforces this
+  # by renaming single-account configs). Multi agent → agent IDs.
   local accounts="{}"
   for idx in "${!agent_ids[@]}"; do
     local acct_name="${agent_ids[$idx]}"
@@ -271,7 +270,7 @@ build_discord_channel() {
     dm_flat=$(jq -n '{dmPolicy: "pairing"}')
   fi
 
-  # Always use accounts object. Single account uses "default" name.
+  # Always use accounts object. Single → "default", multi → agent IDs.
   local accounts="{}"
   for idx in "${!dc_agent_ids[@]}"; do
     local acct_name="${dc_agent_ids[$idx]}"

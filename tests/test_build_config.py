@@ -156,7 +156,7 @@ class TestPlatformTelegram:
         assert config["plugins"]["entries"]["discord"]["enabled"] is False
 
     def test_telegram_single_account(self):
-        """Single agent uses accounts.default."""
+        """Single agent uses accounts.default (single agent = default)."""
         config = run_generate_config(platform="telegram")
         acct = config["channels"]["telegram"]["accounts"]["default"]
         assert acct["botToken"] == "tg-token-1"
@@ -194,7 +194,7 @@ class TestPlatformDiscord:
         assert config["plugins"]["entries"]["telegram"]["enabled"] is False
 
     def test_discord_single_account(self):
-        """Single agent uses accounts.default."""
+        """Single agent uses accounts.default (single agent = default)."""
         config = run_generate_config(platform="discord")
         acct = config["channels"]["discord"]["accounts"]["default"]
         assert acct["token"] == "dc-token-1"
@@ -559,7 +559,7 @@ class TestSafeModeConfig:
         assert agents[0]["name"] == "SafeModeBot"
 
     def test_safe_mode_telegram_account_matches_agent(self):
-        """Safe-mode Telegram uses accounts.default."""
+        """Safe-mode Telegram uses accounts.default (single agent = default)."""
         config = run_generate_config(
             mode="safe-mode",
             sm_bot_token="test-bot-token-123",
@@ -572,7 +572,7 @@ class TestSafeModeConfig:
         assert acct["botToken"] == "test-bot-token-123"
 
     def test_safe_mode_discord_account(self):
-        """Safe-mode Discord uses accounts.default."""
+        """Safe-mode Discord uses accounts.default (single agent = default)."""
         config = run_generate_config(
             mode="safe-mode",
             sm_bot_token="discord-bot-token-123",
