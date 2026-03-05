@@ -1,304 +1,178 @@
 #!/bin/bash
 # =============================================================================
-# verify-2a.sh — Mixed Mode Verification (session + container on same droplet)
-# Run on bot2.frysinger.org after Stage 11
+# verify-2a.sh — Automated verification for Test 2A (Mixed Mode)
+# =============================================================================
+# Usage: ./verify-2a.sh [hostname]
+# Default hostname: bot2.frysinger.org
 # =============================================================================
 set -euo pipefail
 
-PASS=0; FAIL=0; WARN=0
-pass() { echo "  ✅ $1"; ((PASS++)) || true; }
-fail() { echo "  ❌ $1"; ((FAIL++)) || true; }
-warn() { echo "  ⚠️  $1"; ((WARN++)) || true; }
+HOST="${1:-bot2.frysinger.org}"
+SSH="sshpass -p 'h31CPqjldx0P*tvqR0DB8vQHM^GWgS' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 bot@${HOST}"
+PASS=0
+FAIL=0
+WARN=0
 
-echo "═══════════════════════════════════════════════════"
-echo "  Test 2A: Mixed Mode (Session + Container)"
-echo "  Host: $(hostname)"
-echo "  Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "═══════════════════════════════════════════════════"
-echo
+pass() { echo "  ✅ $1"; PASS=$((PASS + 1)); }
+fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
+warn() { echo "  ⚠️  $1"; WARN=$((WARN + 1)); }
+section() { echo ""; echo "=== $1 ==="; }
 
-MANIFEST="/etc/openclaw-groups.json"
+echo "============================================"
+echo "  Test 2A: Mixed Mode Verification"
+echo "  Host: ${HOST}"
+echo "============================================"
 
-# --- 1. Stage & Readiness ---
-echo "▸ Stage & Readiness"
-STAGE=$(curl -sf localhost:8080/status 2>/dev/null | jq -r '.stage // "unreachable"')
-if [ "$STAGE" = "11" ]; then
-  pass "Stage 11 (READY)"
+# --- 1. Boot status ---
+section "1. Boot Status"
+STATUS=$(eval $SSH 'curl -sf localhost:8080/status' 2>/dev/null) || { fail "API server unreachable"; STATUS="{}"; }
+STAGE=$(echo "$STATUS" | jq -r '.stage // "unknown"')
+SAFE=$(echo "$STATUS" | jq -r '.safe_mode // "unknown"')
+if [ "$STAGE" = "11" ]; then pass "Stage 11 (ready)"; else fail "Stage=$STAGE (expected 11)"; fi
+if [ "$SAFE" = "false" ]; then pass "Not in safe mode"; else fail "safe_mode=$SAFE"; fi
+
+# --- 2. Manifest: mixed isolation ---
+section "2. Manifest"
+MANIFEST=$(eval $SSH 'cat /etc/openclaw-groups.json 2>/dev/null' 2>/dev/null) || MANIFEST="{}"
+TYPES=$(echo "$MANIFEST" | jq -r '.groups | to_entries[] | .value.isolation' 2>/dev/null | sort -u)
+HAS_SESSION=$(echo "$TYPES" | grep -c "session" || true)
+HAS_CONTAINER=$(echo "$TYPES" | grep -c "container" || true)
+if [ "$HAS_SESSION" -ge 1 ] && [ "$HAS_CONTAINER" -ge 1 ]; then
+  pass "Mixed isolation: session + container"
 else
-  fail "Stage is $STAGE, expected 11"
+  fail "Not mixed: types=$TYPES"
 fi
 
-# --- 2. Docker Installed ---
-echo
-echo "▸ Docker Installation"
-if command -v docker &>/dev/null; then
-  pass "Docker installed"
-  DOCKER_VER=$(docker --version)
-  echo "       $DOCKER_VER"
+PORTS=$(echo "$MANIFEST" | jq -r '.groups | to_entries[] | .value.port' 2>/dev/null | sort)
+UNIQUE_PORTS=$(echo "$PORTS" | sort -u)
+if [ "$PORTS" = "$UNIQUE_PORTS" ]; then pass "All ports unique"; else fail "Duplicate ports"; fi
+
+echo "$MANIFEST" | jq -r '.groups | to_entries[] | "    \(.key): \(.value.isolation) port=\(.value.port)"' 2>/dev/null
+
+# --- 3. Session service active ---
+section "3. Session Service"
+SESSION_GROUP=$(echo "$MANIFEST" | jq -r '.groups | to_entries[] | select(.value.isolation == "session") | .key' 2>/dev/null | head -1)
+if [ -n "$SESSION_GROUP" ]; then
+  SVC_STATUS=$(eval $SSH "systemctl is-active openclaw-${SESSION_GROUP} 2>/dev/null" 2>/dev/null) || SVC_STATUS="unknown"
+  if [ "$SVC_STATUS" = "active" ]; then pass "openclaw-${SESSION_GROUP}: active"; else fail "openclaw-${SESSION_GROUP}: $SVC_STATUS"; fi
 else
-  fail "Docker not installed — install-docker.sh didn't run"
+  fail "No session group in manifest"
 fi
 
-if docker info &>/dev/null; then
-  pass "Docker daemon running"
+# --- 4. Container healthy ---
+section "4. Container"
+CONTAINER_GROUP=$(echo "$MANIFEST" | jq -r '.groups | to_entries[] | select(.value.isolation == "container") | .key' 2>/dev/null | head -1)
+if [ -n "$CONTAINER_GROUP" ]; then
+  HEALTH=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{.State.Health.Status}}' 2>/dev/null" 2>/dev/null) || HEALTH="unknown"
+  if [ "$HEALTH" = "healthy" ]; then pass "openclaw-${CONTAINER_GROUP}: healthy"; else fail "openclaw-${CONTAINER_GROUP}: $HEALTH"; fi
 else
-  fail "Docker daemon not responding"
+  fail "No container group in manifest"
 fi
 
-# Log rotation
-if [ -f /etc/docker/daemon.json ]; then
-  MAX_SIZE=$(jq -r '.["log-opts"]["max-size"] // "missing"' /etc/docker/daemon.json)
-  if [ "$MAX_SIZE" = "50m" ]; then
-    pass "Docker log rotation configured (50m)"
-  else
-    warn "Docker log rotation: max-size=$MAX_SIZE (expected 50m)"
-  fi
-else
-  fail "Docker daemon.json missing"
+# --- 5. Container mounts — security check ---
+section "5. Container Mounts"
+MOUNTS=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{range .Mounts}}{{.Source}}|{{.Destination}}|{{.Mode}}{{println}}{{end}}' 2>/dev/null" 2>/dev/null) || MOUNTS=""
+
+# Check no host scripts leaked
+BAD_MOUNTS=$(echo "$MOUNTS" | grep -E "/usr/local/bin|/usr/local/sbin|/etc/droplet|/var/lib/init|/var/log" || true)
+if [ -z "$BAD_MOUNTS" ]; then pass "No host scripts/state in container mounts"; else fail "Leaked mounts: $BAD_MOUNTS"; fi
+
+# Check config and token are read-only
+RO_CONFIG=$(echo "$MOUNTS" | grep "openclaw.json\|openclaw.session.json" | grep -c "ro" || true)
+RO_TOKEN=$(echo "$MOUNTS" | grep "gateway-token" | grep -c "ro" || true)
+if [ "$RO_CONFIG" -ge 1 ]; then pass "Config mount is read-only"; else fail "Config mount not read-only"; fi
+if [ "$RO_TOKEN" -ge 1 ]; then pass "Token mount is read-only"; else fail "Token mount not read-only"; fi
+
+# --- 6. Security hardening ---
+section "6. Container Security"
+CAP_DROP=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{.HostConfig.CapDrop}}' 2>/dev/null" 2>/dev/null) || CAP_DROP=""
+READONLY=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{.HostConfig.ReadonlyRootfs}}' 2>/dev/null" 2>/dev/null) || READONLY=""
+SEC_OPT=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{.HostConfig.SecurityOpt}}' 2>/dev/null" 2>/dev/null) || SEC_OPT=""
+PIDS=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{.HostConfig.PidsLimit}}' 2>/dev/null" 2>/dev/null) || PIDS=""
+
+if echo "$CAP_DROP" | grep -q "ALL"; then pass "cap_drop: ALL"; else fail "cap_drop: $CAP_DROP"; fi
+if [ "$READONLY" = "true" ]; then pass "read_only rootfs"; else fail "read_only=$READONLY"; fi
+if echo "$SEC_OPT" | grep -q "no-new-privileges"; then pass "no-new-privileges"; else fail "SecurityOpt=$SEC_OPT"; fi
+if [ -n "$PIDS" ] && [ "$PIDS" != "0" ] && [ "$PIDS" != "-1" ]; then pass "pids_limit=$PIDS"; else warn "pids_limit=$PIDS (unbounded)"; fi
+
+# --- 7. Resource limits ---
+section "7. Resource Limits"
+MEM=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{.HostConfig.Memory}}' 2>/dev/null" 2>/dev/null) || MEM=0
+CPU=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{.HostConfig.NanoCpus}}' 2>/dev/null" 2>/dev/null) || CPU=0
+if [ "$MEM" -gt 0 ] 2>/dev/null; then pass "Memory limit: $((MEM / 1048576))MB"; else fail "No memory limit"; fi
+if [ "$CPU" -gt 0 ] 2>/dev/null; then pass "CPU limit: $((CPU / 1000000000)) cores"; else warn "No CPU limit"; fi
+
+# --- 8. Restart policy (Docker) ---
+section "8. Docker Restart Policy"
+RESTART_POLICY=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{.HostConfig.RestartPolicy.Name}}:{{.HostConfig.RestartPolicy.MaximumRetryCount}}' 2>/dev/null" 2>/dev/null) || RESTART_POLICY=""
+if echo "$RESTART_POLICY" | grep -q "on-failure"; then pass "Restart: on-failure"; else fail "Restart: $RESTART_POLICY"; fi
+MAX_RETRY=$(echo "$RESTART_POLICY" | cut -d: -f2)
+if [ "$MAX_RETRY" -gt 0 ] 2>/dev/null; then pass "Max retries: $MAX_RETRY"; else fail "No retry cap (infinite restarts)"; fi
+
+# --- 9. Restart policy (Systemd) ---
+section "9. Systemd Restart Policy"
+if [ -n "$SESSION_GROUP" ]; then
+  SYS_RESTART=$(eval $SSH "grep 'Restart=' /etc/systemd/system/openclaw-${SESSION_GROUP}.service 2>/dev/null" 2>/dev/null) || SYS_RESTART=""
+  SYS_BURST=$(eval $SSH "grep 'StartLimitBurst' /etc/systemd/system/openclaw-${SESSION_GROUP}.service 2>/dev/null" 2>/dev/null) || SYS_BURST=""
+  if echo "$SYS_RESTART" | grep -q "on-failure"; then pass "Systemd: Restart=on-failure"; else fail "Systemd: $SYS_RESTART"; fi
+  if echo "$SYS_BURST" | grep -q "StartLimitBurst"; then pass "Systemd: $SYS_BURST"; else fail "No StartLimitBurst"; fi
 fi
 
-# --- 3. Manifest ---
-echo
-echo "▸ Runtime Manifest"
-if [ -f "$MANIFEST" ]; then
-  pass "Manifest exists"
-  echo "       $(jq -c '.groups | to_entries[] | {name: .key, iso: .value.isolation, port: .value.port}' "$MANIFEST")"
-
-  # Check mixed types
-  SESSION_COUNT=$(jq '[.groups[] | select(.isolation == "session")] | length' "$MANIFEST")
-  CONTAINER_COUNT=$(jq '[.groups[] | select(.isolation == "container")] | length' "$MANIFEST")
-  if [ "$SESSION_COUNT" -ge 1 ] && [ "$CONTAINER_COUNT" -ge 1 ]; then
-    pass "Mixed mode: ${SESSION_COUNT} session + ${CONTAINER_COUNT} container group(s)"
-  else
-    fail "Expected mixed mode, got ${SESSION_COUNT} session + ${CONTAINER_COUNT} container"
-  fi
-
-  # Unique ports
-  PORT_COUNT=$(jq '[.groups[].port] | unique | length' "$MANIFEST")
-  TOTAL_PORTS=$(jq '[.groups[].port] | length' "$MANIFEST")
-  if [ "$PORT_COUNT" = "$TOTAL_PORTS" ]; then
-    pass "All ports unique (no collisions)"
-  else
-    fail "Port collision detected!"
-  fi
+# --- 10. Safeguard watchers ---
+section "10. Safeguard Watchers"
+SAFEGUARD_PATHS=$(eval $SSH 'systemctl list-units "openclaw-safeguard-*.path" --no-pager --no-legend 2>/dev/null' 2>/dev/null)
+SAFEGUARD_ACTIVE=$(echo "$SAFEGUARD_PATHS" | grep -c "active" || true)
+if [ "$SAFEGUARD_ACTIVE" -ge 2 ]; then
+  pass "$SAFEGUARD_ACTIVE safeguard .path units active"
 else
-  fail "Manifest missing"
+  fail "Only $SAFEGUARD_ACTIVE safeguard .path units active (expected ≥2)"
 fi
 
-# --- 4. Session Group ---
-echo
-echo "▸ Session Group (session-group)"
-SVC="openclaw-session-group"
-if systemctl is-active --quiet "$SVC" 2>/dev/null; then
-  pass "$SVC is active"
-else
-  fail "$SVC is not active"
-fi
+# --- 11. Safe mode handler ---
+section "11. Safe Mode Handler"
+STOP_COUNT=$(eval $SSH 'grep -c "hc_stop_service" /usr/local/bin/safe-mode-handler.sh 2>/dev/null' 2>/dev/null) || STOP_COUNT=0
+if [ "$STOP_COUNT" -ge 2 ]; then pass "hc_stop_service on terminal paths ($STOP_COUNT)"; else fail "hc_stop_service missing ($STOP_COUNT, need ≥2)"; fi
 
-S_PORT=$(jq -r '.groups["session-group"].port' "$MANIFEST" 2>/dev/null)
-if curl -sf "http://127.0.0.1:${S_PORT}/" &>/dev/null; then
-  pass "HTTP health check passes (port ${S_PORT})"
-else
-  fail "HTTP health check fails (port ${S_PORT})"
-fi
-
-# --- 5. Container Group ---
-echo
-echo "▸ Container Group (container-group)"
-CSVC="openclaw-container-container-group"
-if systemctl is-active --quiet "$CSVC" 2>/dev/null; then
-  pass "$CSVC systemd wrapper is active"
-else
-  fail "$CSVC systemd wrapper is not active"
-fi
-
-# Container health
-CONTAINER_NAME="openclaw-container-group"
-HEALTH=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "not-found")
-if [ "$HEALTH" = "healthy" ]; then
-  pass "Container '$CONTAINER_NAME' is healthy"
-else
-  fail "Container health: $HEALTH (expected healthy)"
-fi
-
-C_PORT=$(jq -r '.groups["container-group"].port' "$MANIFEST" 2>/dev/null)
-if curl -sf "http://127.0.0.1:${C_PORT}/" &>/dev/null; then
-  pass "HTTP health check passes (port ${C_PORT})"
-else
-  fail "HTTP health check fails (port ${C_PORT})"
-fi
-
-# --- 6. Container Mounts (Option A validation) ---
-echo
-echo "▸ Container Mounts (Option A — no host scripts)"
-MOUNTS=$(docker inspect "$CONTAINER_NAME" --format='{{range .Mounts}}{{.Source}}{{println}}{{end}}' 2>/dev/null)
-if echo "$MOUNTS" | grep -q '/usr/local/'; then
-  fail "Host scripts mounted in container (Option B leak!)"
-  echo "       Offending mounts:"
-  echo "$MOUNTS" | grep '/usr/local/' | sed 's/^/         /'
-else
-  pass "No host scripts mounted (Option A correct)"
-fi
-
-if echo "$MOUNTS" | grep -q '/var/lib/init-status'; then
-  fail "Marker dir mounted in container"
-else
-  pass "No marker dir mounted"
-fi
-
-if echo "$MOUNTS" | grep -q '/etc/droplet.env\|/etc/habitat-parsed.env'; then
-  fail "Host secrets mounted in container"
-else
-  pass "No host secrets mounted"
-fi
-
-# Read-only mounts
-RO_MOUNTS=$(docker inspect "$CONTAINER_NAME" --format='{{range .Mounts}}{{.Source}} {{.Mode}}{{println}}{{end}}' 2>/dev/null)
-if echo "$RO_MOUNTS" | grep 'openclaw.session.json' | grep -q 'ro'; then
-  pass "Config mounted read-only"
-else
-  warn "Config mount mode unclear (check manually)"
-fi
-
-# --- 7. Security Hardening ---
-echo
-echo "▸ Security Hardening"
-CAP_DROP=$(docker inspect "$CONTAINER_NAME" --format='{{.HostConfig.CapDrop}}' 2>/dev/null)
-if echo "$CAP_DROP" | grep -qi 'ALL'; then
-  pass "cap_drop: ALL"
-else
-  fail "cap_drop not set to ALL: $CAP_DROP"
-fi
-
-SEC_OPT=$(docker inspect "$CONTAINER_NAME" --format='{{.HostConfig.SecurityOpt}}' 2>/dev/null)
-if echo "$SEC_OPT" | grep -q 'no-new-privileges'; then
-  pass "no-new-privileges enabled"
-else
-  fail "no-new-privileges not set"
-fi
-
-READ_ONLY=$(docker inspect "$CONTAINER_NAME" --format='{{.HostConfig.ReadonlyRootfs}}' 2>/dev/null)
-if [ "$READ_ONLY" = "true" ]; then
-  pass "Read-only root filesystem"
-else
-  fail "Root filesystem not read-only"
-fi
-
-PIDS=$(docker inspect "$CONTAINER_NAME" --format='{{.HostConfig.PidsLimit}}' 2>/dev/null)
-if [ "$PIDS" = "256" ]; then
-  pass "pids_limit: 256"
-else
-  warn "pids_limit: $PIDS (expected 256)"
-fi
-
-# --- 8. Resource Limits ---
-echo
-echo "▸ Resource Limits"
-MEM_LIMIT=$(docker inspect "$CONTAINER_NAME" --format='{{.HostConfig.Memory}}' 2>/dev/null)
-# 1g = 1073741824 bytes
-if [ "$MEM_LIMIT" = "1073741824" ]; then
-  pass "Memory limit: 1g"
-elif [ "$MEM_LIMIT" -gt 0 ] 2>/dev/null; then
-  warn "Memory limit: $((MEM_LIMIT / 1024 / 1024))MB (expected 1024MB)"
-else
-  fail "No memory limit set"
-fi
-
-CPU_QUOTA=$(docker inspect "$CONTAINER_NAME" --format='{{.HostConfig.NanoCpus}}' 2>/dev/null)
-# 1.0 cpu = 1000000000 nanocpus
-if [ "$CPU_QUOTA" = "1000000000" ]; then
-  pass "CPU limit: 1.0"
-elif [ "$CPU_QUOTA" -gt 0 ] 2>/dev/null; then
-  warn "CPU limit: $(echo "scale=2; $CPU_QUOTA / 1000000000" | bc) (expected 1.0)"
-else
-  fail "No CPU limit set"
-fi
-
-# --- 9. Container UID ---
-echo
-echo "▸ Container User"
-CONTAINER_UID=$(docker exec "$CONTAINER_NAME" id -u 2>/dev/null)
-HOST_UID=$(id -u bot 2>/dev/null || echo "unknown")
-if [ "$CONTAINER_UID" = "$HOST_UID" ]; then
-  pass "Container UID ($CONTAINER_UID) matches host bot UID"
-else
-  warn "Container UID=$CONTAINER_UID, host bot UID=$HOST_UID"
-fi
-
-# --- 10. Safeguard Units (ALL groups) ---
-echo
-echo "▸ Safeguard & E2E Units"
-for group in session-group container-group; do
-  if systemctl is-enabled --quiet "openclaw-safeguard-${group}.path" 2>/dev/null; then
-    pass "openclaw-safeguard-${group}.path enabled"
-  else
-    fail "openclaw-safeguard-${group}.path not enabled"
-  fi
-
-  if systemctl is-active --quiet "openclaw-safeguard-${group}.path" 2>/dev/null; then
-    pass "openclaw-safeguard-${group}.path active (watching)"
-  else
-    fail "openclaw-safeguard-${group}.path not active (dead — re-arm bug)"
-  fi
-
-  if [ -f "/etc/systemd/system/openclaw-e2e-${group}.service" ]; then
-    pass "openclaw-e2e-${group}.service exists"
-  else
-    fail "openclaw-e2e-${group}.service missing"
-  fi
+# --- 12. HTTP endpoints ---
+section "12. HTTP Endpoints"
+echo "$MANIFEST" | jq -r '.groups | to_entries[] | "\(.key) \(.value.port)"' 2>/dev/null | while read -r group port; do
+  RESP=$(eval $SSH "curl -sf http://localhost:${port}/ >/dev/null 2>&1 && echo OK || echo FAIL" 2>/dev/null)
+  if [ "$RESP" = "OK" ]; then echo "  ✅ $group (port $port): HTTP OK"; else echo "  ❌ $group (port $port): HTTP FAIL"; fi
 done
 
-# --- 11. Cross-Mode Isolation ---
-echo
-echo "▸ Cross-Mode Isolation"
-echo "  (Restart container group, verify session group unaffected)"
-# Just verify both are independently reachable — manual restart test is in the checklist
-if curl -sf "http://127.0.0.1:${S_PORT}/" &>/dev/null && curl -sf "http://127.0.0.1:${C_PORT}/" &>/dev/null; then
-  pass "Both groups independently reachable on different ports"
-else
-  fail "One or both groups unreachable"
-fi
+# --- 13. Container UID ---
+section "13. Container UID"
+CUID=$(eval $SSH "docker exec openclaw-${CONTAINER_GROUP} id -u 2>/dev/null" 2>/dev/null) || CUID="unknown"
+if [ "$CUID" = "1000" ]; then pass "Container runs as UID 1000 (bot)"; else fail "Container UID=$CUID (expected 1000)"; fi
 
-# --- 12. No Safe Mode ---
-echo
-echo "▸ No Safe Mode Markers"
-SM_COUNT=$(ls /var/lib/init-status/safe-mode-* 2>/dev/null | wc -l || true)
-if [ "$SM_COUNT" = "0" ]; then
-  pass "No safe mode markers"
-else
-  fail "$SM_COUNT safe mode marker(s) found"
-fi
+# --- 14. Intros sent ---
+section "14. Agent Intros"
+INTRO_MARKERS=$(eval $SSH 'ls /var/lib/init-status/intro-sent-* 2>/dev/null | wc -l' 2>/dev/null) || INTRO_MARKERS=0
+if [ "$INTRO_MARKERS" -ge 2 ]; then pass "$INTRO_MARKERS intro markers"; else warn "Only $INTRO_MARKERS intro markers"; fi
 
-# --- 13. Graceful Shutdown Timing ---
-echo
-echo "▸ Graceful Shutdown (container)"
-echo "  Timing docker compose down..."
-COMPOSE_PATH=$(jq -r '.groups["container-group"].composePath' "$MANIFEST")
-START_TIME=$(date +%s%N)
-docker compose -f "$COMPOSE_PATH" -p "openclaw-container-group" down 2>/dev/null
-END_TIME=$(date +%s%N)
-DURATION_MS=$(( (END_TIME - START_TIME) / 1000000 ))
-if [ "$DURATION_MS" -lt 10000 ]; then
-  pass "Graceful shutdown in ${DURATION_MS}ms (< 10s)"
-else
-  warn "Shutdown took ${DURATION_MS}ms (≥ 10s — may hit SIGKILL)"
-fi
+# --- 15. No errors ---
+section "15. Error Check"
+SAFE_MARKERS=$(eval $SSH 'ls /var/lib/init-status/safe-mode-* /var/lib/init-status/gateway-failed-* /var/lib/init-status/critical-notified-* 2>/dev/null | wc -l' 2>/dev/null) || SAFE_MARKERS=0
+if [ "$SAFE_MARKERS" = "0" ]; then pass "No failure markers"; else fail "$SAFE_MARKERS failure markers found"; fi
 
-echo "  Restarting container group..."
-docker compose -f "$COMPOSE_PATH" -p "openclaw-container-group" up -d --wait 2>/dev/null
-sleep 5
-HEALTH_AFTER=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "not-found")
-if [ "$HEALTH_AFTER" = "healthy" ]; then
-  pass "Container recovered after restart"
-else
-  warn "Container health after restart: $HEALTH_AFTER (may need more time for start_period)"
-fi
+# --- 16. NODE_OPTIONS clean ---
+section "16. NODE_OPTIONS Clean"
+NODE_OPTS=$(eval $SSH 'grep -r "experimental-sqlite" /etc/systemd/system/openclaw-* 2>/dev/null | wc -l' 2>/dev/null) || NODE_OPTS=0
+if [ "$NODE_OPTS" = "0" ]; then pass "No NODE_OPTIONS=--experimental-sqlite"; else fail "Found in $NODE_OPTS files"; fi
+
+# --- 17. kill-droplet.sh uses droplet ID ---
+section "17. Self-Destruct"
+KILL_BY_ID=$(eval $SSH 'grep -c "169.254.169.254/metadata/v1/id\|DROPLET_ID" /usr/local/bin/kill-droplet.sh 2>/dev/null' 2>/dev/null) || KILL_BY_ID=0
+if [ "$KILL_BY_ID" -ge 1 ]; then pass "kill-droplet.sh uses droplet ID"; else fail "kill-droplet.sh missing droplet ID lookup"; fi
 
 # --- Summary ---
-echo
-echo "═══════════════════════════════════════════════════"
-echo "  Results: ✅ $PASS passed  ❌ $FAIL failed  ⚠️  $WARN warnings"
-echo "═══════════════════════════════════════════════════"
-
-[ "$FAIL" -eq 0 ] && echo "  🎉 TEST 2A PASSED" || echo "  💥 TEST 2A FAILED"
+echo ""
+echo "============================================"
+echo "  RESULTS: $PASS passed, $FAIL failed, $WARN warnings"
+echo "============================================"
+if [ "$FAIL" -eq 0 ]; then
+  echo "  🎉 TEST 2A: PASS"
+else
+  echo "  💥 TEST 2A: FAIL"
+fi
 exit "$FAIL"

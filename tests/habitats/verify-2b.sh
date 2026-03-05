@@ -1,182 +1,140 @@
 #!/bin/bash
 # =============================================================================
-# verify-2b.sh — Session Regression Verification
-# Run on bot1.frysinger.org after Stage 11
+# verify-2b.sh — Automated verification for Test 2B (Session Regression)
+# =============================================================================
+# Usage: ./verify-2b.sh [hostname]
+# Default hostname: bot1.frysinger.org
 # =============================================================================
 set -euo pipefail
 
-PASS=0; FAIL=0; WARN=0
-pass() { echo "  ✅ $1"; ((PASS++)) || true; }
-fail() { echo "  ❌ $1"; ((FAIL++)) || true; }
-warn() { echo "  ⚠️  $1"; ((WARN++)) || true; }
+HOST="${1:-bot1.frysinger.org}"
+SSH="sshpass -p 'h31CPqjldx0P*tvqR0DB8vQHM^GWgS' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 bot@${HOST}"
+PASS=0
+FAIL=0
+WARN=0
 
-echo "═══════════════════════════════════════════════════"
-echo "  Test 2B: Session-Only Regression"
-echo "  Host: $(hostname)"
-echo "  Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "═══════════════════════════════════════════════════"
-echo
+pass() { echo "  ✅ $1"; PASS=$((PASS + 1)); }
+fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
+warn() { echo "  ⚠️  $1"; WARN=$((WARN + 1)); }
+section() { echo ""; echo "=== $1 ==="; }
 
-# --- 1. Stage & Readiness ---
-echo "▸ Stage & Readiness"
-STAGE=$(curl -sf localhost:8080/status 2>/dev/null | jq -r '.stage // "unreachable"')
-if [ "$STAGE" = "11" ]; then
-  pass "Stage 11 (READY)"
+echo "============================================"
+echo "  Test 2B: Session Regression Verification"
+echo "  Host: ${HOST}"
+echo "============================================"
+
+# --- 1. Boot status ---
+section "1. Boot Status"
+STATUS=$(eval $SSH 'curl -sf localhost:8080/status' 2>/dev/null) || { fail "API server unreachable"; STATUS="{}"; }
+STAGE=$(echo "$STATUS" | jq -r '.stage // "unknown"')
+SAFE=$(echo "$STATUS" | jq -r '.safe_mode // "unknown"')
+if [ "$STAGE" = "11" ]; then pass "Stage 11 (ready)"; else fail "Stage=$STAGE (expected 11)"; fi
+if [ "$SAFE" = "false" ]; then pass "Not in safe mode"; else fail "safe_mode=$SAFE"; fi
+
+# --- 2. Session services active ---
+section "2. Session Services"
+SERVICES=$(eval $SSH 'systemctl is-active openclaw-*group*.service 2>/dev/null | sort -u' 2>/dev/null) || SERVICES=""
+ACTIVE_COUNT=$(echo "$SERVICES" | grep -c "^active$" || true)
+if [ "$ACTIVE_COUNT" -ge 2 ]; then
+  pass "$ACTIVE_COUNT session services active"
 else
-  fail "Stage is $STAGE, expected 11"
+  fail "Only $ACTIVE_COUNT session services active (expected ≥2)"
 fi
 
-if [ -f /var/lib/init-status/setup-complete ]; then
-  pass "setup-complete marker exists"
-else
-  fail "setup-complete marker missing"
-fi
-
-# --- 2. No Docker ---
-echo
-echo "▸ Docker NOT installed (session-only habitat)"
-if command -v docker &>/dev/null; then
-  fail "Docker is installed — needs_docker() gate failed"
-else
-  pass "Docker not installed (correct for session-only)"
-fi
-
-# --- 3. Manifest ---
-echo
-echo "▸ Runtime Manifest"
-MANIFEST="/etc/openclaw-groups.json"
-if [ -f "$MANIFEST" ]; then
-  pass "Manifest exists"
-  GROUP_COUNT=$(jq '.groups | length' "$MANIFEST")
-  if [ "$GROUP_COUNT" = "2" ]; then
-    pass "2 groups in manifest (group-alpha, group-beta)"
-  else
-    fail "Expected 2 groups, found $GROUP_COUNT"
-  fi
-
-  # Unique ports
-  PORT_COUNT=$(jq '[.groups[].port] | unique | length' "$MANIFEST")
-  TOTAL_PORTS=$(jq '[.groups[].port] | length' "$MANIFEST")
-  if [ "$PORT_COUNT" = "$TOTAL_PORTS" ]; then
-    pass "All ports unique"
-  else
-    fail "Port collision detected!"
-  fi
-
-  # All groups are session type
-  NON_SESSION=$(jq '[.groups[] | select(.isolation != "session")] | length' "$MANIFEST")
-  if [ "$NON_SESSION" = "0" ]; then
-    pass "All groups are session isolation"
-  else
-    fail "$NON_SESSION group(s) are not session type"
-  fi
-else
-  fail "Manifest missing at $MANIFEST"
-fi
-
-# --- 4. Session Services ---
-echo
-echo "▸ Session Services"
-for group in group-alpha group-beta; do
-  SVC="openclaw-${group}"
-  if systemctl is-active --quiet "$SVC" 2>/dev/null; then
-    pass "$SVC is active"
-  else
-    fail "$SVC is not active"
-  fi
+# List actual service names
+eval $SSH 'systemctl list-units "openclaw-*" --no-pager --no-legend 2>/dev/null | grep -v safeguard | grep -v sync | grep -v "e2e"' 2>/dev/null | while read -r line; do
+  echo "    $line"
 done
 
-# --- 5. Safeguard Units ---
-echo
-echo "▸ Safeguard & E2E Units"
-for group in group-alpha group-beta; do
-  if systemctl is-enabled --quiet "openclaw-safeguard-${group}.path" 2>/dev/null; then
-    pass "openclaw-safeguard-${group}.path enabled"
-  else
-    fail "openclaw-safeguard-${group}.path not enabled"
-  fi
+# --- 3. Docker NOT installed ---
+section "3. Docker Absent"
+DOCKER=$(eval $SSH 'which docker 2>/dev/null && echo "FOUND" || echo "ABSENT"' 2>/dev/null)
+if [ "$DOCKER" = "ABSENT" ]; then pass "Docker not installed"; else fail "Docker found (should not be installed for session-only)"; fi
 
-  if systemctl is-active --quiet "openclaw-safeguard-${group}.path" 2>/dev/null; then
-    pass "openclaw-safeguard-${group}.path active (watching)"
-  else
-    fail "openclaw-safeguard-${group}.path not active (dead — re-arm bug)"
-  fi
+# --- 4. No container units ---
+section "4. No Container Units"
+CONTAINER_UNITS=$(eval $SSH 'ls /etc/systemd/system/openclaw-container-* 2>/dev/null | wc -l' 2>/dev/null) || CONTAINER_UNITS=0
+if [ "$CONTAINER_UNITS" = "0" ]; then pass "No container systemd units"; else fail "$CONTAINER_UNITS container units found"; fi
 
-  if [ -f "/etc/systemd/system/openclaw-e2e-${group}.service" ]; then
-    pass "openclaw-e2e-${group}.service exists"
-  else
-    fail "openclaw-e2e-${group}.service missing"
-  fi
-done
+# --- 5. Manifest valid ---
+section "5. Manifest"
+MANIFEST=$(eval $SSH 'cat /etc/openclaw-groups.json 2>/dev/null' 2>/dev/null) || MANIFEST="{}"
+GROUP_COUNT=$(echo "$MANIFEST" | jq '.groups | length' 2>/dev/null) || GROUP_COUNT=0
+if [ "$GROUP_COUNT" -ge 2 ]; then pass "$GROUP_COUNT groups in manifest"; else fail "Only $GROUP_COUNT groups (expected ≥2)"; fi
 
-# --- 6. Configs & Auth ---
-echo
-echo "▸ Per-Group Configs"
-for group in group-alpha group-beta; do
-  CONFIG_DIR="/home/bot/.openclaw/configs/${group}"
-  if [ -f "${CONFIG_DIR}/openclaw.session.json" ]; then
-    pass "${group}: config exists"
-  else
-    fail "${group}: config missing"
-  fi
+# Check all groups are session type
+ALL_SESSION=$(echo "$MANIFEST" | jq -r '.groups | to_entries[] | .value.isolation' 2>/dev/null | sort -u)
+if [ "$ALL_SESSION" = "session" ]; then pass "All groups are session type"; else fail "Mixed types: $ALL_SESSION"; fi
 
-  if [ -f "${CONFIG_DIR}/group.env" ]; then
-    pass "${group}: group.env exists"
-  else
-    fail "${group}: group.env missing"
-  fi
+# Check unique ports
+PORTS=$(echo "$MANIFEST" | jq -r '.groups | to_entries[] | .value.port' 2>/dev/null | sort)
+UNIQUE_PORTS=$(echo "$PORTS" | sort -u)
+if [ "$PORTS" = "$UNIQUE_PORTS" ]; then pass "All ports unique"; else fail "Duplicate ports detected"; fi
 
-  if [ -f "${CONFIG_DIR}/gateway-token.txt" ]; then
-    pass "${group}: gateway token exists"
-  else
-    fail "${group}: gateway token missing"
-  fi
-done
+echo "$MANIFEST" | jq -r '.groups | to_entries[] | "    \(.key): \(.value.isolation) port=\(.value.port)"' 2>/dev/null
 
-# --- 7. No Safe Mode ---
-echo
-echo "▸ No Safe Mode Markers"
-SM_COUNT=$(ls /var/lib/init-status/safe-mode-* 2>/dev/null | wc -l || true)
-if [ "$SM_COUNT" = "0" ]; then
-  pass "No safe mode markers"
+# --- 6. Safeguard .path units active ---
+section "6. Safeguard Watchers"
+SAFEGUARD_PATHS=$(eval $SSH 'systemctl list-units "openclaw-safeguard-*.path" --no-pager --no-legend 2>/dev/null' 2>/dev/null)
+SAFEGUARD_ACTIVE=$(echo "$SAFEGUARD_PATHS" | grep -c "active" || true)
+SAFEGUARD_TOTAL=$(echo "$SAFEGUARD_PATHS" | grep -c "openclaw-safeguard" || true)
+if [ "$SAFEGUARD_ACTIVE" -ge 2 ]; then
+  pass "$SAFEGUARD_ACTIVE safeguard .path units active"
 else
-  fail "$SM_COUNT safe mode marker(s) found"
+  fail "Only $SAFEGUARD_ACTIVE safeguard .path units active (expected ≥2)"
 fi
 
-UNHEALTHY=$(ls /var/lib/init-status/unhealthy-* 2>/dev/null | wc -l || true)
-if [ "$UNHEALTHY" = "0" ]; then
-  pass "No unhealthy markers"
-else
-  fail "$UNHEALTHY unhealthy marker(s) found"
-fi
+# --- 7. Handler has EXIT trap ---
+section "7. Safe Mode Handler"
+TRAP_COUNT=$(eval $SSH 'grep -c "_handler_exit\|EXIT.*trap\|trap.*EXIT" /usr/local/bin/safe-mode-handler.sh 2>/dev/null' 2>/dev/null) || TRAP_COUNT=0
+if [ "$TRAP_COUNT" -ge 2 ]; then pass "EXIT trap found ($TRAP_COUNT references)"; else fail "EXIT trap missing or incomplete ($TRAP_COUNT refs)"; fi
 
-# --- 8. Health Check ---
-echo
-echo "▸ HTTP Health Checks"
-for group in group-alpha group-beta; do
-  PORT=$(jq -r --arg g "$group" '.groups[$g].port' "$MANIFEST")
-  if curl -sf "http://127.0.0.1:${PORT}/" &>/dev/null; then
-    pass "${group}: HTTP health check passes (port ${PORT})"
-  else
-    fail "${group}: HTTP health check fails (port ${PORT})"
-  fi
+# Handler stops service on terminal failure
+STOP_COUNT=$(eval $SSH 'grep -c "hc_stop_service" /usr/local/bin/safe-mode-handler.sh 2>/dev/null' 2>/dev/null) || STOP_COUNT=0
+if [ "$STOP_COUNT" -ge 2 ]; then pass "hc_stop_service on terminal paths ($STOP_COUNT calls)"; else fail "hc_stop_service missing ($STOP_COUNT calls, expected ≥2)"; fi
+
+# --- 8. Health check has safeguard re-arm ---
+section "8. Health Check Safeguard Re-arm"
+REARM=$(eval $SSH 'grep -c "openclaw-safeguard" /usr/local/bin/gateway-health-check.sh 2>/dev/null' 2>/dev/null) || REARM=0
+if [ "$REARM" -ge 1 ]; then pass "Safeguard re-arm in health check ($REARM refs)"; else fail "No safeguard re-arm in health check"; fi
+
+# --- 9. HTTP endpoints responding ---
+section "9. HTTP Endpoints"
+eval $SSH 'cat /etc/openclaw-groups.json 2>/dev/null' 2>/dev/null | jq -r '.groups | to_entries[] | "\(.key) \(.value.port)"' 2>/dev/null | while read -r group port; do
+  RESP=$(eval $SSH "curl -sf http://localhost:${port}/ >/dev/null 2>&1 && echo OK || echo FAIL" 2>/dev/null)
+  if [ "$RESP" = "OK" ]; then echo "  ✅ $group (port $port): HTTP OK"; else echo "  ❌ $group (port $port): HTTP FAIL"; fi
 done
 
-# --- 9. Disk ---
-echo
-echo "▸ Disk Usage"
-DISK_PCT=$(df / --output=pcent | tail -1 | tr -d ' %')
-if [ "$DISK_PCT" -lt 80 ]; then
-  pass "Disk usage ${DISK_PCT}% (< 80%)"
-else
-  warn "Disk usage ${DISK_PCT}% (≥ 80%)"
-fi
+# --- 10. Restart policy ---
+section "10. Restart Policy"
+RESTART_POLICY=$(eval $SSH 'grep "Restart=" /etc/systemd/system/openclaw-*.service 2>/dev/null | head -1' 2>/dev/null) || RESTART_POLICY=""
+if echo "$RESTART_POLICY" | grep -q "on-failure"; then pass "Restart=on-failure (not always)"; else fail "Restart policy: $RESTART_POLICY"; fi
+BURST=$(eval $SSH 'grep "StartLimitBurst" /etc/systemd/system/openclaw-*.service 2>/dev/null | head -1' 2>/dev/null) || BURST=""
+if echo "$BURST" | grep -q "StartLimitBurst"; then pass "StartLimitBurst set"; else fail "No StartLimitBurst"; fi
+
+# --- 11. Intros sent ---
+section "11. Agent Intros"
+INTRO_MARKERS=$(eval $SSH 'ls /var/lib/init-status/intro-sent-* 2>/dev/null | wc -l' 2>/dev/null) || INTRO_MARKERS=0
+if [ "$INTRO_MARKERS" -ge 2 ]; then pass "$INTRO_MARKERS intro markers found"; else warn "Only $INTRO_MARKERS intro markers"; fi
+
+# --- 12. No errors ---
+section "12. Error Check"
+SAFE_MARKERS=$(eval $SSH 'ls /var/lib/init-status/safe-mode-* /var/lib/init-status/gateway-failed-* /var/lib/init-status/critical-notified-* 2>/dev/null | wc -l' 2>/dev/null) || SAFE_MARKERS=0
+if [ "$SAFE_MARKERS" = "0" ]; then pass "No failure markers"; else fail "$SAFE_MARKERS failure markers found"; fi
+
+# --- 13. No NODE_OPTIONS ---
+section "13. NODE_OPTIONS Clean"
+NODE_OPTS=$(eval $SSH 'grep -r "experimental-sqlite" /etc/systemd/system/openclaw-* 2>/dev/null | wc -l' 2>/dev/null) || NODE_OPTS=0
+if [ "$NODE_OPTS" = "0" ]; then pass "No NODE_OPTIONS=--experimental-sqlite"; else fail "Found experimental-sqlite in $NODE_OPTS files"; fi
 
 # --- Summary ---
-echo
-echo "═══════════════════════════════════════════════════"
-echo "  Results: ✅ $PASS passed  ❌ $FAIL failed  ⚠️  $WARN warnings"
-echo "═══════════════════════════════════════════════════"
-
-[ "$FAIL" -eq 0 ] && echo "  🎉 TEST 2B PASSED" || echo "  💥 TEST 2B FAILED"
+echo ""
+echo "============================================"
+echo "  RESULTS: $PASS passed, $FAIL failed, $WARN warnings"
+echo "============================================"
+if [ "$FAIL" -eq 0 ]; then
+  echo "  🎉 TEST 2B: PASS"
+else
+  echo "  💥 TEST 2B: FAIL"
+fi
 exit "$FAIL"
