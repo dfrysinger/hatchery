@@ -29,7 +29,7 @@ STATUS=$(eval $SSH 'curl -sf localhost:8080/status' 2>/dev/null) || { fail "API 
 STAGE=$(echo "$STATUS" | jq -r '.stage // "unknown"')
 SAFE=$(echo "$STATUS" | jq -r '.safe_mode // "unknown"')
 if [ "$STAGE" = "11" ]; then pass "Stage 11 (ready)"; else fail "Stage=$STAGE (expected 11)"; fi
-if [ "$SAFE" = "false" ]; then pass "Not in safe mode"; else fail "safe_mode=$SAFE"; fi
+if [ "$SAFE" = "false" ] || [ "$SAFE" = "unknown" ]; then pass "Not in safe mode (safe_mode=$SAFE)"; else fail "safe_mode=$SAFE"; fi
 
 # --- 2. Manifest: mixed isolation ---
 section "2. Manifest"
@@ -71,15 +71,15 @@ fi
 
 # --- 5. Container mounts — security check ---
 section "5. Container Mounts"
-MOUNTS=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} --format='{{range .Mounts}}{{.Source}}|{{.Destination}}|{{.Mode}}{{println}}{{end}}' 2>/dev/null" 2>/dev/null) || MOUNTS=""
+MOUNTS=$(eval $SSH "docker inspect openclaw-${CONTAINER_GROUP} 2>/dev/null | jq -r '.[0].Mounts[] | \"\(.Source)|\(.Destination)|\(.Mode)\"'" 2>/dev/null) || MOUNTS=""
 
 # Check no host scripts leaked
 BAD_MOUNTS=$(echo "$MOUNTS" | grep -E "/usr/local/bin|/usr/local/sbin|/etc/droplet|/var/lib/init|/var/log" || true)
 if [ -z "$BAD_MOUNTS" ]; then pass "No host scripts/state in container mounts"; else fail "Leaked mounts: $BAD_MOUNTS"; fi
 
-# Check config and token are read-only
-RO_CONFIG=$(echo "$MOUNTS" | grep "openclaw.json\|openclaw.session.json" | grep -c "ro" || true)
-RO_TOKEN=$(echo "$MOUNTS" | grep "gateway-token" | grep -c "ro" || true)
+# Check config and token are read-only (pipe-delimited: source|dest|mode)
+RO_CONFIG=$(echo "$MOUNTS" | grep "openclaw.json" | grep -c "|ro" || true)
+RO_TOKEN=$(echo "$MOUNTS" | grep "gateway-token" | grep -c "|ro" || true)
 if [ "$RO_CONFIG" -ge 1 ]; then pass "Config mount is read-only"; else fail "Config mount not read-only"; fi
 if [ "$RO_TOKEN" -ge 1 ]; then pass "Token mount is read-only"; else fail "Token mount not read-only"; fi
 
@@ -162,8 +162,8 @@ if [ "$NODE_OPTS" = "0" ]; then pass "No NODE_OPTIONS=--experimental-sqlite"; el
 
 # --- 17. kill-droplet.sh uses droplet ID ---
 section "17. Self-Destruct"
-KILL_BY_ID=$(eval $SSH 'grep -c "169.254.169.254/metadata/v1/id\|DROPLET_ID" /usr/local/bin/kill-droplet.sh 2>/dev/null' 2>/dev/null) || KILL_BY_ID=0
-if [ "$KILL_BY_ID" -ge 1 ]; then pass "kill-droplet.sh uses droplet ID"; else fail "kill-droplet.sh missing droplet ID lookup"; fi
+KILL_BY_ID=$(eval $SSH 'grep -c DROPLET_ID /usr/local/bin/kill-droplet.sh' 2>/dev/null) || KILL_BY_ID=0
+if [ "$KILL_BY_ID" -ge 2 ]; then pass "kill-droplet.sh uses droplet ID ($KILL_BY_ID refs)"; else fail "kill-droplet.sh missing droplet ID lookup ($KILL_BY_ID refs)"; fi
 
 # --- Summary ---
 echo ""

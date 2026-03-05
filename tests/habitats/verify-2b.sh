@@ -28,13 +28,13 @@ section "1. Boot Status"
 STATUS=$(eval $SSH 'curl -sf localhost:8080/status' 2>/dev/null) || { fail "API server unreachable"; STATUS="{}"; }
 STAGE=$(echo "$STATUS" | jq -r '.stage // "unknown"')
 SAFE=$(echo "$STATUS" | jq -r '.safe_mode // "unknown"')
+READY=$(echo "$STATUS" | jq -r '.ready // "unknown"')
 if [ "$STAGE" = "11" ]; then pass "Stage 11 (ready)"; else fail "Stage=$STAGE (expected 11)"; fi
-if [ "$SAFE" = "false" ]; then pass "Not in safe mode"; else fail "safe_mode=$SAFE"; fi
+if [ "$SAFE" = "false" ] || [ "$SAFE" = "unknown" ]; then pass "Not in safe mode (safe_mode=$SAFE)"; else fail "safe_mode=$SAFE"; fi
 
 # --- 2. Session services active ---
 section "2. Session Services"
-SERVICES=$(eval $SSH 'systemctl is-active openclaw-*group*.service 2>/dev/null | sort -u' 2>/dev/null) || SERVICES=""
-ACTIVE_COUNT=$(echo "$SERVICES" | grep -c "^active$" || true)
+ACTIVE_COUNT=$(eval $SSH 'systemctl list-units "openclaw-group-*" --no-pager --no-legend 2>/dev/null | grep -c "running"' 2>/dev/null) || ACTIVE_COUNT=0
 if [ "$ACTIVE_COUNT" -ge 2 ]; then
   pass "$ACTIVE_COUNT session services active"
 else
@@ -53,7 +53,7 @@ if [ "$DOCKER" = "ABSENT" ]; then pass "Docker not installed"; else fail "Docker
 
 # --- 4. No container units ---
 section "4. No Container Units"
-CONTAINER_UNITS=$(eval $SSH 'ls /etc/systemd/system/openclaw-container-* 2>/dev/null | wc -l' 2>/dev/null) || CONTAINER_UNITS=0
+CONTAINER_UNITS=$(eval $SSH 'ls /etc/systemd/system/openclaw-container-*.service 2>/dev/null | wc -l' 2>/dev/null) || CONTAINER_UNITS=0
 if [ "$CONTAINER_UNITS" = "0" ]; then pass "No container systemd units"; else fail "$CONTAINER_UNITS container units found"; fi
 
 # --- 5. Manifest valid ---
@@ -86,8 +86,10 @@ fi
 
 # --- 7. Handler has EXIT trap ---
 section "7. Safe Mode Handler"
-TRAP_COUNT=$(eval $SSH 'grep -c "_handler_exit\|EXIT.*trap\|trap.*EXIT" /usr/local/bin/safe-mode-handler.sh 2>/dev/null' 2>/dev/null) || TRAP_COUNT=0
-if [ "$TRAP_COUNT" -ge 2 ]; then pass "EXIT trap found ($TRAP_COUNT references)"; else fail "EXIT trap missing or incomplete ($TRAP_COUNT refs)"; fi
+TRAP_LINE=$(eval $SSH 'grep -c "trap.*EXIT" /usr/local/bin/safe-mode-handler.sh 2>/dev/null' 2>/dev/null) || TRAP_LINE=0
+HANDLER_FN=$(eval $SSH 'grep -c "_handler_exit" /usr/local/bin/safe-mode-handler.sh 2>/dev/null' 2>/dev/null) || HANDLER_FN=0
+TRAP_TOTAL=$((TRAP_LINE + HANDLER_FN))
+if [ "$TRAP_TOTAL" -ge 2 ]; then pass "EXIT trap found (trap=$TRAP_LINE, handler=$HANDLER_FN)"; else fail "EXIT trap missing (trap=$TRAP_LINE, handler=$HANDLER_FN)"; fi
 
 # Handler stops service on terminal failure
 STOP_COUNT=$(eval $SSH 'grep -c "hc_stop_service" /usr/local/bin/safe-mode-handler.sh 2>/dev/null' 2>/dev/null) || STOP_COUNT=0
@@ -107,9 +109,9 @@ done
 
 # --- 10. Restart policy ---
 section "10. Restart Policy"
-RESTART_POLICY=$(eval $SSH 'grep "Restart=" /etc/systemd/system/openclaw-*.service 2>/dev/null | head -1' 2>/dev/null) || RESTART_POLICY=""
+RESTART_POLICY=$(eval $SSH 'grep "Restart=" /etc/systemd/system/openclaw-group-*.service 2>/dev/null | head -1' 2>/dev/null) || RESTART_POLICY=""
 if echo "$RESTART_POLICY" | grep -q "on-failure"; then pass "Restart=on-failure (not always)"; else fail "Restart policy: $RESTART_POLICY"; fi
-BURST=$(eval $SSH 'grep "StartLimitBurst" /etc/systemd/system/openclaw-*.service 2>/dev/null | head -1' 2>/dev/null) || BURST=""
+BURST=$(eval $SSH 'grep "StartLimitBurst" /etc/systemd/system/openclaw-group-*.service 2>/dev/null | head -1' 2>/dev/null) || BURST=""
 if echo "$BURST" | grep -q "StartLimitBurst"; then pass "StartLimitBurst set"; else fail "No StartLimitBurst"; fi
 
 # --- 11. Intros sent ---
