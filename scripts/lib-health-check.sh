@@ -306,9 +306,13 @@ hc_stop_service() {
   local user="${HC_USERNAME:-${USERNAME:-bot}}"
   case "$iso" in
     container)
+      # Stop the container AND disable the systemd unit to prevent restart loops
       docker compose \
         -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
-        -p "openclaw-${group}" down 2>&1 ;;
+        -p "openclaw-${group}" down 2>&1
+      systemctl stop "openclaw-container-${group}" 2>&1 || true
+      systemctl disable "openclaw-container-${group}" 2>&1 || true
+      ;;
     none)
       systemctl stop openclaw 2>&1 ;;
     *)

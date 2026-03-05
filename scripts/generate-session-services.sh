@@ -86,7 +86,7 @@ Description=OpenClaw Session - ${group} (${HABITAT})
 After=network.target desktop.service
 Wants=desktop.service
 StartLimitBurst=5
-StartLimitIntervalSec=300
+StartLimitIntervalSec=1800
 
 [Service]
 Type=simple

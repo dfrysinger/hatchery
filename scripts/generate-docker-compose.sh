@@ -204,7 +204,7 @@ Description=OpenClaw Container - ${group} (${HABITAT})
 After=network.target docker.service
 Requires=docker.service
 StartLimitBurst=5
-StartLimitIntervalSec=300
+StartLimitIntervalSec=1800
 
 [Service]
 Type=oneshot
