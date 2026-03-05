@@ -162,8 +162,10 @@ class TestPlatformTelegram:
 
     def test_telegram_dm_policy(self):
         config = run_generate_config(platform="telegram")
-        assert config["channels"]["telegram"]["dmPolicy"] == "allowlist"
-        assert "12345" in config["channels"]["telegram"]["allowFrom"]
+        # dmPolicy/allowFrom live inside each account for multi-account Telegram
+        acct = config["channels"]["telegram"]["accounts"]["agent1"]
+        assert acct["dmPolicy"] == "allowlist"
+        assert "12345" in acct["allowFrom"]
 
     def test_default_platform_is_telegram(self):
         """When PLATFORM is telegram, should enable telegram and disable discord."""
@@ -426,7 +428,8 @@ class TestJSONEscaping:
 
     def test_telegram_user_id_with_leading_zero(self):
         config = run_generate_config(platform="telegram", telegram_user_id="0123456789")
-        assert "0123456789" in config["channels"]["telegram"]["allowFrom"]
+        acct = config["channels"]["telegram"]["accounts"]["agent1"]
+        assert "0123456789" in acct["allowFrom"]
 
 
 class TestJSONValidation:
@@ -592,8 +595,10 @@ class TestSafeModeConfig:
             sm_owner_id="99999",
         )
         tg = config["channels"]["telegram"]
-        assert tg["dmPolicy"] == "allowlist"
-        assert "99999" in tg["allowFrom"]
+        # For telegram, dmPolicy/allowFrom are per-account
+        acct = tg["accounts"]["safe-mode"]
+        assert acct["dmPolicy"] == "allowlist"
+        assert "99999" in acct["allowFrom"]
 
     def test_safe_mode_anthropic_env(self):
         """Anthropic provider should set ANTHROPIC_API_KEY in env."""

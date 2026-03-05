@@ -202,8 +202,8 @@ build_telegram_channel() {
     fi
     local tok_var="AGENT${i}_BOT_TOKEN"; local tok="${!tok_var:-}"
     [ -z "$tok" ] && continue
-    accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" \
-      '. + {($id): {botToken: $tok}}')
+    accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" --arg oid "$owner_id" \
+      '. + {($id): {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}')
   done
 
   # Build groups if council group configured
@@ -215,13 +215,10 @@ build_telegram_channel() {
 
   jq -n \
     --argjson enabled "$_tg_enabled" \
-    --arg owner_id "$owner_id" \
     --argjson accounts "$accounts" \
     --argjson groups "$groups" \
     '{
       enabled: $enabled,
-      dmPolicy: "allowlist",
-      allowFrom: [$owner_id],
       accounts: $accounts
     } + (if $groups != null then {groups: $groups} else {} end)'
 }
@@ -483,7 +480,7 @@ generate_safe_mode() {
   local tg_config="null" dc_config="null"
   if [ "$SM_PLATFORM" = "telegram" ]; then
     tg_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {"safe-mode": {botToken: $tok}}}')
+      '{enabled: true, accounts: {"safe-mode": {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}}')
   elif [ "$SM_PLATFORM" = "discord" ]; then
     dc_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
       '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {"safe-mode": {token: $tok}}}')
