@@ -31,6 +31,11 @@ for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[
 done
 type d &>/dev/null || { echo "FATAL: lib-env.sh not found" >&2; exit 1; }
 
+# --- Source lib-auth.sh (for get_default_model_for_provider) ---
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-auth.sh" ] && { source "$_lib_path/lib-auth.sh"; break; }
+done
+
 # --- Parse arguments ---
 MODE=""
 GROUP=""
@@ -83,6 +88,10 @@ case "$_platform" in
   telegram) _tg_enabled=true ;;
   discord)  _dc_enabled=true ;;
   both)     _tg_enabled=true; _dc_enabled=true ;;
+  *)
+    echo "Error: Invalid PLATFORM='${_platform}'. Valid values: telegram, discord, both" >&2
+    exit 1
+    ;;
 esac
 
 # =============================================================================
@@ -91,6 +100,40 @@ esac
 
 # Exec policy — used for top-level tools.exec (gateway-wide policy).
 EXEC_POLICY='{"security":"full","ask":"off"}'
+
+# Build agents.defaults — single source of truth for all modes.
+# Args: $1 = model (optional override, defaults to opus)
+#        $2 = workspace override (optional)
+# All keys MUST match the OpenClaw config schema (agents.defaults.*).
+# Invalid keys cause "Config invalid" → gateway refuses to start.
+build_defaults() {
+  local model="${1:-anthropic/claude-opus-4-5}"
+  local workspace="${2:-${HOME_DIR}/clawd}"
+
+  jq -n \
+    --arg model "$model" \
+    --arg workspace "$workspace" \
+    '{
+      model: { primary: $model },
+      maxConcurrent: 4,
+      workspace: $workspace,
+      heartbeat: { every: "30m", session: "heartbeat" },
+      models: {
+        "openai/gpt-5.2": { params: { reasoning_effort: "high" } }
+      }
+    }'
+}
+
+# Build top-level tools section — single source of truth.
+# NOTE: tools.exec belongs here (top-level) or in agents.list[].tools,
+# NOT in agents.defaults.tools (which is not in the schema).
+build_tools() {
+  jq -n --argjson exec_policy "$EXEC_POLICY" \
+    '{
+      agentToAgent: { enabled: true },
+      exec: $exec_policy
+    }'
+}
 
 # Build the gateway section (common to all modes)
 build_gateway() {
@@ -150,8 +193,8 @@ build_telegram_channel() {
   local filter_agents="${1:-}"
   local owner_id="${TELEGRAM_OWNER_ID:-$(d "${TELEGRAM_USER_ID_B64:-}")}"
 
-  # Build accounts object
-  local accounts="{}"
+  # Collect matching agents
+  local agent_ids=() agent_tokens=()
   for i in $(seq 1 "$AGENT_COUNT"); do
     local agent_id="agent${i}"
     if [ -n "$filter_agents" ]; then
@@ -159,8 +202,8 @@ build_telegram_channel() {
     fi
     local tok_var="AGENT${i}_BOT_TOKEN"; local tok="${!tok_var:-}"
     [ -z "$tok" ] && continue
-    accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" \
-      '. + {($id): {botToken: $tok}}')
+    agent_ids+=("$agent_id")
+    agent_tokens+=("$tok")
   done
 
   # Build groups if council group configured
@@ -170,15 +213,25 @@ build_telegram_channel() {
     groups=$(jq -n --arg gid "$cgi" '{($gid): {requireMention: true}, "*": {requireMention: true}}')
   fi
 
+  # Always use accounts object. Single agent → "default" (Doctor enforces this
+  # by renaming single-account configs). Multi agent → agent IDs.
+  local accounts="{}"
+  for idx in "${!agent_ids[@]}"; do
+    local acct_name="${agent_ids[$idx]}"
+    [ "${#agent_ids[@]}" -eq 1 ] && acct_name="default"
+    accounts=$(echo "$accounts" | jq \
+      --arg id "$acct_name" \
+      --arg tok "${agent_tokens[$idx]}" \
+      --arg oid "$owner_id" \
+      '. + {($id): {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}')
+  done
+
   jq -n \
     --argjson enabled "$_tg_enabled" \
-    --arg owner_id "$owner_id" \
     --argjson accounts "$accounts" \
     --argjson groups "$groups" \
     '{
       enabled: $enabled,
-      dmPolicy: "allowlist",
-      allowFrom: [$owner_id],
       accounts: $accounts
     } + (if $groups != null then {groups: $groups} else {} end)'
 }
@@ -190,8 +243,8 @@ build_discord_channel() {
   local owner_id="${DISCORD_OWNER_ID:-$(d "${DISCORD_OWNER_ID_B64:-}")}"
   local guild_id="${DISCORD_GUILD_ID:-$(d "${DISCORD_GUILD_ID_B64:-}")}"
 
-  # Build accounts object
-  local accounts="{}"
+  # Collect matching agents
+  local dc_agent_ids=() dc_agent_tokens=()
   for i in $(seq 1 "$AGENT_COUNT"); do
     local agent_id="agent${i}"
     if [ -n "$filter_agents" ]; then
@@ -199,8 +252,8 @@ build_discord_channel() {
     fi
     local tok_var="AGENT${i}_DISCORD_BOT_TOKEN"; local tok="${!tok_var:-}"
     [ -z "$tok" ] && continue
-    accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" \
-      '. + {($id): {token: $tok}}')
+    dc_agent_ids+=("$agent_id")
+    dc_agent_tokens+=("$tok")
   done
 
   # Build guilds if guild ID set
@@ -209,43 +262,59 @@ build_discord_channel() {
     guilds=$(jq -n --arg gid "$guild_id" '{($gid): {requireMention: true}}')
   fi
 
-  # Build DM config
-  local dm_config
+  # Discord dmPolicy/allowFrom are channel-level (not per-account).
+  local dm_flat
   if [ -n "$owner_id" ]; then
-    dm_config=$(jq -n --arg oid "$owner_id" '{enabled: true, policy: "pairing", allowFrom: [$oid]}')
+    dm_flat=$(jq -n --arg oid "$owner_id" '{dmPolicy: "pairing", allowFrom: [$oid]}')
   else
-    dm_config=$(jq -n '{enabled: true, policy: "pairing"}')
+    dm_flat=$(jq -n '{dmPolicy: "pairing"}')
   fi
+
+  # Always use accounts object. Single → "default", multi → agent IDs.
+  local accounts="{}"
+  for idx in "${!dc_agent_ids[@]}"; do
+    local acct_name="${dc_agent_ids[$idx]}"
+    [ "${#dc_agent_ids[@]}" -eq 1 ] && acct_name="default"
+    accounts=$(echo "$accounts" | jq \
+      --arg id "$acct_name" \
+      --arg tok "${dc_agent_tokens[$idx]}" \
+      '. + {($id): {token: $tok}}')
+  done
 
   jq -n \
     --argjson enabled "$_dc_enabled" \
     --argjson accounts "$accounts" \
-    --argjson dm "$dm_config" \
+    --argjson dm_flat "$dm_flat" \
     --argjson guilds "$guilds" \
-    '{
+    '({
       enabled: $enabled,
       groupPolicy: "allowlist",
-      accounts: $accounts,
-      dm: $dm
-    } + (if $guilds != null then {guilds: $guilds} else {} end)'
+      accounts: $accounts
+    } + $dm_flat + (if $guilds != null then {guilds: $guilds} else {} end))'
 }
 
-# Build bindings array (maps non-default agents to their channel accounts)
+# Build bindings array (maps each agent to its channel account)
 build_bindings() {
   local filter_agents="${1:-}"
   local bindings="[]"
-  local first=true
 
+  # Count agents in this group to decide if bindings are needed
+  local group_agent_count=0
   for i in $(seq 1 "$AGENT_COUNT"); do
     local agent_id="agent${i}"
     if [ -n "$filter_agents" ]; then
       echo "$filter_agents" | tr ',' '\n' | grep -qx "$agent_id" || continue
     fi
+    group_agent_count=$((group_agent_count + 1))
+  done
 
-    # First agent in the list is the default — doesn't need a binding
-    if [ "$first" = "true" ]; then
-      first=false
-      continue
+  # Single-agent groups use account "default" — no binding needed (fallback routing)
+  [ "$group_agent_count" -le 1 ] && { echo "$bindings"; return; }
+
+  for i in $(seq 1 "$AGENT_COUNT"); do
+    local agent_id="agent${i}"
+    if [ -n "$filter_agents" ]; then
+      echo "$filter_agents" | tr ',' '\n' | grep -qx "$agent_id" || continue
     fi
 
     if [ "$_tg_enabled" = "true" ]; then
@@ -302,6 +371,7 @@ build_auth_profiles() {
 # =============================================================================
 generate_full() {
   local agents_list bindings_json env_json tg_channel dc_channel auth_profiles
+  local defaults_json tools_json
 
   agents_list=$(build_agents "")
   bindings_json=$(build_bindings "")
@@ -309,6 +379,8 @@ generate_full() {
   tg_channel=$(build_telegram_channel "")
   dc_channel=$(build_discord_channel "")
   auth_profiles=$(build_auth_profiles)
+  defaults_json=$(build_defaults)
+  tools_json=$(build_tools)
 
   jq -n \
     --argjson env "$env_json" \
@@ -320,8 +392,8 @@ generate_full() {
     --argjson dc "$dc_channel" \
     --argjson tg_enabled "$_tg_enabled" \
     --argjson dc_enabled "$_dc_enabled" \
-    --argjson exec_policy "$EXEC_POLICY" \
-    --arg workspace "${HOME_DIR}/clawd" \
+    --argjson defaults "$defaults_json" \
+    --argjson tools "$tools_json" \
     '{
       env: $env,
       browser: {
@@ -330,20 +402,9 @@ generate_full() {
         headless: false,
         noSandbox: true
       },
-      tools: {
-        agentToAgent: { enabled: true },
-        exec: $exec_policy
-      },
+      tools: $tools,
       agents: {
-        defaults: {
-          model: { primary: "anthropic/claude-opus-4-5" },
-          maxConcurrent: 4,
-          workspace: $workspace,
-          heartbeat: { every: "30m", session: "heartbeat" },
-          models: {
-            "openai/gpt-5.2": { params: { reasoning_effort: "high" } }
-          }
-        },
+        defaults: $defaults,
         list: $agents_list
       },
       bindings: $bindings,
@@ -382,6 +443,8 @@ generate_session() {
   bindings_json=$(build_bindings "$GROUP_AGENTS")
   tg_channel=$(build_telegram_channel "$GROUP_AGENTS")
   dc_channel=$(build_discord_channel "$GROUP_AGENTS")
+  local defaults_json
+  defaults_json=$(build_defaults)
 
   jq -n \
     --argjson agents_list "$agents_list" \
@@ -391,14 +454,12 @@ generate_session() {
     --argjson dc "$dc_channel" \
     --argjson tg_enabled "$_tg_enabled" \
     --argjson dc_enabled "$_dc_enabled" \
-    --arg workspace "${HOME_DIR}/clawd" \
+    --argjson defaults "$defaults_json" \
+    --argjson exec_policy "$EXEC_POLICY" \
     '{
+      tools: { exec: $exec_policy },
       agents: {
-        defaults: {
-          model: { primary: "anthropic/claude-opus-4-5" },
-          maxConcurrent: 4,
-          workspace: $workspace
-        },
+        defaults: $defaults,
         list: $agents_list
       },
       bindings: $bindings,
@@ -435,38 +496,48 @@ generate_safe_mode() {
     esac
   fi
 
-  # Use explicitly passed model, or fall back to provider default
-  # NOTE: Keep in sync with get_default_model_for_provider() in lib-auth.sh
+  # Use explicitly passed model, or omit to let OpenClaw use its built-in default.
+  # NOT hardcoding a model name here — hardcoded names become invalid when
+  # OpenClaw updates its model registry. The built-in default is always valid
+  # for the installed version and is typically the most capable model available.
   local model="${SM_MODEL:-}"
-  if [ -z "$model" ]; then
-    case "$SM_PROVIDER" in
-      anthropic) model="anthropic/claude-sonnet-4-5" ;;
-      openai)    model="openai/gpt-4.1-mini" ;;
-      google)    model="google/gemini-2.5-flash" ;;
-      *)         model="anthropic/claude-sonnet-4-5" ;;
-    esac
-  fi
 
-  # Build channel config
-  local tg_config dc_config
+  # Build channel config — only include the active platform.
+  # The plugins.entries section controls which providers actually load;
+  # channels not present are simply ignored.
+  local tg_config="null" dc_config="null"
   if [ "$SM_PLATFORM" = "telegram" ]; then
     tg_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, accounts: {"safe-mode": {botToken: $tok}}, dmPolicy: "allowlist", allowFrom: [$oid]}')
-    dc_config=$(jq -n '{enabled: false}')
+      '{enabled: true, accounts: {default: {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}}')
   elif [ "$SM_PLATFORM" = "discord" ]; then
-    tg_config=$(jq -n '{enabled: false}')
     dc_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, accounts: {"safe-mode": {token: $tok}}, dmPolicy: "allowlist", allowFrom: [$oid]}')
-  else
-    tg_config=$(jq -n '{enabled: false}')
-    dc_config=$(jq -n '{enabled: false}')
+      '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {default: {token: $tok}}}')
   fi
+
+  # Build plugins — only enable the active platform's provider
+  local plugins_config
+  if [ "$SM_PLATFORM" = "telegram" ]; then
+    plugins_config='{"entries":{"telegram":{"enabled":true}}}'
+  elif [ "$SM_PLATFORM" = "discord" ]; then
+    plugins_config='{"entries":{"discord":{"enabled":true}}}'
+  else
+    plugins_config='{"entries":{}}'
+  fi
+
+  # Build channels object — only include the active platform
+  local channels_config
+  channels_config=$(jq -n \
+    --argjson tg "$tg_config" \
+    --argjson dc "$dc_config" \
+    '{}
+     | if $tg != null then . + {telegram: $tg} else . end
+     | if $dc != null then . + {discord: $dc} else . end')
 
   jq -n \
     --argjson env "$env_json" \
     --argjson gateway "$(build_gateway)" \
-    --argjson tg "$tg_config" \
-    --argjson dc "$dc_config" \
+    --argjson channels "$channels_config" \
+    --argjson plugins "$plugins_config" \
     --argjson exec_policy "$EXEC_POLICY" \
     --arg model "$model" \
     --arg workspace "${HOME_DIR}/clawd/agents/safe-mode" \
@@ -474,10 +545,7 @@ generate_safe_mode() {
     '{
       env: $env,
       browser: {
-        enabled: true,
-        executablePath: "/usr/bin/google-chrome-stable",
-        headless: false,
-        noSandbox: true
+        enabled: false
       },
       tools: {
         exec: $exec_policy
@@ -492,15 +560,19 @@ generate_safe_mode() {
           default: true,
           name: "SafeModeBot",
           model: $model,
-          workspace: $workspace
+          workspace: $workspace,
+          tools: { exec: $exec_policy }
         }]
       },
       gateway: $gateway,
-      channels: {
-        telegram: $tg,
-        discord: $dc
-      }
-    }'
+      plugins: $plugins,
+      channels: $channels
+    }
+    # When no model is specified, remove model fields entirely so OpenClaw
+    # uses its built-in default (always valid for the installed version).
+    | if $model == "" then
+        del(.agents.defaults.model) | .agents.list[0] |= del(.model)
+      else . end'
 }
 
 # =============================================================================

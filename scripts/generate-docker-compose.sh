@@ -1,294 +1,254 @@
 #!/bin/bash
 # =============================================================================
-# generate-docker-compose.sh — Generate docker-compose.yaml for container mode
+# generate-docker-compose.sh — Generate per-group docker-compose.yaml files
 # =============================================================================
-# Purpose:  For container isolation mode, generates a docker-compose.yaml with
-#           one service per isolation group, proper volume mounts for shared
-#           paths, network modes, and resource limits.
+# THIN GENERATOR: Creates docker-compose.yaml + systemd unit per container group.
 #
-# Inputs:   Environment variables from habitat-parsed.env:
-#             ISOLATION_DEFAULT     — must be "container" to generate
-#             ISOLATION_GROUPS      — comma-separated list of group names
-#             AGENT_COUNT           — number of agents
-#             AGENT{N}_NAME, AGENT{N}_ISOLATION_GROUP, AGENT{N}_ISOLATION,
-#             AGENT{N}_NETWORK, AGENT{N}_RESOURCES_MEMORY, AGENT{N}_RESOURCES_CPU
-#             USERNAME              — system user
-#             HABITAT_NAME          — habitat name
-#             ISOLATION_SHARED_PATHS    — comma-separated shared paths
-#             CONTAINER_IMAGE       — base image (default: hatchery/agent:latest)
+# All shared concerns (directories, config, credentials, tokens, env files,
+# safeguard/E2E units, manifest) are handled by the orchestrator
+# (build-full-config.sh) using lib-isolation.sh BEFORE this script runs.
 #
-# Outputs:  docker-compose.yaml in COMPOSE_OUTPUT_DIR
+# Inputs:
+#   MANIFEST           — path to /etc/openclaw-groups.json (runtime SSOT)
+#   ISOLATION_GROUPS   — comma-separated list of container groups to generate
+#   ISOLATION_DEFAULT  — must be "container" for this generator
+#   USERNAME / SVC_USER — system user
+#   HOME_DIR           — home directory
+#   HABITAT_NAME       — habitat name (for unit descriptions)
+#   CONTAINER_IMAGE    — Docker image (default: hatchery/agent:latest)
 #
-# Env:      COMPOSE_OUTPUT_DIR — output directory (default: /home/$USERNAME)
-#           DRY_RUN            — if set, only write files (no docker-compose up)
-#           CONTAINER_IMAGE    — base Docker image
+# Outputs:
+#   ~/.openclaw/compose/{group}/docker-compose.yaml — one per group
+#   ${COMPOSE_SYSTEMD_DIR}/openclaw-container-{group}.service — systemd units
 #
-# Original: scripts/generate-docker-compose.sh
+# Env:
+#   COMPOSE_SYSTEMD_DIR — systemd output dir (default: /etc/systemd/system)
+#   DRY_RUN             — if set, write files only (no docker/systemctl)
+#   START_SERVICES      — if "true", also start services after enabling
 # =============================================================================
-
 set -euo pipefail
+umask 022
 
-# --- Source environment files (may be called standalone or from another script) ---
-[ -f /etc/droplet.env ] && [ -r /etc/droplet.env ] && source /etc/droplet.env
-[ -f /etc/habitat-parsed.env ] && [ -r /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+# --- Source lib-isolation for manifest reading ---
+for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_lib_path/lib-isolation.sh" ] && { source "$_lib_path/lib-isolation.sh"; break; }
+done
+type get_group_port &>/dev/null || { echo "FATAL: lib-isolation.sh not found" >&2; exit 1; }
 
-# --- Validate required inputs ---
-if [ -z "${AGENT_COUNT:-}" ]; then
-    echo "ERROR: AGENT_COUNT is required" >&2
-    exit 1
-fi
-
+# --- Configuration ---
 ISOLATION="${ISOLATION_DEFAULT:-none}"
 ISO_GROUPS="${ISOLATION_GROUPS:-}"
-SVC_USER="${USERNAME:-bot}"
+SVC_USER="${SVC_USER:-${USERNAME:-bot}}"
+HOME_DIR="${HOME_DIR:-/home/${SVC_USER}}"
 HABITAT="${HABITAT_NAME:-default}"
-SHARED="${ISOLATION_SHARED_PATHS:-}"
 BASE_IMAGE="${CONTAINER_IMAGE:-hatchery/agent:latest}"
-OUTPUT_DIR="${COMPOSE_OUTPUT_DIR:-/home/${SVC_USER}}"
-HOME_DIR="/home/${SVC_USER}"
+SYSTEMD_DIR="${COMPOSE_SYSTEMD_DIR:-${UNIT_OUTPUT_DIR:-/etc/systemd/system}}"
 
-# --- Skip if not container mode or no groups ---
-if [ "$ISOLATION" != "container" ]; then
-    echo "Isolation mode is '$ISOLATION' — no docker-compose needed."
-    exit 0
-fi
+# --- Skip if no groups ---
+# NOTE: Do NOT gate on ISOLATION_DEFAULT here. In mixed-mode habitats,
+# ISOLATION_DEFAULT may be "session" but some groups use "container".
+# The caller (build-full-config.sh) pre-filters and only passes container
+# groups via ISOLATION_GROUPS. Trust the caller.
 
 if [ -z "$ISO_GROUPS" ]; then
     echo "No isolation groups defined — no docker-compose needed."
     exit 0
 fi
 
-# --- Filter groups: only include container-mode groups ---
-IFS=',' read -ra ALL_GROUPS <<< "$ISO_GROUPS"
-
-CONTAINER_GROUPS=()
-for group in "${ALL_GROUPS[@]}"; do
-    is_container=false
-    for i in $(seq 1 "$AGENT_COUNT"); do
-        agent_group_var="AGENT${i}_ISOLATION_GROUP"
-        agent_iso_var="AGENT${i}_ISOLATION"
-        agent_group="${!agent_group_var:-}"
-        agent_iso="${!agent_iso_var:-}"
-
-        if [ "$agent_group" = "$group" ]; then
-            # Skip agents explicitly set to non-container modes
-            if [ "$agent_iso" = "session" ] || [ "$agent_iso" = "none" ]; then
-                continue
-            fi
-            # Agent inherits container default or is explicitly container
-            if [ "$agent_iso" = "container" ] || [ -z "$agent_iso" ]; then
-                is_container=true
-            fi
-        fi
-    done
-    if [ "$is_container" = true ]; then
-        CONTAINER_GROUPS+=("$group")
-    fi
-done
+IFS=',' read -ra CONTAINER_GROUPS <<< "$ISO_GROUPS"
 
 if [ ${#CONTAINER_GROUPS[@]} -eq 0 ]; then
-    echo "No container-mode groups found — no docker-compose needed."
+    echo "No container groups — nothing to do."
     exit 0
 fi
 
-mkdir -p "$OUTPUT_DIR"
+echo "Generating docker-compose files for ${#CONTAINER_GROUPS[@]} group(s)..."
 
-echo "Generating docker-compose.yaml for ${#CONTAINER_GROUPS[@]} group(s)..."
-
-# --- Build shared paths volumes ---
-SHARED_VOLUMES=""
-if [ -n "$SHARED" ]; then
-    IFS=',' read -ra PATHS <<< "$SHARED"
-    for sp in "${PATHS[@]}"; do
-        SHARED_VOLUMES="${SHARED_VOLUMES}      - .${sp}:${sp}
-"
-    done
-fi
-
-# --- Determine network mode for a group ---
-# Uses the first agent in the group with a network setting, or defaults to "host"
-get_group_network() {
-    local group="$1"
-    for i in $(seq 1 "$AGENT_COUNT"); do
-        local ag_var="AGENT${i}_ISOLATION_GROUP"
-        local net_var="AGENT${i}_NETWORK"
-        local ag="${!ag_var:-}"
-        local net="${!net_var:-}"
-        if [ "$ag" = "$group" ] && [ -n "$net" ]; then
-            echo "$net"
-            return
-        fi
-    done
-    echo "host"
-}
-
-# --- Determine resource limits for a group ---
-# Uses the first agent in the group with resource settings
-get_group_memory() {
-    local group="$1"
-    for i in $(seq 1 "$AGENT_COUNT"); do
-        local ag_var="AGENT${i}_ISOLATION_GROUP"
-        local mem_var="AGENT${i}_RESOURCES_MEMORY"
-        local ag="${!ag_var:-}"
-        local mem="${!mem_var:-}"
-        if [ "$ag" = "$group" ] && [ -n "$mem" ]; then
-            echo "$mem"
-            return
-        fi
-    done
-    echo ""
-}
-
-get_group_cpu() {
-    local group="$1"
-    for i in $(seq 1 "$AGENT_COUNT"); do
-        local ag_var="AGENT${i}_ISOLATION_GROUP"
-        local cpu_var="AGENT${i}_RESOURCES_CPU"
-        local ag="${!ag_var:-}"
-        local cpu="${!cpu_var:-}"
-        if [ "$ag" = "$group" ] && [ -n "$cpu" ]; then
-            echo "$cpu"
-            return
-        fi
-    done
-    echo ""
-}
-
-# --- Collect agent names per group ---
-get_group_agent_names() {
-    local group="$1"
-    local names=""
-    for i in $(seq 1 "$AGENT_COUNT"); do
-        local ag_var="AGENT${i}_ISOLATION_GROUP"
-        local name_var="AGENT${i}_NAME"
-        local ag="${!ag_var:-}"
-        local name="${!name_var:-Agent${i}}"
-        if [ "$ag" = "$group" ]; then
-            [ -n "$names" ] && names="${names},"
-            names="${names}${name}"
-        fi
-    done
-    echo "$names"
-}
-
-# --- Write docker-compose.yaml ---
-COMPOSE_FILE="${OUTPUT_DIR}/docker-compose.yaml"
-
-# Initialize compose file
-: > "$COMPOSE_FILE"
-# Check if we need an internal network
-needs_internal=false
+# --- Generate per-group compose file + systemd unit ---
 for group in "${CONTAINER_GROUPS[@]}"; do
-    net=$(get_group_network "$group")
-    if [ "$net" = "internal" ]; then
-        needs_internal=true
-        break
+    # Read all metadata from manifest (generated by orchestrator)
+    port=$(jq -r --arg g "$group" '.groups[$g].port' "$MANIFEST" 2>/dev/null)
+    config_path=$(jq -r --arg g "$group" '.groups[$g].configPath // empty' "$MANIFEST" 2>/dev/null)
+    state_path=$(jq -r --arg g "$group" '.groups[$g].statePath // empty' "$MANIFEST" 2>/dev/null)
+    env_file=$(jq -r --arg g "$group" '.groups[$g].envFile // empty' "$MANIFEST" 2>/dev/null)
+    compose_path=$(jq -r --arg g "$group" '.groups[$g].composePath // empty' "$MANIFEST" 2>/dev/null)
+    network=$(jq -r --arg g "$group" '.groups[$g].network // "host"' "$MANIFEST" 2>/dev/null)
+    agents_json=$(jq -r --arg g "$group" '.groups[$g].agents // [] | join(",")' "$MANIFEST" 2>/dev/null)
+    # Resource limits from agent env vars (pipe-delimited: "mem|cpu")
+    IFS='|' read -r mem_limit cpu_limit <<< "$(get_group_resources "$group")"
+
+    [ -z "$port" ] || [ "$port" = "null" ] && { echo "ERROR: No port for group '${group}'" >&2; exit 1; }
+    [ -z "$config_path" ] && { echo "ERROR: No configPath for group '${group}'" >&2; exit 1; }
+    [ -z "$compose_path" ] && { echo "ERROR: No composePath for group '${group}'" >&2; exit 1; }
+
+    config_dir="$(dirname "$config_path")"
+    compose_dir="$(dirname "$compose_path")"
+    mkdir -p "$compose_dir"
+
+    # --- Build volumes list ---
+    # Option A: minimal mounts, no host scripts
+    volumes=""
+    # OpenClaw config (read-only — generated by orchestrator)
+    volumes="${volumes}      - ${config_path}:${HOME_DIR}/.openclaw/openclaw.json:ro"$'\n'
+    # Gateway token (read-only)
+    volumes="${volumes}      - ${config_dir}/gateway-token.txt:${HOME_DIR}/.openclaw/gateway-token.txt:ro"$'\n'
+    # Session state dir (rw — contains auth-profiles symlinks, transcripts)
+    volumes="${volumes}      - ${state_path}:${HOME_DIR}/.openclaw-sessions/${group}:rw"$'\n'
+    # Per-agent workspaces (rw — agents write memory, etc.)
+    IFS=',' read -ra agent_ids <<< "$agents_json"
+    for agent_id in "${agent_ids[@]}"; do
+        [ -z "$agent_id" ] && continue
+        volumes="${volumes}      - ${HOME_DIR}/clawd/agents/${agent_id}:${HOME_DIR}/clawd/agents/${agent_id}:rw"$'\n'
+    done
+    # Safe-mode agent workspace (rw — needed when recovery swaps to SafeModeBot)
+    safe_mode_already_mounted=false
+    for agent_id in "${agent_ids[@]}"; do
+        [ "$agent_id" = "safe-mode" ] && safe_mode_already_mounted=true
+    done
+    if [ "$safe_mode_already_mounted" = "false" ]; then
+        volumes="${volumes}      - ${HOME_DIR}/clawd/agents/safe-mode:${HOME_DIR}/clawd/agents/safe-mode:rw"$'\n'
     fi
-done
-
-echo "services:" >> "$COMPOSE_FILE"
-
-for group in "${CONTAINER_GROUPS[@]}"; do
-    net=$(get_group_network "$group")
-    mem=$(get_group_memory "$group")
-    cpu=$(get_group_cpu "$group")
-    agent_names=$(get_group_agent_names "$group")
-
-    cat >> "$COMPOSE_FILE" <<SVC
-  ${group}:
-    image: ${BASE_IMAGE}
-SVC
-
-    # Network mode
-    if [ "$net" = "internal" ]; then
-        cat >> "$COMPOSE_FILE" <<NET
-    networks:
-      - internal
-NET
-    else
-        cat >> "$COMPOSE_FILE" <<NET
-    network_mode: ${net}
-NET
-    fi
-
-    # Resource limits
-    if [ -n "$mem" ]; then
-        echo "    mem_limit: ${mem}" >> "$COMPOSE_FILE"
-    fi
-    if [ -n "$cpu" ]; then
-        echo "    cpus: ${cpu}" >> "$COMPOSE_FILE"
-    fi
-
-    # Volumes — include config, scripts, and env files needed by health check
-    echo "    volumes:" >> "$COMPOSE_FILE"
-    echo "      - ./config/${group}:${HOME_DIR}/.openclaw" >> "$COMPOSE_FILE"
-    echo "      - /usr/local/bin/gateway-health-check.sh:/usr/local/bin/gateway-health-check.sh:ro" >> "$COMPOSE_FILE"
-    echo "      - /usr/local/bin/safe-mode-recovery.sh:/usr/local/bin/safe-mode-recovery.sh:ro" >> "$COMPOSE_FILE"
-    echo "      - /usr/local/bin/setup-safe-mode-workspace.sh:/usr/local/bin/setup-safe-mode-workspace.sh:ro" >> "$COMPOSE_FILE"
-    echo "      - /usr/local/sbin/lib-permissions.sh:/usr/local/sbin/lib-permissions.sh:ro" >> "$COMPOSE_FILE"
-    echo "      - /etc/droplet.env:/etc/droplet.env:ro" >> "$COMPOSE_FILE"
-    echo "      - /etc/habitat-parsed.env:/etc/habitat-parsed.env:ro" >> "$COMPOSE_FILE"
-    echo "      - /var/lib/init-status:/var/lib/init-status" >> "$COMPOSE_FILE"
-    echo "      - /var/log:/var/log" >> "$COMPOSE_FILE"
-    echo "      - ${HOME_DIR}/clawd:${HOME_DIR}/clawd" >> "$COMPOSE_FILE"
-    if [ -n "$SHARED" ]; then
-        IFS=',' read -ra PATHS <<< "$SHARED"
-        for sp in "${PATHS[@]}"; do
-            echo "      - .${sp}:${sp}" >> "$COMPOSE_FILE"
+    # Shared workspace (rw — cross-agent collaboration)
+    volumes="${volumes}      - ${HOME_DIR}/clawd/shared:${HOME_DIR}/clawd/shared:rw"
+    # Additional shared paths from habitat config
+    if [ -n "${ISOLATION_SHARED_PATHS:-}" ]; then
+        IFS=',' read -ra shared_paths <<< "$ISOLATION_SHARED_PATHS"
+        for sp in "${shared_paths[@]}"; do
+            [ -z "$sp" ] && continue
+            volumes="${volumes}"$'\n'"      - ${sp}:${sp}:rw"
         done
     fi
 
-    # Port for this group (base 18789, offset by group index)
-    group_idx=0
-    for g in "${CONTAINER_GROUPS[@]}"; do
-        [ "$g" = "$group" ] && break
-        group_idx=$((group_idx + 1))
-    done
-    group_port=$((18789 + group_idx))
-
-    # Environment — pass GROUP and GROUP_PORT so health check is universal
-    cat >> "$COMPOSE_FILE" <<ENV
-    environment:
-      - AGENT_NAMES=${agent_names}
-      - GROUP=${group}
-      - GROUP_PORT=${group_port}
-      - ISOLATION=container
-      - RUN_MODE=execstartpost
-    container_name: openclaw-${group}
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:${group_port}/"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-ENV
-
-    # Entrypoint: start gateway, then run health check (like ExecStart + ExecStartPost)
-    cat >> "$COMPOSE_FILE" <<'ENTRY'
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - |
-        # Start gateway in background
-        openclaw gateway --bind loopback --port $${GROUP_PORT} &
-        GW_PID=$$!
-        # Wait for gateway to be ready, then run health check
-        sleep 30
-        /usr/local/bin/gateway-health-check.sh
-        # Keep gateway running
-        wait $$GW_PID
-ENTRY
-
-    echo "  [${group}] network=${net} port=${group_port} agents=${agent_names} → docker-compose.yaml"
-done
-
-# Add internal network definition if needed
-if [ "$needs_internal" = true ]; then
-    cat >> "$COMPOSE_FILE" <<NETS
+    # --- Build network section ---
+    network_section=""
+    networks_block=""
+    if [ "$network" = "host" ]; then
+        network_section="    network_mode: host"
+    else
+        # Isolated network — internal bridge (no external access)
+        # Port mapping required so host health checks can reach the gateway
+        network_section="    networks:
+      - internal
+    ports:
+      - \"${port}:${port}\"
+    dns: []"
+        networks_block="
 networks:
   internal:
     driver: bridge
-    internal: true
-NETS
+    internal: true"
+    fi
+
+    # --- Build resource limits ---
+    resource_lines=""
+    if [ -n "$mem_limit" ]; then
+        resource_lines="${resource_lines}    mem_limit: ${mem_limit}"$'\n'
+        resource_lines="${resource_lines}    memswap_limit: ${mem_limit}"$'\n'  # Prevent swap
+    fi
+    if [ -n "$cpu_limit" ]; then
+        resource_lines="${resource_lines}    cpus: ${cpu_limit}"$'\n'
+    fi
+
+    # --- Security hardening ---
+    security_section="    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256M
+      - /run:size=64M
+      - ${HOME_DIR}/.npm:size=64M
+      - ${HOME_DIR}/.cache:size=64M
+    pids_limit: 256"
+
+    # Resolve UID/GID for user: directive (host user must match container user)
+    bot_uid=$(id -u "$SVC_USER" 2>/dev/null || echo 1000)
+    bot_gid=$(id -g "$SVC_USER" 2>/dev/null || echo 1000)
+
+    # --- Write docker-compose.yaml ---
+    cat > "$compose_path" <<COMPOSE
+services:
+  openclaw-${group}:
+    image: ${BASE_IMAGE}
+    container_name: openclaw-${group}
+    user: "${bot_uid}:${bot_gid}"
+    restart: on-failure:5
+${network_section}
+    command: ["--bind", "loopback", "--port", "${port}"]
+    env_file:
+      - ${env_file}
+    environment:
+      - NODE_ENV=production
+      # Override host paths from group.env to match container mount points
+      - OPENCLAW_CONFIG_PATH=/home/${SVC_USER}/.openclaw/openclaw.json
+      - OPENCLAW_STATE_DIR=/home/${SVC_USER}/.openclaw-sessions/${group}
+    volumes:
+${volumes}
+${resource_lines}${security_section}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:${port}/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+${networks_block}
+COMPOSE
+
+    echo "  [${group}] port=${port} network=${network} → ${compose_path}"
+
+    # --- Generate container systemd unit ---
+    cat > "${SYSTEMD_DIR}/openclaw-container-${group}.service" <<SVCFILE
+[Unit]
+Description=OpenClaw Container - ${group} (${HABITAT})
+After=network.target docker.service
+Requires=docker.service
+StartLimitBurst=5
+StartLimitIntervalSec=1800
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+WorkingDirectory=${HOME_DIR}
+
+EnvironmentFile=${env_file}
+ExecStart=/usr/bin/docker compose -f ${compose_path} -p openclaw-${group} up -d --wait
+ExecStop=/usr/bin/docker compose -f ${compose_path} -p openclaw-${group} down
+ExecStartPost=+/bin/bash -c 'source ${env_file} && RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
+
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+SVCFILE
+
+    echo "  [${group}] → openclaw-container-${group}.service"
+done
+
+# --- Install and enable services ---
+if [ -z "${DRY_RUN:-}" ]; then
+    echo "Installing container services..."
+    systemctl daemon-reload
+
+    for group in "${CONTAINER_GROUPS[@]}"; do
+        systemctl enable "openclaw-container-${group}.service"
+        if [ "${START_SERVICES:-false}" = "true" ]; then
+            systemctl start "openclaw-container-${group}.service" || {
+                echo "  [${group}] Service start returned non-zero"
+            }
+        else
+            echo "  [${group}] Service enabled (caller will start)"
+        fi
+    done
+
+    echo "Container services enabled${START_SERVICES:+ and started}."
+else
+    echo "DRY_RUN mode — compose files and units written"
 fi
 
-echo "Generated docker-compose.yaml with ${#CONTAINER_GROUPS[@]} service(s) for habitat '${HABITAT}'"
+echo "Generated ${#CONTAINER_GROUPS[@]} container compose file(s) for habitat '${HABITAT}'"

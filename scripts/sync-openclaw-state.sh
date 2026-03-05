@@ -87,7 +87,7 @@ for i in $(seq 1 $AC); do
     fi
 done
 
-# Sync session transcripts
+# Sync session transcripts (default state dir)
 for i in $(seq 1 $AC); do
     a="agent${i}"
     SRC="$H/.openclaw/agents/$a/sessions"
@@ -96,3 +96,22 @@ for i in $(seq 1 $AC); do
         safe_rclone_su_copy "$USERNAME" "$SRC/" "$DST" --include '*.jsonl' 2>/dev/null || true
     fi
 done
+
+# Sync session-isolation transcripts (~/.openclaw-sessions/{group}/agents/*/sessions/)
+# With session isolation, each group has its own state dir with separate transcripts.
+# These are NOT under ~/.openclaw/ so the above loop misses them entirely.
+SESSIONS_DIR="$H/.openclaw-sessions"
+if [ -d "$SESSIONS_DIR" ]; then
+    for group_dir in "$SESSIONS_DIR"/*/; do
+        [ -d "$group_dir" ] || continue
+        group="$(basename "$group_dir")"
+        # Sync all agent transcripts within this isolation group
+        for agent_sessions_dir in "$group_dir"agents/*/sessions/; do
+            [ -d "$agent_sessions_dir" ] || continue
+            # Extract agent id from path: .../agents/<id>/sessions/
+            agent_id="$(basename "$(dirname "$agent_sessions_dir")")"
+            DST="$R/sessions-isolated/${group}/${agent_id}/"
+            safe_rclone_su_copy "$USERNAME" "$agent_sessions_dir" "$DST" --include '*.jsonl' 2>/dev/null || true
+        done
+    done
+fi

@@ -18,6 +18,8 @@
 #   GROUP / GROUP_PORT         — per-group session isolation
 # =============================================================================
 
+set -euo pipefail
+
 # Source shared libraries
 for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
   [ -f "$lib_path/lib-health-check.sh" ] && { source "$lib_path/lib-health-check.sh"; break; }
@@ -38,7 +40,7 @@ HARD_MAX="${HEALTH_CHECK_HARD_MAX_SECS:-300}"
 WARN_AT="${HEALTH_CHECK_WARN_SECS:-120}"
 
 log "========== HTTP HEALTH CHECK =========="
-log "PORT=$PORT | SETTLE=${SETTLE}s | HARD_MAX=${HARD_MAX}s | GROUP=${GROUP:-none}"
+log "PORT=$PORT | SETTLE=${SETTLE}s | HARD_MAX=${HARD_MAX}s | GROUP=${GROUP:-none} | ISOLATION=${ISOLATION:-none}"
 
 # --- Skip if recently recovered ---
 RECENTLY_RECOVERED="/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}"
@@ -54,10 +56,9 @@ fi
 log "Waiting ${SETTLE}s for gateway to settle..."
 sleep "$SETTLE"
 
-# --- HTTP poll with process-alive detection ---
+# --- HTTP poll using hc_curl_gateway (handles all isolation modes) ---
 start=$(date +%s)
 warned=false
-process_seen=false
 
 while true; do
   elapsed=$(( $(date +%s) - start ))
@@ -68,15 +69,6 @@ while true; do
     break
   fi
 
-  # Process alive?
-  if pgrep -f "openclaw.gateway" >/dev/null 2>&1; then
-    process_seen=true
-  elif [ "$process_seen" = "true" ]; then
-    log "Gateway process DIED"; break
-  elif [ "$elapsed" -ge 60 ]; then
-    log "Gateway process never appeared after ${elapsed}s"; break
-  fi
-
   # "Still waiting" notification
   if [ "$warned" = "false" ] && [ "$elapsed" -ge "$WARN_AT" ]; then
     warned=true
@@ -85,10 +77,16 @@ while true; do
       notify_send_message "⏳ <b>[${HC_HABITAT_NAME}]</b> Gateway slow to start (${elapsed}s). Still trying..." 2>/dev/null || true
   fi
 
-  # HTTP check
-  if curl -sf "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
+  # HTTP check — hc_curl_gateway handles none/session/container + network isolation
+  if hc_curl_gateway "${GROUP:-}" "/" >/dev/null 2>&1; then
     log "✓ HTTP responding at ${elapsed}s"
     rm -f "$HC_UNHEALTHY_MARKER"
+    # Re-arm the safeguard .path unit if it's dead (belt-and-suspenders).
+    # The handler's EXIT trap also does this, but if systemd killed the
+    # handler or it crashed, the path unit may still be inactive.
+    _sg="openclaw-safeguard${GROUP:+-$GROUP}.path"
+    systemctl is-active --quiet "$_sg" 2>/dev/null || \
+      systemctl restart "$_sg" 2>/dev/null || true
     log "========== HTTP CHECK PASSED =========="
     exit 0
   fi

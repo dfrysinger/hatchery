@@ -2,6 +2,7 @@
 # =============================================================================
 # build-full-config.sh -- Generate full openclaw.json with all features
 # =============================================================================
+set -euo pipefail
 umask 022  # Ensure files are world-readable (DO defaults to 077)
 
 # Source permission utilities (creates dirs with correct ownership)
@@ -30,10 +31,11 @@ done
 type d &>/dev/null || { echo "FATAL: lib-env.sh not found" >&2; exit 1; }
 env_load
 
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+# Export habitat vars so child processes (generators, install-docker) can see them
+[ -f /etc/habitat-parsed.env ] && { set -a; source /etc/habitat-parsed.env; set +a; }
 H="/home/$USERNAME"
 # Decode secrets needed for auth-profiles.json (workspace code below)
-AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64")
+AK=$(d "$ANTHROPIC_KEY_B64"); GK=$(d "$GOOGLE_API_KEY_B64"); BK=$(d "${BRAVE_KEY_B64:-}")
 OA=$(d "$OPENAI_ACCESS_B64"); OR=$(d "$OPENAI_REFRESH_B64"); OE=$(d "$OPENAI_EXPIRES_B64"); OI=$(d "$OPENAI_ACCOUNT_ID_B64")
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 HN="${HABITAT_NAME:-default}"
@@ -43,7 +45,7 @@ GTO=$(d "$GLOBAL_TOOLS_B64")
 CGI="$COUNCIL_GROUP_ID"
 CGN="$COUNCIL_GROUP_NAME"
 CJ="$COUNCIL_JUDGE"
-GT=$(cat $H/.openclaw/gateway-token.txt)
+GT=$(cat "$H/.openclaw/gateway-token.txt")
 AC=${AGENT_COUNT:-1}
 # --- Generate config via generate-config.sh (single source of truth) ---
 GEN_CONFIG_SCRIPT=""
@@ -65,7 +67,7 @@ if type ensure_bot_dir &>/dev/null; then
     ensure_bot_dir "$H/clawd/agents/agent${i}/memory" 755
   done
 else
-  mkdir -p $H/.openclaw/credentials && chmod 700 $H/.openclaw/credentials
+  mkdir -p "$H/.openclaw/credentials" && chmod 700 "$H/.openclaw/credentials"
   for i in $(seq 1 $AC); do
     mkdir -p "$H/clawd/agents/agent${i}/memory"
   done
@@ -79,7 +81,7 @@ echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
 if [ -f /var/lib/init-status/safe-mode ]; then
   echo "Safe mode active - NOT overwriting openclaw.json with full config"
 else
-  cp $H/.openclaw/openclaw.full.json $H/.openclaw/openclaw.json
+  cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
 fi
 # Check if Dropbox-restored workspace files should be preserved.
 # When restore-openclaw-state.sh successfully restores files, it sets this marker.
@@ -255,15 +257,27 @@ fi
 # NOTE: This file provides actual credentials for OpenClaw's auth resolution.
 # generate-config.sh also references auth.profiles in the JSON config (provider list only).
 # Both are generated from the same env vars, but keep them in sync if adding providers.
-cat > $H/.openclaw/agents/main/agent/auth-profiles.json <<APJ
+# Write auth-profiles.json (live copy — gateway reads/writes/persists on shutdown)
+cat > "$H/.openclaw/agents/main/agent/auth-profiles.json" <<APJ
 {"version":1,"profiles":{"anthropic:default":{"type":"api_key","provider":"anthropic","key":"${AK}"}$([ -n "$OA" ] && echo ",\"openai-codex:default\":{\"type\":\"oauth\",\"provider\":\"openai-codex\",\"access\":\"${OA}\",\"refresh\":\"${OR}\",\"expires\":${OE:-0},\"accountId\":\"${OI}\"}")$([ -n "$GK" ] && echo ",\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"key\":\"${GK}\"}")}}
 APJ
+# Golden copy — never modified by gateway, survives shutdown persistence clobber.
+# Safe mode recovery reads from this to find OAuth tokens that may have been
+# dropped from the live copy during gateway restart cycles.
+# NOTE: This is static after provisioning. If credentials are rotated at runtime
+# (e.g., OAuth token refresh), re-run build-full-config.sh to update the golden copy.
+cp "$H/.openclaw/agents/main/agent/auth-profiles.json" \
+   "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
+
 # SECURITY: auth-profiles.json contains credentials - restrict permissions
 if type ensure_bot_file &>/dev/null; then
   ensure_bot_file "$H/.openclaw/agents/main/agent/auth-profiles.json" 600
+  ensure_bot_file "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json" 600
 else
-  chmod 600 $H/.openclaw/agents/main/agent/auth-profiles.json
-  chown $USERNAME:$USERNAME $H/.openclaw/agents/main/agent/auth-profiles.json
+  chmod 600 "$H/.openclaw/agents/main/agent/auth-profiles.json" \
+            "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
+  chown "$USERNAME:$USERNAME" "$H/.openclaw/agents/main/agent/auth-profiles.json" \
+                              "$H/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
 fi
 for i in $(seq 1 $AC); do
   if type ensure_bot_dir &>/dev/null; then
@@ -340,9 +354,9 @@ TimeoutStartSec=180
 Restart=always
 RestartSec=10
 RestartPreventExitStatus=2
+Environment=CI=true
 Environment=NODE_ENV=production
-Environment=NODE_OPTIONS=--experimental-sqlite
-Environment=PATH=/usr/bin:/usr/local/bin
+Environment=PATH=/usr/local/bin:/usr/bin
 Environment=DISPLAY=:10
 Environment=ANTHROPIC_API_KEY=${AK}
 $([ -n "$GK" ] && echo "Environment=GOOGLE_API_KEY=${GK}")
@@ -397,8 +411,13 @@ E2EFILE
   systemctl enable openclaw-e2e.service 2>/dev/null || true
 fi
 
-# Enable the main openclaw service (session isolation will replace it with per-group services)
-systemctl enable openclaw.service 2>/dev/null || true
+# Enable the main openclaw service ONLY when not using session/container isolation.
+# With isolation, per-group services (openclaw-{group}.service) replace the single service.
+if [ "${ISOLATION_DEFAULT:-none}" = "none" ]; then
+  systemctl enable openclaw.service 2>/dev/null || true
+else
+  systemctl disable openclaw.service 2>/dev/null || true
+fi
 systemctl daemon-reload
 
 # --- Fix permissions BEFORE starting services ---
@@ -409,20 +428,93 @@ if type fix_bot_permissions &>/dev/null; then
   fix_bot_permissions "$H"
 else
   # Fallback if lib-permissions.sh not available
-  chown -R $USERNAME:$USERNAME $H/.openclaw $H/clawd
-  chmod 700 $H/.openclaw
-  chmod 600 $H/.openclaw/openclaw.json $H/.openclaw/openclaw.full.json 2>/dev/null || true
+  chown -R "$USERNAME:$USERNAME" "$H/.openclaw" "$H/clawd"
+  chmod 700 "$H/.openclaw"
+  chmod 600 "$H/.openclaw/openclaw.json" "$H/.openclaw/openclaw.full.json" 2>/dev/null || true
 fi
 
-# --- Agent Isolation: wire isolation scripts into pipeline ---
-if [ "$ISOLATION_DEFAULT" = "session" ]; then
-  # Export API keys for session services
+# --- Initialize state machine (after permissions are fixed) ---
+# Ensure LOG and log() are available (may not be sourced from lib-health-check.sh)
+: "${LOG:=/dev/null}"
+type log &>/dev/null || log() { echo "[build-full-config] $*"; }
+
+if [ -x /usr/local/bin/openclaw-state.sh ]; then
+  sudo -u "${USERNAME:-bot}" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+  if [ -n "${ISOLATION_GROUPS:-}" ]; then
+    IFS=',' read -ra _groups <<< "$ISOLATION_GROUPS"
+    for grp in "${_groups[@]}"; do
+      sudo -u "${USERNAME:-bot}" GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+    done
+  fi
+  log "State machine initialized"
+fi
+
+# --- Agent Isolation: centralized per-group setup + thin generator dispatch ---
+# Source lib-isolation.sh for shared group management functions
+for _iso_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  [ -f "$_iso_path/lib-isolation.sh" ] && { source "$_iso_path/lib-isolation.sh"; break; }
+done
+
+if [ -n "${ISOLATION_GROUPS:-}" ] && type generate_groups_manifest &>/dev/null; then
+  # Export decoded secrets for group.env files and generator env
   export ANTHROPIC_API_KEY="$AK"
   export GOOGLE_API_KEY="$GK"
-  export BRAVE_API_KEY="$BK"
-  bash /usr/local/sbin/generate-session-services.sh || { echo "FATAL: session isolation setup failed" >&2; exit 1; }
-elif [ "$ISOLATION_DEFAULT" = "container" ]; then
-  bash /usr/local/sbin/generate-docker-compose.sh || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
+  export BRAVE_API_KEY="${BK:-}"
+
+  # 1. Generate runtime manifest (single source of truth for group topology + ports)
+  generate_groups_manifest
+  echo "Generated groups manifest: $MANIFEST"
+
+  # 2. Validate group consistency (fail fast on mixed isolation/network within a group)
+  IFS=',' read -ra ALL_GROUPS <<< "$ISOLATION_GROUPS"
+  for group in "${ALL_GROUPS[@]}"; do
+    validate_group_consistency "$group" || exit 1
+  done
+
+  # 3. Per-group setup (dirs, env, config, auth, tokens, safeguard/E2E units)
+  for group in "${ALL_GROUPS[@]}"; do
+    port=$(get_group_port "$group")
+    isolation=$(get_group_isolation "$group")
+
+    setup_group_directories "$group"
+    generate_group_env "$group"
+    generate_group_config "$group"
+    setup_group_auth_profiles "$group"
+    generate_safeguard_units "$group"
+    generate_e2e_unit "$group"
+
+    echo "  [${group}] isolation=${isolation} port=${port} → configured"
+
+    # Enable safeguard + E2E units for this group
+    systemctl enable "openclaw-safeguard-${group}.path" 2>/dev/null || true
+    systemctl enable "openclaw-e2e-${group}.service" 2>/dev/null || true
+  done
+
+  # 4. Dispatch to mode-specific generators (thin — service definitions only)
+  session_groups=$(get_groups_by_type "session")
+  container_groups=$(get_groups_by_type "container")
+
+  if [ -n "$session_groups" ]; then
+    ISOLATION_GROUPS="$(echo "$session_groups" | tr ' ' ',')" \
+        bash /usr/local/sbin/generate-session-services.sh \
+        || { echo "FATAL: session isolation setup failed" >&2; exit 1; }
+  fi
+  if [ -n "$container_groups" ]; then
+    ISOLATION_GROUPS="$(echo "$container_groups" | tr ' ' ',')" \
+        bash /usr/local/sbin/generate-docker-compose.sh \
+        || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
+  fi
+elif [ -n "${ISOLATION_GROUPS:-}" ]; then
+  # Fallback: lib-isolation.sh not available, use legacy dispatch
+  echo "WARNING: lib-isolation.sh not found, using legacy isolation dispatch" >&2
+  export ANTHROPIC_API_KEY="$AK"
+  export GOOGLE_API_KEY="$GK"
+  export BRAVE_API_KEY="${BK:-}"
+  if [ "$ISOLATION_DEFAULT" = "session" ]; then
+    bash /usr/local/sbin/generate-session-services.sh || { echo "FATAL: session isolation setup failed" >&2; exit 1; }
+  elif [ "$ISOLATION_DEFAULT" = "container" ]; then
+    bash /usr/local/sbin/generate-docker-compose.sh || { echo "FATAL: container isolation setup failed" >&2; exit 1; }
+  fi
 fi
 if [ -n "$BG_COLOR" ] && [ ${#BG_COLOR} -eq 6 ]; then
   R=$(printf "%.5f" "$(echo "scale=5; $((16#${BG_COLOR:0:2}))/255" | bc)")

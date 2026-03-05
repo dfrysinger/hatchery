@@ -167,8 +167,12 @@ class TestBashScriptEnvSourcing:
             pytest.skip(f"{script_name} is deprecated")
         with open(path, "r") as f:
             content = f.read()
-        assert "source /etc/droplet.env" in content, (
-            f"{script_name} does not source /etc/droplet.env"
+        # Scripts can source /etc/droplet.env directly OR indirectly via lib-env.sh
+        # (lib-health-check.sh transitively sources lib-env.sh)
+        sources_directly = "source /etc/droplet.env" in content or "droplet.env" in content
+        sources_via_lib = "lib-env.sh" in content or "lib-health-check.sh" in content
+        assert sources_directly or sources_via_lib, (
+            f"{script_name} does not source /etc/droplet.env (directly or via lib-env.sh/lib-health-check.sh)"
         )
 
     @pytest.mark.parametrize(
@@ -184,8 +188,10 @@ class TestBashScriptEnvSourcing:
             pytest.skip(f"{script_name} is deprecated")
         with open(path, "r") as f:
             content = f.read()
-        assert "habitat-parsed.env" in content, (
-            f"{script_name} does not reference /etc/habitat-parsed.env"
+        # Direct reference OR transitive via lib-health-check.sh (which calls hc_load_environment)
+        has_ref = "habitat-parsed.env" in content or "lib-health-check.sh" in content
+        assert has_ref, (
+            f"{script_name} does not reference /etc/habitat-parsed.env (directly or via lib-health-check.sh)"
         )
 
 

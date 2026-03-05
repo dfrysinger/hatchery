@@ -121,10 +121,237 @@ get_owner_id_for_platform() {
         echo "$raw_id"
       fi
       ;;
+    both)
+      # Prefer telegram (simpler ID format), fall back to discord
+      local tg_id="${TELEGRAM_OWNER_ID:-${TELEGRAM_USER_ID:-}}"
+      if [ -n "$tg_id" ]; then
+        echo "$tg_id"
+      else
+        local raw_id="${DISCORD_OWNER_ID:-}"
+        if [ "$with_prefix" = "with_prefix" ] && [ -n "$raw_id" ]; then
+          echo "user:${raw_id}"
+        else
+          echo "$raw_id"
+        fi
+      fi
+      ;;
     *)
       echo ""
       ;;
   esac
+}
+
+# --- Isolation-aware service management ---
+# All health check consumers use these functions — never direct systemctl/docker calls.
+# Works for all 3 isolation modes: none, session, container.
+#
+# In "none" mode (no isolation), group is ignored and the single "openclaw" service is used.
+# In "session" mode, each group has its own systemd service "openclaw-{group}".
+# In "container" mode, each group runs via docker compose.
+#
+# Environment deps:
+#   ISOLATION  — from group.env (EnvironmentFile=) or hc_load_environment()
+#   GROUP      — group name (empty in none mode)
+#   GROUP_PORT — gateway port (default 18789)
+
+# Resolve service name from group + isolation mode
+_hc_service_name() {
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
+  if [ "$iso" = "none" ] || [ -z "$group" ]; then
+    echo "openclaw"
+  else
+    echo "openclaw-${group}"
+  fi
+}
+
+hc_restart_service() {
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" restart 2>&1 ;;
+    none)
+      systemctl restart openclaw 2>&1 ;;
+    *)
+      systemctl restart "openclaw-${group}" 2>&1 ;;
+  esac
+}
+
+hc_is_service_active() {
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
+  case "$iso" in
+    container)
+      # Check if container process is running (not health status).
+      # This is the equivalent of systemd is-active — "is the process alive?"
+      # For actual gateway readiness, use hc_curl_gateway() or hc_restart_and_wait().
+      local running
+      running=$(docker inspect --format='{{.State.Running}}' "openclaw-${group}" 2>/dev/null)
+      [ "$running" = "true" ] ;;
+    none)
+      systemctl is-active --quiet openclaw ;;
+    *)
+      systemctl is-active --quiet "openclaw-${group}" ;;
+  esac
+}
+
+# Poll hc_curl_gateway() until the gateway responds or timeout.
+# No restart — just waits. Use after hc_restart_service() or on its own.
+#
+# Args:
+#   $1 — group name (optional, for isolation modes)
+#   $2 — max wait in seconds (optional, default auto-scaled by isolation mode)
+#
+# Returns: 0 if gateway responds, 1 if timed out
+hc_wait_for_http() {
+  local group="${1:-${GROUP:-}}"
+  local max_wait="${2:-}"
+  local iso="${ISOLATION:-none}"
+
+  # Auto-scale timeout if not provided:
+  #   none/session: systemd → Node boot = fast (30s)
+  #   container: Docker restart → container up → Node boot = slow (90s)
+  if [ -z "$max_wait" ]; then
+    case "$iso" in
+      container) max_wait=90 ;;
+      *)         max_wait=30 ;;
+    esac
+  fi
+
+  local start elapsed
+  start=$(date +%s)
+  while true; do
+    elapsed=$(( $(date +%s) - start ))
+    if [ "$elapsed" -ge "$max_wait" ]; then
+      log "Timed out after ${elapsed}s waiting for HTTP"
+      return 1
+    fi
+
+    if hc_curl_gateway "$group" "/" >/dev/null 2>&1; then
+      log "HTTP responding after ${elapsed}s"
+      return 0
+    fi
+
+    sleep 5
+  done
+}
+
+# Restart service and wait for HTTP readiness.
+# Single canonical implementation — use this instead of hand-rolled poll loops.
+# Restarts ONCE, then polls via hc_wait_for_http().
+# Does NOT re-restart on each poll failure (the old bug).
+#
+# Args:
+#   $1 — group name (optional, for isolation modes)
+#   $2 — max wait in seconds (optional, default auto-scaled by isolation mode)
+#
+# Returns: 0 if gateway responds, 1 if timed out
+# Stop gateway, run a modification callback, then start + wait for HTTP.
+# Prevents the gateway's SIGTERM handler from clobbering files written by the
+# callback (auth-profiles.json, openclaw.json). The callback runs AFTER the
+# gateway has fully stopped and persisted its state.
+#
+# Usage: hc_stop_modify_start GROUP modify_function [args...]
+hc_stop_modify_start() {
+  local group="${1:-${GROUP:-}}"; shift
+  local callback="$1"; shift
+
+  log "Stopping $(_hc_service_name "$group") for safe file modification..."
+  hc_stop_service "$group" || true
+
+  # Gateway has stopped and persisted its state. Now safe to modify files.
+  log "Service stopped — running modification callback..."
+  "$callback" "$@"
+
+  log "Starting $(_hc_service_name "$group")..."
+  hc_start_service "$group" || true
+
+  hc_wait_for_http "$group"
+}
+
+hc_restart_and_wait() {
+  local group="${1:-${GROUP:-}}"
+  local max_wait="${2:-}"
+
+  log "Restarting $(_hc_service_name "$group")..."
+  hc_restart_service "$group" || true
+
+  hc_wait_for_http "$group" "$max_wait"
+}
+
+hc_service_logs() {
+  local group="${1:-${GROUP:-}}"
+  local lines="${2:-50}"
+  local iso="${ISOLATION:-none}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" logs --tail="$lines" 2>/dev/null ;;
+    none)
+      journalctl -u openclaw --no-pager -n "$lines" 2>/dev/null ;;
+    *)
+      journalctl -u "openclaw-${group}" --no-pager -n "$lines" 2>/dev/null ;;
+  esac
+}
+
+hc_stop_service() {
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      # Stop the container AND disable the systemd unit to prevent restart loops
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" down 2>&1
+      systemctl stop "openclaw-container-${group}" 2>&1 || true
+      systemctl disable "openclaw-container-${group}" 2>&1 || true
+      ;;
+    none)
+      systemctl stop openclaw 2>&1 ;;
+    *)
+      systemctl stop "openclaw-${group}" 2>&1 ;;
+  esac
+}
+
+hc_start_service() {
+  local group="${1:-${GROUP:-}}"
+  local iso="${ISOLATION:-none}"
+  local user="${HC_USERNAME:-${USERNAME:-bot}}"
+  case "$iso" in
+    container)
+      docker compose \
+        -f "/home/${user}/.openclaw/compose/${group}/docker-compose.yaml" \
+        -p "openclaw-${group}" up -d 2>&1 ;;
+    none)
+      systemctl start openclaw 2>&1 ;;
+    *)
+      systemctl start "openclaw-${group}" 2>&1 ;;
+  esac
+}
+
+# Reach the gateway — handles all isolation modes including isolated network containers
+hc_curl_gateway() {
+  local group="${1:-${GROUP:-}}"
+  local path="${2:-/}"
+  local port="${GROUP_PORT:-18789}"
+  local iso="${ISOLATION:-none}"
+  local net="${NETWORK_MODE:-host}"
+
+  if [ "$iso" = "container" ] && [ "$net" != "host" ]; then
+    # Isolated network: reach via docker exec
+    docker exec "openclaw-${group}" \
+      curl -sf "http://127.0.0.1:${port}${path}" 2>/dev/null
+  else
+    # Host network, session mode, or none mode: direct curl
+    curl -sf "http://127.0.0.1:${port}${path}" 2>/dev/null
+  fi
 }
 
 # --- State helpers ---

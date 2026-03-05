@@ -188,15 +188,21 @@ class TestIsolationPerAgent(unittest.TestCase):
 class TestIsolationGroupLogic(unittest.TestCase):
     """Tests for isolation group aggregation."""
 
-    def test_isolation_groups_default_to_agent_names(self):
+    def test_none_mode_produces_empty_groups(self):
+        """ISOLATION_GROUPS is empty when isolation is none (default)."""
         env, _ = run_parser(make_habitat())
+        self.assertEqual(env.get('ISOLATION_GROUPS'), '')
+
+    def test_session_mode_produces_groups(self):
+        """ISOLATION_GROUPS populated when isolation is session."""
+        env, _ = run_parser(make_habitat(overrides={"isolation": "session"}))
         self.assertEqual(env.get('ISOLATION_GROUPS'), 'Agent1')
 
     def test_isolation_groups_single(self):
         agents = [
             {"agent": "A", "tokens": {"telegram": "t"}, "isolationGroup": "council"},
         ]
-        env, _ = run_parser(make_habitat(agents=agents))
+        env, _ = run_parser(make_habitat(agents=agents, overrides={"isolation": "session"}))
         self.assertEqual(env['ISOLATION_GROUPS'], 'council')
 
     def test_isolation_groups_multiple_deduped(self):
@@ -205,7 +211,7 @@ class TestIsolationGroupLogic(unittest.TestCase):
             {"agent": "B", "tokens": {"telegram": "t2"}, "isolationGroup": "workers"},
             {"agent": "C", "tokens": {"telegram": "t3"}, "isolationGroup": "council"},
         ]
-        env, _ = run_parser(make_habitat(agents=agents))
+        env, _ = run_parser(make_habitat(agents=agents, overrides={"isolation": "container"}))
         groups = env['ISOLATION_GROUPS'].split(',')
         self.assertEqual(sorted(groups), ['council', 'workers'])
 
@@ -214,7 +220,7 @@ class TestIsolationGroupLogic(unittest.TestCase):
             {"agent": "A", "tokens": {"telegram": "t1"}, "isolationGroup": "zebra"},
             {"agent": "B", "tokens": {"telegram": "t2"}, "isolationGroup": "alpha"},
         ]
-        env, _ = run_parser(make_habitat(agents=agents))
+        env, _ = run_parser(make_habitat(agents=agents, overrides={"isolation": "session"}))
         self.assertEqual(env['ISOLATION_GROUPS'], 'alpha,zebra')
 
     def test_group_name_alphanumeric_with_hyphens(self):
@@ -275,7 +281,8 @@ class TestBackwardCompatibility(unittest.TestCase):
         self.assertEqual(env['HABITAT_NAME'], 'TestHabitat')
         self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
         self.assertEqual(env['ISOLATION_SHARED_PATHS'], '')
-        self.assertEqual(env['ISOLATION_GROUPS'], 'Agent1')
+        # No isolation enabled = empty ISOLATION_GROUPS
+        self.assertEqual(env['ISOLATION_GROUPS'], '')
 
     def test_v1_legacy_format(self):
         hab = {
@@ -336,7 +343,8 @@ class TestBackwardCompatibility(unittest.TestCase):
         self.assertEqual(env['HABITAT_NAME'], 'SimpleBot')
         self.assertEqual(env['ISOLATION_DEFAULT'], 'none')
         self.assertEqual(env['ISOLATION_SHARED_PATHS'], '')
-        self.assertIn('Claude', env['ISOLATION_GROUPS'])
+        # No isolation enabled = empty ISOLATION_GROUPS
+        self.assertEqual(env['ISOLATION_GROUPS'], '')
         self.assertEqual(env['AGENT_COUNT'], '1')
         self.assertEqual(env.get('AGENT1_ISOLATION'), '')
         self.assertEqual(env.get('AGENT1_ISOLATION_GROUP'), 'Claude')

@@ -145,6 +145,10 @@ fix_state_permissions() {
     chown -R "$BOT_USER:$BOT_USER" "$home/.openclaw-sessions" 2>/dev/null || true
     chmod 700 "$home/.openclaw-sessions" 2>/dev/null || true
   fi
+  
+  # State machine directory (system-level, outside home)
+  # Contains state.json, state-{group}.json, events, lock files
+  ensure_bot_dir /var/lib/openclaw 755
 }
 
 # Fix session isolation state directory

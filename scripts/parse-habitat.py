@@ -609,10 +609,16 @@ with open(os.path.join(output_dir, 'habitat-parsed.env'), 'w') as f:
         f.write('AGENT{}_RESOURCES_MEMORY="{}"\n'.format(n, agent_resources.get("memory", "")))
         f.write('AGENT{}_RESOURCES_CPU="{}"\n'.format(n, agent_resources.get("cpu", "")))
 
-        # Track unique isolation groups
-        isolation_groups.add(agent_isolation_group)
+        # Track unique isolation groups — only when isolation is actually enabled.
+        # An agent is isolated if it has per-agent isolation set, or inherits a
+        # non-"none" global default.  Without this gate, ISOLATION_GROUPS gets
+        # populated for "none" mode habitats and build-full-config.sh runs
+        # per-group setup (manifest, dirs, env) for groups that will never be used.
+        effective_isolation = agent_isolation or isolation_default
+        if effective_isolation != "none":
+            isolation_groups.add(agent_isolation_group)
 
-    # List of unique isolation groups (for container/droplet orchestration)
+    # List of unique isolation groups (only groups with actual isolation enabled)
     f.write('ISOLATION_GROUPS="{}"\n'.format(",".join(sorted(isolation_groups))))
 
 os.chmod(os.path.join(output_dir, 'habitat-parsed.env'), 0o600)

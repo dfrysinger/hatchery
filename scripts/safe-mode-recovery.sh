@@ -61,40 +61,9 @@ VALIDATE_API_KEY_FN="${VALIDATE_API_KEY_FN:-validate_api_key}"
 # side effects. Use `local var; var=$(func)` only for pure return values.
 # =============================================================================
 
-# validate_telegram_token() — now in lib-auth.sh
-
-
-# validate_discord_token() — now in lib-auth.sh
-
-
-# validate_api_key() — now in lib-auth.sh
-
-
 # =============================================================================
-# Token Hunting Functions
+# Token Hunting Functions — delegated to lib-auth.sh
 # =============================================================================
-
-# Global variables for function results (avoids subshell issues with $())
-# shellcheck disable=SC2034  # Read by callers after function returns
-VALIDATION_REASON=""
-# shellcheck disable=SC2034  # Read by callers after function returns
-FOUND_TOKEN_RESULT=""
-
-# find_working_telegram_token() — now in lib-auth.sh
-
-
-# find_working_discord_token() — now in lib-auth.sh
-
-
-# Global variable for function results (avoids subshell issues)
-FOUND_TOKEN_RESULT=""
-
-# Find a working platform and token
-# Order: User's default platform (PLATFORM env var) first, then fallback platform
-# Tries ALL tokens from preferred platform before moving to fallback
-# Sets: FOUND_TOKEN_RESULT with platform:agent_num:token (e.g., "telegram:2:abc123...")
-# Returns: 0 if found, 1 if not
-# find_working_platform_token() — REMOVED, use find_working_platform_token() from lib-auth.sh
 
 # Get the model for a specific agent from habitat config
 # Falls back to provider default if not found
@@ -220,10 +189,12 @@ check_oauth_profile() {
     return 1
   fi
   
-  # Find auth-profiles.json
+  # Find auth-profiles.json — prefer golden provisioned copy (survives gateway
+  # SIGTERM persistence clobber), fall back to live copy if golden doesn't exist.
   if [ -z "$auth_file" ]; then
     local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
     for path in \
+      "$home/.openclaw/agents/main/agent/auth-profiles.provisioned.json" \
       "$home/.openclaw/agents/main/agent/auth-profiles.json" \
       "$home/.openclaw/agents/agent1/agent/auth-profiles.json" \
       "$home/.openclaw/agent/auth-profiles.json"; do
@@ -322,30 +293,15 @@ check_oauth_profile() {
   return 1
 }
 
-# get_provider_from_model() — now in lib-auth.sh
-
-
-# get_user_preferred_provider() — now in lib-auth.sh
-
-
-# get_provider_order() — now in lib-auth.sh
-
-
-# Global for API provider result
-# shellcheck disable=SC2034  # Read by callers after find_working_api_provider returns
-FOUND_API_PROVIDER=""
+# Provider discovery — delegated to lib-auth.sh
 
 # Global for OAuth check result (avoids subshell issues)
-OAUTH_CHECK_RESULT=""       # "oauth:<provider>" on success, empty on failure
-# shellcheck disable=SC2034  # Read by callers after check_oauth_profile returns
-OAUTH_CHECK_REASON=""       # failure reason for diagnostics
-# shellcheck disable=SC2034  # Read by callers after check_oauth_profile returns
-OAUTH_CHECK_PROVIDER=""     # actual provider name (e.g., openai-codex for openai)
+OAUTH_CHECK_RESULT=""
+OAUTH_CHECK_REASON=""
+OAUTH_CHECK_PROVIDER=""
 
 # Default log_recovery to no-op if not defined (allows function use outside run_smart_recovery)
 type log_recovery &>/dev/null || log_recovery() { :; }
-
-# find_working_api_provider() — now in lib-auth.sh
 
 
 # Get auth type for a provider (oauth or apikey)
@@ -368,9 +324,6 @@ get_api_key_for_provider() {
     *)         echo "" ;;
   esac
 }
-
-# get_default_model_for_provider() — now in lib-auth.sh
-
 
 # =============================================================================
 # Emergency Config Generation
