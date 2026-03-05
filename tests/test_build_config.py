@@ -157,13 +157,14 @@ class TestPlatformTelegram:
 
     def test_telegram_accounts(self):
         config = run_generate_config(platform="telegram")
-        assert "agent1" in config["channels"]["telegram"]["accounts"]
-        assert config["channels"]["telegram"]["accounts"]["agent1"]["botToken"] == "tg-token-1"
+        # Single account uses "default" name to avoid Doctor migration
+        assert "default" in config["channels"]["telegram"]["accounts"]
+        assert config["channels"]["telegram"]["accounts"]["default"]["botToken"] == "tg-token-1"
 
     def test_telegram_dm_policy(self):
         config = run_generate_config(platform="telegram")
         # dmPolicy/allowFrom live inside each account for multi-account Telegram
-        acct = config["channels"]["telegram"]["accounts"]["agent1"]
+        acct = config["channels"]["telegram"]["accounts"]["default"]
         assert acct["dmPolicy"] == "allowlist"
         assert "12345" in acct["allowFrom"]
 
@@ -195,8 +196,9 @@ class TestPlatformDiscord:
 
     def test_discord_accounts(self):
         config = run_generate_config(platform="discord")
-        assert "agent1" in config["channels"]["discord"]["accounts"]
-        assert config["channels"]["discord"]["accounts"]["agent1"]["token"] == "dc-token-1"
+        # Single account uses "default" name
+        assert "default" in config["channels"]["discord"]["accounts"]
+        assert config["channels"]["discord"]["accounts"]["default"]["token"] == "dc-token-1"
 
     def test_discord_dm_config(self):
         """DM config uses flat keys (dmPolicy, allowFrom), not nested dm object."""
@@ -246,8 +248,9 @@ class TestPlatformBoth:
 
     def test_both_have_accounts(self):
         config = run_generate_config(platform="both")
-        assert "agent1" in config["channels"]["telegram"]["accounts"]
-        assert "agent1" in config["channels"]["discord"]["accounts"]
+        # Single agent → "default" account name
+        assert "default" in config["channels"]["telegram"]["accounts"]
+        assert "default" in config["channels"]["discord"]["accounts"]
 
 
 class TestBindings:
@@ -428,7 +431,7 @@ class TestJSONEscaping:
 
     def test_telegram_user_id_with_leading_zero(self):
         config = run_generate_config(platform="telegram", telegram_user_id="0123456789")
-        acct = config["channels"]["telegram"]["accounts"]["agent1"]
+        acct = config["channels"]["telegram"]["accounts"]["default"]
         assert "0123456789" in acct["allowFrom"]
 
 

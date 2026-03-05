@@ -194,7 +194,8 @@ build_telegram_channel() {
   local owner_id="${TELEGRAM_OWNER_ID:-$(d "${TELEGRAM_USER_ID_B64:-}")}"
 
   # Build accounts object
-  local accounts="{}"
+  # Collect matching agents first to determine account naming
+  local agent_ids=() agent_tokens=()
   for i in $(seq 1 "$AGENT_COUNT"); do
     local agent_id="agent${i}"
     if [ -n "$filter_agents" ]; then
@@ -202,7 +203,19 @@ build_telegram_channel() {
     fi
     local tok_var="AGENT${i}_BOT_TOKEN"; local tok="${!tok_var:-}"
     [ -z "$tok" ] && continue
-    accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" --arg oid "$owner_id" \
+    agent_ids+=("$agent_id")
+    agent_tokens+=("$tok")
+  done
+
+  # Single account → name it "default" to avoid Doctor migration.
+  # Multiple accounts → use agent IDs (agent1, agent2, etc.)
+  local accounts="{}"
+  for idx in "${!agent_ids[@]}"; do
+    local acct_name="${agent_ids[$idx]}"
+    if [ "${#agent_ids[@]}" -eq 1 ]; then
+      acct_name="default"
+    fi
+    accounts=$(echo "$accounts" | jq --arg id "$acct_name" --arg tok "${agent_tokens[$idx]}" --arg oid "$owner_id" \
       '. + {($id): {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}')
   done
 
@@ -230,8 +243,8 @@ build_discord_channel() {
   local owner_id="${DISCORD_OWNER_ID:-$(d "${DISCORD_OWNER_ID_B64:-}")}"
   local guild_id="${DISCORD_GUILD_ID:-$(d "${DISCORD_GUILD_ID_B64:-}")}"
 
-  # Build accounts object
-  local accounts="{}"
+  # Build accounts object — same single-account→default pattern as Telegram
+  local dc_agent_ids=() dc_agent_tokens=()
   for i in $(seq 1 "$AGENT_COUNT"); do
     local agent_id="agent${i}"
     if [ -n "$filter_agents" ]; then
@@ -239,7 +252,17 @@ build_discord_channel() {
     fi
     local tok_var="AGENT${i}_DISCORD_BOT_TOKEN"; local tok="${!tok_var:-}"
     [ -z "$tok" ] && continue
-    accounts=$(echo "$accounts" | jq --arg id "$agent_id" --arg tok "$tok" \
+    dc_agent_ids+=("$agent_id")
+    dc_agent_tokens+=("$tok")
+  done
+
+  local accounts="{}"
+  for idx in "${!dc_agent_ids[@]}"; do
+    local acct_name="${dc_agent_ids[$idx]}"
+    if [ "${#dc_agent_ids[@]}" -eq 1 ]; then
+      acct_name="default"
+    fi
+    accounts=$(echo "$accounts" | jq --arg id "$acct_name" --arg tok "${dc_agent_tokens[$idx]}" \
       '. + {($id): {token: $tok}}')
   done
 
