@@ -25,10 +25,10 @@ STAGE=$(curl -sf localhost:8080/status 2>/dev/null | jq -r '.stage // "unreachab
 
 # --- 1. Boot Completed ---
 echo "▸ Boot Status"
-if [ "$STAGE" = "11" ] || [ "$STAGE" = "12" ]; then
+if [ "$STAGE" = "11" ] || [ "$STAGE" = "12" ] || [ "$STAGE" = "13" ]; then
   pass "Boot completed (Stage $STAGE)"
 else
-  fail "Unexpected stage: $STAGE (expected 11 or 12)"
+  fail "Unexpected stage: $STAGE (expected 11, 12, or 13)"
 fi
 
 if [ -f /var/lib/init-status/setup-complete ]; then
