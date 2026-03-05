@@ -217,6 +217,8 @@ ExecStartPost=+/bin/bash -c 'source ${env_file} && RUN_MODE=execstartpost /usr/l
 
 Restart=on-failure
 RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=300
 RestartPreventExitStatus=2
 TimeoutStartSec=180
 TimeoutStopSec=60
