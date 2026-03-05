@@ -293,22 +293,28 @@ build_discord_channel() {
     } + $dm_flat + (if $guilds != null then {guilds: $guilds} else {} end))'
 }
 
-# Build bindings array (maps non-default agents to their channel accounts)
+# Build bindings array (maps each agent to its channel account)
 build_bindings() {
   local filter_agents="${1:-}"
   local bindings="[]"
-  local first=true
 
+  # Count agents in this group to decide if bindings are needed
+  local group_agent_count=0
   for i in $(seq 1 "$AGENT_COUNT"); do
     local agent_id="agent${i}"
     if [ -n "$filter_agents" ]; then
       echo "$filter_agents" | tr ',' '\n' | grep -qx "$agent_id" || continue
     fi
+    group_agent_count=$((group_agent_count + 1))
+  done
 
-    # First agent in the list is the default — doesn't need a binding
-    if [ "$first" = "true" ]; then
-      first=false
-      continue
+  # Single-agent groups use account "default" — no binding needed (fallback routing)
+  [ "$group_agent_count" -le 1 ] && { echo "$bindings"; return; }
+
+  for i in $(seq 1 "$AGENT_COUNT"); do
+    local agent_id="agent${i}"
+    if [ -n "$filter_agents" ]; then
+      echo "$filter_agents" | tr ',' '\n' | grep -qx "$agent_id" || continue
     fi
 
     if [ "$_tg_enabled" = "true" ]; then

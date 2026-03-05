@@ -266,22 +266,22 @@ class TestBindings:
         bindings = config["bindings"]
         channels = [b["match"]["channel"] for b in bindings]
         assert all(c == "telegram" for c in channels)
-        assert len(bindings) == 2  # agent2 and agent3 (agent1 is default)
+        assert len(bindings) == 3  # all agents get explicit bindings
 
     def test_discord_bindings_only(self):
         config = run_generate_config(platform="discord", agent_count=3, agents=self.MULTI_AGENTS)
         bindings = config["bindings"]
         channels = [b["match"]["channel"] for b in bindings]
         assert all(c == "discord" for c in channels)
-        assert len(bindings) == 2
+        assert len(bindings) == 3
 
     def test_both_bindings(self):
         config = run_generate_config(platform="both", agent_count=3, agents=self.MULTI_AGENTS)
         bindings = config["bindings"]
         tg_bindings = [b for b in bindings if b["match"]["channel"] == "telegram"]
         dc_bindings = [b for b in bindings if b["match"]["channel"] == "discord"]
-        assert len(tg_bindings) == 2
-        assert len(dc_bindings) == 2
+        assert len(tg_bindings) == 3
+        assert len(dc_bindings) == 3
 
     def test_single_agent_no_bindings(self):
         config = run_generate_config(platform="both", agent_count=1)
