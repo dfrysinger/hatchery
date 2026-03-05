@@ -155,15 +155,17 @@ class TestPlatformTelegram:
         config = run_generate_config(platform="telegram")
         assert config["plugins"]["entries"]["discord"]["enabled"] is False
 
-    def test_telegram_accounts(self):
+    def test_telegram_single_account(self):
+        """Single agent uses accounts.default (single agent = default)."""
         config = run_generate_config(platform="telegram")
-        assert "agent1" in config["channels"]["telegram"]["accounts"]
-        assert config["channels"]["telegram"]["accounts"]["agent1"]["botToken"] == "tg-token-1"
+        acct = config["channels"]["telegram"]["accounts"]["default"]
+        assert acct["botToken"] == "tg-token-1"
 
     def test_telegram_dm_policy(self):
         config = run_generate_config(platform="telegram")
-        assert config["channels"]["telegram"]["dmPolicy"] == "allowlist"
-        assert "12345" in config["channels"]["telegram"]["allowFrom"]
+        acct = config["channels"]["telegram"]["accounts"]["default"]
+        assert acct["dmPolicy"] == "allowlist"
+        assert "12345" in acct["allowFrom"]
 
     def test_default_platform_is_telegram(self):
         """When PLATFORM is telegram, should enable telegram and disable discord."""
@@ -191,16 +193,19 @@ class TestPlatformDiscord:
         config = run_generate_config(platform="discord")
         assert config["plugins"]["entries"]["telegram"]["enabled"] is False
 
-    def test_discord_accounts(self):
+    def test_discord_single_account(self):
+        """Single agent uses accounts.default (single agent = default)."""
         config = run_generate_config(platform="discord")
-        assert "agent1" in config["channels"]["discord"]["accounts"]
-        assert config["channels"]["discord"]["accounts"]["agent1"]["token"] == "dc-token-1"
+        acct = config["channels"]["discord"]["accounts"]["default"]
+        assert acct["token"] == "dc-token-1"
 
     def test_discord_dm_config(self):
+        """DM config uses flat keys (dmPolicy, allowFrom), not nested dm object."""
         config = run_generate_config(platform="discord")
-        dm = config["channels"]["discord"]["dm"]
-        assert dm["enabled"] is True
-        assert dm["policy"] == "pairing"
+        dc = config["channels"]["discord"]
+        assert dc["dmPolicy"] == "pairing"
+        # Ensure no nested dm object (triggers Doctor migration prompt)
+        assert "dm" not in dc
 
     def test_discord_group_policy(self):
         config = run_generate_config(platform="discord")
@@ -214,8 +219,8 @@ class TestPlatformDiscord:
 
     def test_discord_owner_id_in_dm_allow(self):
         config = run_generate_config(platform="discord", discord_owner_id="owner-999")
-        dm = config["channels"]["discord"]["dm"]
-        assert "owner-999" in dm["allowFrom"]
+        dc = config["channels"]["discord"]
+        assert "owner-999" in dc["allowFrom"]
 
     def test_no_guild_when_empty(self):
         config = run_generate_config(platform="discord", discord_guild_id="")
@@ -223,8 +228,8 @@ class TestPlatformDiscord:
 
     def test_no_allow_from_when_no_owner(self):
         config = run_generate_config(platform="discord", discord_owner_id="")
-        dm = config["channels"]["discord"]["dm"]
-        assert "allowFrom" not in dm
+        dc = config["channels"]["discord"]
+        assert "allowFrom" not in dc
 
 
 class TestPlatformBoth:
@@ -240,10 +245,11 @@ class TestPlatformBoth:
         assert config["plugins"]["entries"]["telegram"]["enabled"] is True
         assert config["plugins"]["entries"]["discord"]["enabled"] is True
 
-    def test_both_have_accounts(self):
+    def test_both_single_agent(self):
+        """Single agent with both platforms uses accounts.default."""
         config = run_generate_config(platform="both")
-        assert "agent1" in config["channels"]["telegram"]["accounts"]
-        assert "agent1" in config["channels"]["discord"]["accounts"]
+        assert "default" in config["channels"]["telegram"]["accounts"]
+        assert "default" in config["channels"]["discord"]["accounts"]
 
 
 class TestBindings:
@@ -260,22 +266,22 @@ class TestBindings:
         bindings = config["bindings"]
         channels = [b["match"]["channel"] for b in bindings]
         assert all(c == "telegram" for c in channels)
-        assert len(bindings) == 2  # agent2 and agent3 (agent1 is default)
+        assert len(bindings) == 3  # all agents get explicit bindings
 
     def test_discord_bindings_only(self):
         config = run_generate_config(platform="discord", agent_count=3, agents=self.MULTI_AGENTS)
         bindings = config["bindings"]
         channels = [b["match"]["channel"] for b in bindings]
         assert all(c == "discord" for c in channels)
-        assert len(bindings) == 2
+        assert len(bindings) == 3
 
     def test_both_bindings(self):
         config = run_generate_config(platform="both", agent_count=3, agents=self.MULTI_AGENTS)
         bindings = config["bindings"]
         tg_bindings = [b for b in bindings if b["match"]["channel"] == "telegram"]
         dc_bindings = [b for b in bindings if b["match"]["channel"] == "discord"]
-        assert len(tg_bindings) == 2
-        assert len(dc_bindings) == 2
+        assert len(tg_bindings) == 3
+        assert len(dc_bindings) == 3
 
     def test_single_agent_no_bindings(self):
         config = run_generate_config(platform="both", agent_count=1)
@@ -391,7 +397,7 @@ class TestConfigStructure:
         dc = config["channels"]["discord"]
         assert dc["enabled"] is True
         assert dc["guilds"]["guild-123"]["requireMention"] is True
-        assert "owner-456" in dc["dm"]["allowFrom"]
+        assert "owner-456" in dc["allowFrom"]
         assert dc["accounts"]["agent2"]["token"] == "dc-2"
 
 
@@ -424,7 +430,8 @@ class TestJSONEscaping:
 
     def test_telegram_user_id_with_leading_zero(self):
         config = run_generate_config(platform="telegram", telegram_user_id="0123456789")
-        assert "0123456789" in config["channels"]["telegram"]["allowFrom"]
+        acct = config["channels"]["telegram"]["accounts"]["default"]
+        assert "0123456789" in acct["allowFrom"]
 
 
 class TestJSONValidation:
@@ -552,7 +559,7 @@ class TestSafeModeConfig:
         assert agents[0]["name"] == "SafeModeBot"
 
     def test_safe_mode_telegram_account_matches_agent(self):
-        """Telegram account key should match the agent id 'safe-mode'."""
+        """Safe-mode Telegram uses accounts.default (single agent = default)."""
         config = run_generate_config(
             mode="safe-mode",
             sm_bot_token="test-bot-token-123",
@@ -561,12 +568,11 @@ class TestSafeModeConfig:
             sm_token="sk-ant-test",
             sm_owner_id="12345",
         )
-        accounts = config["channels"]["telegram"]["accounts"]
-        assert "safe-mode" in accounts
-        assert accounts["safe-mode"]["botToken"] == "test-bot-token-123"
+        acct = config["channels"]["telegram"]["accounts"]["default"]
+        assert acct["botToken"] == "test-bot-token-123"
 
-    def test_safe_mode_discord_account_matches_agent(self):
-        """Discord account key should match the agent id 'safe-mode'."""
+    def test_safe_mode_discord_account(self):
+        """Safe-mode Discord uses accounts.default (single agent = default)."""
         config = run_generate_config(
             mode="safe-mode",
             sm_bot_token="discord-bot-token-123",
@@ -575,9 +581,8 @@ class TestSafeModeConfig:
             sm_token="sk-ant-test",
             sm_owner_id="12345",
         )
-        accounts = config["channels"]["discord"]["accounts"]
-        assert "safe-mode" in accounts
-        assert accounts["safe-mode"]["token"] == "discord-bot-token-123"
+        acct = config["channels"]["discord"]["accounts"]["default"]
+        assert acct["token"] == "discord-bot-token-123"
 
     def test_safe_mode_dm_policy(self):
         """Safe-mode config should have allowlist dmPolicy with owner."""
@@ -589,9 +594,9 @@ class TestSafeModeConfig:
             sm_token="sk-ant-test",
             sm_owner_id="99999",
         )
-        tg = config["channels"]["telegram"]
-        assert tg["dmPolicy"] == "allowlist"
-        assert "99999" in tg["allowFrom"]
+        acct = config["channels"]["telegram"]["accounts"]["default"]
+        assert acct["dmPolicy"] == "allowlist"
+        assert "99999" in acct["allowFrom"]
 
     def test_safe_mode_anthropic_env(self):
         """Anthropic provider should set ANTHROPIC_API_KEY in env."""
@@ -643,8 +648,8 @@ class TestSafeModeConfig:
             )
             assert isinstance(config, dict)
 
-    def test_safe_mode_has_browser(self):
-        """Safe-mode config should include browser settings."""
+    def test_safe_mode_has_browser_disabled(self):
+        """Safe-mode config disables browser (container has no Chrome)."""
         config = run_generate_config(
             mode="safe-mode",
             sm_bot_token="123:ABC",
@@ -653,7 +658,7 @@ class TestSafeModeConfig:
             sm_token="sk-ant-test",
             sm_owner_id="12345",
         )
-        assert config["browser"]["enabled"] is True
+        assert config["browser"]["enabled"] is False
 
     def test_safe_mode_has_gateway(self):
         """Safe-mode config should include gateway settings."""

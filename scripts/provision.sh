@@ -1,25 +1,29 @@
 #!/bin/bash
 # =============================================================================
-# provision.sh — Single-phase droplet provisioning
+# provision.sh -- Single-phase droplet provisioning
 # =============================================================================
-# Replaces the phase1-critical.sh → phase2-background.sh background fork.
-# One script, sequential stages, no background fork. Ends with REBOOT.
+# Replaces the phase1-critical.sh -> phase2-background.sh background fork.
+# One script, sequential stages, no background fork. Does NOT reboot.
 #
 # Called by: bootstrap.sh (which is called by cloud-init runcmd)
+# Reboot: cloud-init power_state module triggers reboot AFTER all runcmd
+#         entries complete. Gated on provision-complete marker.
+#
+# Critical stages (1-3, 7) set build-failed on failure, which prevents
+# provision-complete from being written and thus prevents reboot. The
+# droplet stays up for SSH debugging.
 #
 # Stages:
-#   1. Parse config + install Node/jq + start API server
-#   2. Install OpenClaw (npm)
-#   3. Create user + workspace + gateway token
+#   1. Parse config + install Node/jq + start API server  [CRITICAL]
+#   2. Install OpenClaw (npm)                              [CRITICAL]
+#   3. Create user + workspace + gateway token             [CRITICAL]
 #   4. Install desktop packages (apt)
 #   5. Install developer tools (apt)
 #   6. Install Chrome, pip packages & helpers
-#   7. Configure desktop + apps + build config + enable services
-#   8. REBOOT
+#   7. Configure desktop + apps + build config + enable    [CRITICAL]
+#   8. Gate completion marker — exit (cloud-init reboots)
 #
-# After reboot: systemd starts enabled services → health check → E2E
-# Reboot is REQUIRED: packages need kernel modules, systemd needs
-# daemon-reload, avoids weird state from halfway-installed packages.
+# After reboot: systemd starts enabled services -> health check -> E2E
 # =============================================================================
 
 set -o pipefail
@@ -35,6 +39,11 @@ LOG="/var/log/provision.log"
 START=$(date +%s)
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [provision] $*" | tee -a "$LOG"; }
+
+# Clear stale failure marker from previous runs (allows manual re-run on
+# failed droplets without requiring cleanup: just re-run provision.sh).
+mkdir -p /var/lib/init-status
+rm -f /var/lib/init-status/build-failed
 
 # Source permission utilities
 [ -f /usr/local/sbin/lib-permissions.sh ] && source /usr/local/sbin/lib-permissions.sh
@@ -97,7 +106,7 @@ if tg_owner:
 FALLBACK_PY
 fi
 
-source /etc/habitat-parsed.env
+set -a; source /etc/habitat-parsed.env; set +a
 
 # Install Node (parallel download started in bootcmd)
 log "Installing Node.js..."
@@ -110,6 +119,18 @@ else
   apt-get update -qq && apt-get install -y nodejs npm >> "$LOG" 2>&1
 fi
 apt-get install -y jq >> "$LOG" 2>&1 || true
+
+# Remove ancient system nodejs (Ubuntu 22.04 ships v12) to prevent PATH shadowing.
+# Our Node 22 lives in /usr/local/bin; /usr/bin/node from apt shadows it when PATH
+# has /usr/bin first. Belt-and-suspenders: service units also set PATH=/usr/local/bin first.
+apt-get remove -y nodejs 2>/dev/null || true
+
+# Verify critical: Node binary must exist for npm/OpenClaw installation.
+# Without Node, stages 2+ are all broken.
+if ! command -v node &>/dev/null; then
+  log "FATAL: Node.js installation failed — node binary not found"
+  touch /var/lib/init-status/build-failed
+fi
 
 # Start API server early so iOS Shortcut can track provisioning stages
 if [ ! -f /etc/systemd/system/api-server.service ]; then
@@ -146,6 +167,13 @@ $S 2 "installing-openclaw"
 log "Stage 2: Installing OpenClaw..."
 
 npm install -g openclaw@latest >> "$LOG" 2>&1
+
+# Verify critical: OpenClaw binary must exist for post-boot services.
+# Safe mode itself needs the openclaw binary — it cannot recover from this.
+if ! command -v openclaw &>/dev/null; then
+  log "FATAL: OpenClaw installation failed — openclaw binary not found"
+  touch /var/lib/init-status/build-failed
+fi
 
 # =============================================================================
 # Stage 3: Create user + workspace
@@ -191,6 +219,13 @@ chmod 700 "$H/.openclaw"
 chmod 600 "$H/.openclaw/gateway-token.txt" "$H/.openclaw/.env"
 ensure_exec_approvals "$H"
 
+# Verify critical: bot user must exist for all downstream operations.
+# Services, config, and workspace all depend on this user.
+if ! id "$USERNAME" &>/dev/null; then
+  log "FATAL: User creation failed — $USERNAME does not exist"
+  touch /var/lib/init-status/build-failed
+fi
+
 # =============================================================================
 # Stage 4: Install desktop packages (apt)
 # =============================================================================
@@ -228,6 +263,14 @@ DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-instal
   thunderbird pandoc scrot flameshot qpdf htop ncdu bc wget xz-utils \
   rclone fuse3 khal vdirsyncer unattended-upgrades \
   >> "$LOG" 2>&1
+
+# =============================================================================
+# Stage 5b: Install Docker (if container isolation is configured)
+# =============================================================================
+# install-docker.sh handles needs_docker gating internally
+log "Stage 5b: Docker install (if container isolation configured)..."
+bash /usr/local/sbin/install-docker.sh >> "$LOG" 2>&1 \
+  || log "Stage 5b: Docker install skipped or failed (non-fatal for session-only habitats)"
 
 # =============================================================================
 # Stage 6: Install Chrome, pip packages & helper scripts
@@ -474,26 +517,40 @@ else
   chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}" 2>/dev/null || true
 fi
 
-# Mark provisioning complete (before reboot)
-touch /var/lib/init-status/provision-complete
+# Enable post-boot health check (runs after reboot to verify services)
+systemctl enable post-boot-check.service 2>/dev/null || true
+
 touch /var/lib/init-status/needs-post-boot-check
 
-ELAPSED=$(( $(date +%s) - START ))
-log "Provisioning complete in ${ELAPSED}s — rebooting"
-
-# =============================================================================
-# Stage 8: REBOOT
-# =============================================================================
-# Reboot is REQUIRED:
-# - Packages need kernel modules loaded (xrdp, chrome sandbox)
-# - systemd needs clean daemon-reload after new unit files
-# - Avoids weird state from halfway-installed packages
-# - All services are enabled and will start automatically on boot
-
+# Gate the provision-complete marker on no critical failures.
+# Critical stages set build-failed on failure:
+#   Stage 1: Node.js binary    (required for npm/OpenClaw)
+#   Stage 2: OpenClaw binary   (required for post-boot services + safe mode)
+#   Stage 3: Bot user          (required for service startup + config ownership)
+#   Stage 7: build-full-config (required for valid OpenClaw config)
+# Stages 4-6 are non-critical — OpenClaw boots without desktop/tools/extras
+# and safe mode can recover from those missing packages.
+# Without this marker, cloud-init power_state condition fails → no reboot →
+# droplet stays up for SSH debugging.
 if [ -f /var/lib/init-status/build-failed ]; then
-  log "!!! BUILD FAILED — rebooting anyway but services will not start correctly !!!"
+  ELAPSED=$(( $(date +%s) - START ))
+  log "Provisioning FAILED in ${ELAPSED}s — build-failed marker present, skipping provision-complete"
+  log "Droplet will NOT reboot (power_state condition will fail). SSH in to debug."
+  log "NOTE: self-destruct timer (if configured) is still active from this boot."
+  $S 8 "provision-failed"
+  exit 1
 fi
 
-$S 8 "rebooting"
-sleep 2
-reboot
+touch /var/lib/init-status/provision-complete
+
+ELAPSED=$(( $(date +%s) - START ))
+log "Provisioning complete in ${ELAPSED}s"
+
+# =============================================================================
+# NOTE: provision.sh does NOT reboot. Cloud-init's power_state module owns
+# the reboot and triggers it AFTER all runcmd entries (schedule-destruct,
+# rename-bots, etc.) have completed. This eliminates the race condition where
+# runcmd entries execute during shutdown.
+# =============================================================================
+
+$S 8 "waiting-for-reboot"

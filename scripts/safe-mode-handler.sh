@@ -16,7 +16,7 @@
 #   2 = critical failure, gave up
 # =============================================================================
 
-set -o pipefail
+set -euo pipefail
 
 # Source shared libraries
 for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
@@ -36,12 +36,46 @@ hc_init_logging "${GROUP:-}"
 hc_load_environment
 
 RUN_MODE="${RUN_MODE:-standalone}"
-MAX_RECOVERY_ATTEMPTS=2
+# Unified threshold — same env var as openclaw-state.sh (default: 3)
+MAX_RECOVERY_ATTEMPTS=${OPENCLAW_MAX_RECOVERY:-3}
 
 log "============================================================"
 log "========== SAFE MODE HANDLER STARTING =========="
 log "============================================================"
 log "RUN_ID=$HC_RUN_ID | MODE=$RUN_MODE | GROUP=${GROUP:-none}"
+
+# --- EXIT trap: re-arm .path watcher ---
+# The .path unit deactivates after triggering (Type=oneshot). Without re-arming,
+# it silently stops watching and future failures go undetected. (Bug: 2026-03-04)
+_handler_exit() {
+  local path_unit="openclaw-safeguard${GROUP:+-$GROUP}.path"
+  systemctl restart "$path_unit" 2>/dev/null || \
+    systemctl start "$path_unit" 2>/dev/null || \
+    log "WARNING: Could not re-arm $path_unit"
+}
+trap _handler_exit EXIT
+
+# --- Critical failure notification ---
+# Single function for all failure paths. Includes journal errors so the user
+# knows what's actually wrong without SSHing in.
+_notify_critical_failure() {
+  local reason="${1:-unknown}"
+  local error_lines
+  error_lines=$(hc_service_logs "${GROUP:-}" 20 2>/dev/null \
+    | grep -v "^$" | tail -8 || echo "(could not read logs)")
+
+  { notify_find_token && notify_send_message \
+"🔴 <b>[${HC_HABITAT_NAME}] CRITICAL</b>
+
+Recovery failed: ${reason}.
+Bot is OFFLINE.
+
+<b>Last errors:</b>
+<code>${error_lines}</code>
+
+SSH: <code>ssh bot@$(curl -sf --max-time 3 ifconfig.me 2>/dev/null || hostname)</code>"; } \
+    || log "WARNING: Failed to send critical notification"
+}
 
 # --- Recovery attempt tracking ---
 
@@ -56,13 +90,23 @@ if [ "$ALREADY_IN_SAFE_MODE" = "true" ] && [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECO
   touch /var/lib/init-status/gateway-failed${GROUP:+-$GROUP}
   set_stage 13
 
-  # Try to notify even in critical state
-  notify_find_token && notify_send_message "🔴 <b>[${HC_HABITAT_NAME}] CRITICAL FAILURE</b>
+  # KILL the service/container — don't leave a safe-mode bot running
+  # that will respond to every message indefinitely
+  log "Stopping service to prevent safe-mode bot message flood..."
+  hc_stop_service "${GROUP:-}" >> "$HC_LOG" 2>&1 || true
 
-Gateway failed after $MAX_RECOVERY_ATTEMPTS recovery attempts.
-Bot is OFFLINE.
+  # Remove unhealthy marker to break .path re-trigger loop
+  # (gateway-failed marker records the terminal state)
+  rm -f "$HC_UNHEALTHY_MARKER"
 
-Check logs: <code>journalctl -u $HC_SERVICE_NAME -n 50</code>"
+  # Only notify once — check for lockout marker
+  lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
+  if [ ! -f "$lockout_file" ]; then
+    _notify_critical_failure "after $MAX_RECOVERY_ATTEMPTS recovery attempts"
+    touch "$lockout_file"
+  else
+    log "CRITICAL FAILURE notification already sent — suppressing duplicate"
+  fi
 
   exit 2
 fi
@@ -90,31 +134,26 @@ run_recovery_attempt() {
 
   if type run_full_recovery_escalation &>/dev/null; then
     log "Attempting full recovery escalation..."
-    local output exit_code
-    output=$(run_full_recovery_escalation 2>&1)
-    exit_code=$?
-
-    if [ $exit_code -eq 0 ]; then
+    local output
+    # set +e around command substitution: non-zero exit must not abort the script
+    if output=$(run_full_recovery_escalation 2>&1); then
       log "Recovery succeeded"
       log "Recovery output: $output"
       return 0
     else
-      log "Recovery FAILED (exit $exit_code)"
+      log "Recovery FAILED (exit $?)"
       log "Recovery output: $output"
     fi
   fi
 
   if type run_smart_recovery &>/dev/null; then
     log "Attempting smart recovery..."
-    local output exit_code
-    output=$(run_smart_recovery 2>&1)
-    exit_code=$?
-
-    if [ $exit_code -eq 0 ]; then
+    local output
+    if output=$(run_smart_recovery 2>&1); then
       log "Recovery succeeded"
       return 0
     else
-      log "Recovery FAILED (exit $exit_code): $output"
+      log "Recovery FAILED (exit $?): $output"
     fi
   fi
 
@@ -171,11 +210,11 @@ echo "$((RECOVERY_ATTEMPTS + 1))" > "$HC_RECOVERY_COUNTER"
 
 if [ "$ALREADY_IN_SAFE_MODE" != "true" ]; then
   log "========== SENDING SAFE MODE WARNING =========="
-  notify_find_token && notify_send_message "⚠️ <b>[${HC_HABITAT_NAME}] Entering Safe Mode</b>
+  { notify_find_token && notify_send_message "⚠️ <b>[${HC_HABITAT_NAME}] Entering Safe Mode</b>
 
 Health check failed. Recovering with backup configuration.
 
-SafeModeBot will follow up shortly with diagnostics."
+SafeModeBot will follow up shortly with diagnostics."; } || log "WARNING: Failed to send safe mode notification"
   log "========== SAFE MODE WARNING SENT =========="
 fi
 
@@ -219,10 +258,9 @@ format_diagnostics() {
 }
 
 generate_boot_report() {
-  # Capture the actual errors from OpenClaw service logs (journalctl)
-  local service_name="openclaw${GROUP:+-$GROUP}"
+  # Capture the actual errors from OpenClaw service logs via hc_service_logs
   local service_errors
-  service_errors=$(journalctl -u "$service_name" --no-pager -n 100 --since "5 min ago" 2>/dev/null \
+  service_errors=$(hc_service_logs "${GROUP:-}" 100 2>/dev/null \
     | grep -iE "401|403|error|failed|authentication|unauthorized|invalid.*key|No API key" \
     | grep -v "rename-bots" \
     | head -15 || echo "Could not read service logs")
@@ -241,7 +279,7 @@ ${service_errors:-No service errors captured}
 \`\`\`
 
 ## Recovery Actions
-$(grep -E "Recovery|recovery|SAFE MODE|token|API|provider|model" "$HC_LOG" 2>/dev/null | tail -20)
+$(grep -E "Recovery|recovery|SAFE MODE|token|API|provider|model" "$HC_LOG" 2>/dev/null | tail -20 || true)
 
 ## Diagnostics
 $(format_diagnostics)
@@ -290,41 +328,39 @@ generate_boot_report
 
 # --- Restart service ---
 
-restart_and_verify() {
-  local target_service="$HC_SERVICE_NAME"
+# Restore auth-profiles from golden provisioned copy.
+# Called between gateway stop and start to prevent the gateway's SIGTERM
+# persistence handler from clobbering OAuth tokens and other credentials.
+_restore_auth_profiles() {
+  local home="${H:-/home/${HC_USERNAME:-bot}}"
+  local live="$home/.openclaw/agents/main/agent/auth-profiles.json"
+  local golden="$home/.openclaw/agents/main/agent/auth-profiles.provisioned.json"
 
-  log "Restarting $target_service with safe mode config..."
-
-  if [ -n "${GROUP:-}" ] && [ "$ISOLATION" = "container" ]; then
-    docker restart "openclaw-${GROUP}" 2>/dev/null || true
+  if [ -f "$golden" ]; then
+    cp "$golden" "$live"
+    chmod 600 "$live"
+    [ -n "${HC_USERNAME:-}" ] && chown "${HC_USERNAME}:${HC_USERNAME}" "$live" 2>/dev/null
+    log "Restored auth-profiles.json from provisioned golden copy"
   else
-    systemctl restart "${target_service}.service" 2>/dev/null || systemctl restart "$target_service" 2>/dev/null || true
+    log "WARNING: No golden auth-profiles.provisioned.json found — live copy may be stale"
   fi
-  sleep 5
+}
 
-  for attempt in 1 2 3; do
-    local is_active=false
+restart_and_verify() {
+  # Use stop → modify → start pattern to prevent the gateway's SIGTERM
+  # handler from clobbering auth-profiles.json (and config). The gateway
+  # persists in-memory state on shutdown, which can drop OAuth tokens
+  # that weren't loaded by the safe-mode config.
+  if hc_stop_modify_start "${GROUP:-}" _restore_auth_profiles; then
+    log "$(_hc_service_name "${GROUP:-}") is serving HTTP"
+    /usr/local/bin/rename-bots.sh >> "$HC_LOG" 2>&1 || true
+    return 0
+  fi
 
-    if [ -n "${GROUP:-}" ] && [ "$ISOLATION" = "container" ]; then
-      docker inspect --format='{{.State.Running}}' "openclaw-${GROUP}" 2>/dev/null | grep -q 'true' && is_active=true
-    else
-      systemctl is-active --quiet "${target_service}.service" 2>/dev/null && is_active=true
-      systemctl is-active --quiet "$target_service" 2>/dev/null && is_active=true
-    fi
-
-    if [ "$is_active" = "true" ]; then
-      log "$target_service started (attempt $attempt)"
-      /usr/local/bin/rename-bots.sh >> "$HC_LOG" 2>&1 || true
-      return 0
-    fi
-
-    log "$target_service not active, retry $attempt/3..."
-    systemctl restart "${target_service}.service" 2>/dev/null || systemctl restart "$target_service" 2>/dev/null || true
-    sleep 5
-  done
-
-  log "CRITICAL: $target_service failed to start"
+  log "CRITICAL: $(_hc_service_name "${GROUP:-}") failed to respond"
   touch "/var/lib/init-status/gateway-failed${GROUP:+-$GROUP}"
+  # Remove unhealthy marker to prevent .path unit re-trigger loop
+  rm -f "$HC_UNHEALTHY_MARKER"
   set_stage 13
   return 1
 }
@@ -334,7 +370,7 @@ date +%s > /var/lib/init-status/recently-recovered${GROUP:+-$GROUP}
 
 if restart_and_verify; then
   # Trigger SafeModeBot intro (shared implementation in lib-notify.sh)
-  notify_send_safe_mode_intro
+  notify_send_safe_mode_intro || log "WARNING: Failed to send safe mode intro"
 
   # Mark boot as complete (safe mode IS a completed boot, just degraded)
   touch /var/lib/init-status/setup-complete
@@ -346,5 +382,13 @@ if restart_and_verify; then
   exit 0
 else
   log "========== SAFE MODE HANDLER FAILED — SERVICE WON'T START =========="
+  # Kill the service to prevent a half-alive bot from spamming
+  log "Stopping failed service..."
+  hc_stop_service "${GROUP:-}" >> "$HC_LOG" 2>&1 || true
+  lockout_file="/var/lib/init-status/critical-notified${GROUP:+-$GROUP}"
+  if [ ! -f "$lockout_file" ]; then
+    _notify_critical_failure "service won't start after config swap"
+    touch "$lockout_file"
+  fi
   exit 2
 fi

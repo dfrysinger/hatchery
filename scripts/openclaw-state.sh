@@ -16,9 +16,9 @@
 #   openclaw-state init                        Initialize state file
 #   openclaw-state history [--limit N]         Show recent transitions
 #
-# State file: /var/lib/openclaw/state.json
-# Lock file:  /var/lib/openclaw/state.lock (flock-based)
-# Event log:  /var/log/openclaw-state-events.jsonl
+# State file: /var/lib/openclaw/state.json (or state-{GROUP}.json)
+# Lock file:  /var/lib/openclaw/state.lock (or state-{GROUP}.lock)
+# Event log:  /var/lib/openclaw/events.jsonl (or events-{GROUP}.jsonl)
 #
 # Dependencies: jq, flock, bash 4+
 # =============================================================================

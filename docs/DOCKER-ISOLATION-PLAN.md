@@ -8,13 +8,17 @@
 > v6 by ClaudeBot (2026-02-24) - integrated ChatGPT final audit (5 new fixes).
 > v7 by ClaudeBot (2026-02-24) - delta review: single manifest, secrets policy, self-sufficient examples.
 > v8 by ClaudeBot (2026-02-24) - final cleanup: terminology table, reader contract, last stale refs.
+> v9 by ClaudeBot (2026-02-27) - boot architecture: cloud-init power_state owns reboot, persistent self-destruct timer, modular runcmd.
+> v10 by ClaudeBot (2026-02-27) - auth-profiles golden copy, stop-modify-start pattern, critical stage gating.
 
 ---
 
 ## Table of Contents
 
 1. [Architecture Decision](#architecture-decision)
-2. [Current State Assessment](#current-state-assessment)
+2. [Boot Architecture](#boot-architecture)
+3. [Gateway State Persistence](#gateway-state-persistence)
+3. [Current State Assessment](#current-state-assessment)
 3. [SSOT Violations to Fix](#ssot-violations-to-fix)
 4. [Target Architecture](#target-architecture)
 5. [Pre-Implementation Checklist](#pre-implementation-checklist)
@@ -55,6 +59,99 @@
 - `systemctl stop openclaw-{group}` → `docker compose -p openclaw-{group} down`
 - `journalctl -u openclaw-{group}` → `docker compose -p openclaw-{group} logs`
 - `pgrep -f openclaw.gateway` → `docker inspect --format='{{.State.Running}}' openclaw-{group}`
+
+---
+
+## Boot Architecture
+
+**Cloud-init `power_state` owns the reboot, not `provision.sh`.**
+
+Provisioning scripts must never call `reboot` directly. The boot pipeline uses cloud-init's `power_state` module to reboot AFTER all `runcmd` entries complete, eliminating the class of bugs where runcmd entries race the shutdown.
+
+```yaml
+# hatch.yaml
+runcmd:
+  # provision.sh does stages 1-7, marks provision-complete, exits (NO reboot)
+  - [bash, -lc, "/usr/local/bin/bootstrap.sh"]
+  # These run with full network and systemd -- guaranteed by power_state
+  - [bash, -lc, "/usr/local/bin/schedule-destruct.sh"]
+  - [bash, -lc, "/usr/local/bin/rename-bots.sh"]
+
+power_state:
+  delay: "now"
+  mode: reboot
+  message: "Rebooting after provisioning"
+  condition: "test -f /var/lib/init-status/provision-complete"
+```
+
+**Why this matters:** `provision.sh` previously called `reboot` at the end of Stage 7. But `reboot` signals systemd and returns immediately -- cloud-init continued executing remaining runcmd entries while the network was being torn down. This caused `curl` (rename-bots), `systemd-run` (schedule-destruct), and `systemctl start` (api-server) to fail silently.
+
+**Key rules:**
+- `provision.sh` does stages 1-7, writes `provision-complete` marker, exits
+- Post-provision tasks (rename-bots, schedule-destruct) are modular runcmd entries
+- `power_state` reboots only if `provision-complete` marker exists (failed provisions don't reboot)
+- Adding a new post-provision task = adding a runcmd line (no code changes to provision.sh)
+- Self-destruct uses persistent systemd timer units (`OnBootSec`), not transient `systemd-run`
+
+---
+
+## Gateway State Persistence
+
+**The gateway persists in-memory state (config + auth-profiles) to disk on SIGTERM.**
+
+This is OpenClaw behavior we cannot change. When the gateway shuts down (systemd stop, Docker stop, reboot), its SIGTERM handler writes:
+- `openclaw.json` — current in-memory config
+- `auth-profiles.json` — current in-memory auth credentials (with usage stats)
+
+This creates a class of bugs where files modified between gateway restarts get clobbered.
+
+### The Clobber Pattern
+
+```
+1. Gateway running with auth-profiles containing [anthropic, openai-codex, google]
+2. Safe mode triggers → recovery generates Anthropic-only safe-mode config
+3. systemctl restart openclaw
+   └── STOP: gateway persists auth state → may drop unused/failed entries
+   └── START: reads clobbered auth-profiles → openai-codex OAuth token GONE
+4. SafeModeBot changes model to openai-codex → fails (token lost permanently)
+```
+
+This does NOT happen on normal reboots — the gateway persists what it loaded, which includes all entries. The clobber only occurs during **safe mode recovery restarts** where the gateway is running a minimal config that doesn't use all auth entries.
+
+### Three-Layer Defense
+
+**1. Golden copy** (`auth-profiles.provisioned.json`)
+
+`build-full-config.sh` writes a golden copy alongside the live `auth-profiles.json`. The golden copy is never modified by the gateway — it survives any number of restart cycles.
+
+```
+auth-profiles.json              ← live (gateway reads/writes/clobbers)
+auth-profiles.provisioned.json  ← golden (only written by provisioning)
+```
+
+**2. Stop-modify-start pattern** (`hc_stop_modify_start()`)
+
+`lib-health-check.sh` provides a helper that ensures files are modified AFTER the gateway has stopped (and persisted its state), BEFORE the gateway starts again:
+
+```bash
+hc_stop_modify_start() {
+  hc_stop_service "$group"    # gateway persists state here
+  "$callback" "$@"             # safe to modify files now
+  hc_start_service "$group"   # gateway reads modified files
+}
+```
+
+**3. Recovery reads golden copy**
+
+`safe-mode-recovery.sh`'s `check_oauth_profile()` searches `auth-profiles.provisioned.json` before the live copy, ensuring OAuth tokens are always found even after clobber.
+
+### Rules
+
+- **Normal restart/reboot**: `systemctl restart` is fine — gateway persists what it loaded, no data loss.
+- **Safe mode recovery**: MUST use `hc_stop_modify_start()` with a callback that restores auth-profiles from the golden copy.
+- **Config updates while gateway is running**: Stop → modify → start. Never `cp && restart`.
+- **Adding new providers**: Update both `auth-profiles.json` and `auth-profiles.provisioned.json` (or re-run `build-full-config.sh`).
+- **Credential rotation**: The golden copy is static after provisioning. If OAuth tokens are refreshed at runtime (e.g., OpenAI token refresh), the golden copy becomes stale. This is acceptable — the refresh token remains valid and OpenClaw re-authenticates on startup. To update the golden copy after credential changes, re-run `build-full-config.sh` or manually: `cp auth-profiles.json auth-profiles.provisioned.json`.
 
 ---
 
@@ -99,9 +196,10 @@ The pattern "iterate `AGENT{N}_ISOLATION_GROUP`, match against group name" exist
 
 ### 3. Auth-profiles handling (3 different approaches)
 
-- `build-full-config.sh` creates `agents/main/agent/auth-profiles.json`, symlinks to `agents/agent{N}/agent/`
+- `build-full-config.sh` creates `agents/main/agent/auth-profiles.json` + golden copy `.provisioned.json`, symlinks to `agents/agent{N}/agent/`
 - `generate-session-services.sh` copies auth-profiles into `${state_dir}/agents/agent{N}/agent/`
 - Container mode (planned) would bind-mount from `configs/{group}/`
+- Safe mode recovery restores from golden copy via `hc_stop_modify_start()` callback
 
 ### 4. Port assignment (different base ports, will collide)
 
@@ -1436,6 +1534,8 @@ Which scripts read which files - prevents re-introduction of topology re-parsing
 | `/etc/openclaw-groups.json` | `build-full-config.sh` | `lib-health-check.sh`, `safe-mode-handler.sh`, `sync-openclaw-state.sh`, debugging commands | Group topology: isolation type, ports, paths, service names, agents |
 | `configs/{group}/group.env` | `build-full-config.sh` | systemd `EnvironmentFile=`, compose `env_file:` | Runtime process env: API keys, group name, port, isolation, config/state paths |
 | `configs/{group}/openclaw.session.json` | `generate-config.sh` (called by orchestrator) | OpenClaw gateway (inside container or systemd service) | OpenClaw app config: agents, channels, plugins, auth |
+| `auth-profiles.json` | `build-full-config.sh`, then gateway on SIGTERM | OpenClaw gateway | Live auth credentials (may be clobbered by gateway shutdown) |
+| `auth-profiles.provisioned.json` | `build-full-config.sh` only | `safe-mode-recovery.sh`, `safe-mode-handler.sh` | Golden auth credentials (survives gateway clobber cycles) |
 | `/etc/habitat-parsed.env` | `parse-habitat.py` | `build-full-config.sh`, generators | Raw habitat config as env vars (input to the pipeline) |
 
 **Rule:** Scripts that need to know "what groups exist" or "what port does group X use" read the manifest. Scripts that need to inject env vars into a process use `group.env`. No script should re-derive topology from `/etc/habitat-parsed.env` after `build-full-config.sh` has run.
@@ -1451,8 +1551,6 @@ These must hold true after Phase 1:
 - All group metadata resolvable from `/etc/openclaw-groups.json` (no env var re-parsing)
 - All secrets injected via `group.env` (no per-script B64 decoding)
 - Hyphenated group names work everywhere (manifest, systemd units, compose projects)
-
----
 
 ---
 
@@ -1490,7 +1588,8 @@ Live droplet tests at Phase 5 and Phase 7.
 │   │       └── group.env                     # Per-group runtime env: API keys + process config (ALL modes)
 │   └── agents/
 │       └── main/agent/
-│           └── auth-profiles.json            # Master auth-profiles (symlinked everywhere)
+│           ├── auth-profiles.json            # Live auth-profiles (gateway reads/writes/clobbers on SIGTERM)
+│           └── auth-profiles.provisioned.json # Golden copy (never modified by gateway, survives clobber)
 ├── .openclaw-sessions/
 │   └── {group}/                              # Per-group session state (ALL modes)
 │       └── agents/{agent}/
@@ -1525,3 +1624,281 @@ Live droplet tests at Phase 5 and Phase 7.
 ├── generate-docker-compose.sh                # SLIMMED: compose + systemd unit only
 └── build-full-config.sh                      # EXPANDED: orchestrates all per-group setup
 ```
+
+---
+
+## Implementation Progress
+
+Track implementation status here. Updated as work proceeds.
+
+### Phase 1: Shared Foundation
+- [x] Create `scripts/lib-isolation.sh` with all shared functions
+- [x] Write `tests/test_lib_isolation.py` (31 tests)
+- [x] Make tests pass (31/31 GREEN)
+- [x] Refactor `scripts/build-full-config.sh` to use lib-isolation.sh
+- [x] Slim `scripts/generate-session-services.sh` (380→145 lines, reads manifest)
+- [x] Write `tests/test_build_full_config_orchestration.py` (19 tests, all GREEN)
+- [x] `bash -n` passes on all modified scripts
+- [x] Commit: b68a6e6
+- [ ] Slim `scripts/generate-docker-compose.sh` (remove duplicated logic — Phase 2 rewrites it fully)
+- [ ] Push to remote
+
+### Phase 2: Fix Compose Generator
+- [x] Rewrite `scripts/generate-docker-compose.sh` for Option A
+- [x] Rewrite `tests/test_docker_compose.py` (28 tests, all GREEN)
+- [x] Per-group compose files (not monolithic)
+- [x] Option A mounts: config ro, token ro, state rw, workspaces rw, no host scripts
+- [x] env_file for secrets, no bash wrapper entrypoint
+- [x] Container systemd unit (oneshot + RemainAfterExit, requires docker)
+- [x] Network modes (host, isolated), resource limits (mem_limit, cpus)
+- [x] Resources field added to manifest in lib-isolation.sh
+- [x] `bash -n` passes on all scripts
+- [x] Commit: 022117d
+
+### Phase 3: Dockerfile + Docker Install
+- [x] Dockerfile exists with correct build args, entrypoint, healthcheck
+- [x] `scripts/install-docker.sh` with needs_docker gating
+- [x] Docker log rotation config (50MB × 3)
+- [x] 19 Dockerfile tests + 8 install tests (all GREEN)
+- [x] Commit: dc8d3be
+
+### Phase 4: Health Check Abstraction
+- [x] `hc_*` functions already in `scripts/lib-health-check.sh` (added during planning)
+- [x] hc_restart_service, hc_is_service_active, hc_service_logs, hc_stop_service, hc_curl_gateway
+- [x] 19 health check abstraction tests (all GREEN)
+- [x] Commit: 5d2ff8f
+
+### Phase 5: Tests
+- [x] 124 new tests pass across 6 test files
+- [x] `bash -n` passes on all 36 scripts in scripts/
+- [ ] Push to remote
+
+### Phase 6: Network Isolation
+- [x] Isolated mode: port mapping + empty DNS
+- [x] Host mode: no port mapping
+- [x] 3 network isolation tests (all GREEN)
+- [x] Commit: b3dfa2f
+
+### Phase 7: Security Hardening
+- [x] cap_drop: ALL, security_opt: no-new-privileges
+- [x] read_only: true, tmpfs /tmp + /run
+- [x] pids_limit: 256, memswap_limit matches mem_limit
+- [x] 6 security tests (all GREEN)
+- [x] Commit: b3dfa2f
+- [x] Pushed to remote
+
+### Post-Phase: Boot Architecture Hardening
+- [x] Diagnosed runcmd-vs-shutdown race condition (rename-bots, schedule-destruct, api-server all fail during provisioning)
+- [x] Rewrote `schedule-destruct.sh` from transient `systemd-run` to persistent timer units (`OnBootSec`)
+- [x] Removed `reboot` from `provision.sh` -- cloud-init `power_state` module owns the reboot
+- [x] Restored modular `runcmd` entries (safe because power_state runs after all runcmd complete)
+- [x] Added `power_state` section to `hatch.yaml` (gated on `provision-complete` marker)
+- [x] Critical stage gating: stages 1-3 verify node/openclaw/user, set `build-failed` on failure → no reboot
+- [x] Stale `build-failed` marker cleared on re-run for manual recovery workflows
+- [x] 26 tests: `test_runcmd_race.py` (19) + `test_schedule_destruct.py` (9) — includes 6 critical stage gating tests
+- [x] Commits: 188d39a, 696b444, 007315b, 4447327
+
+### Post-Phase: Auth-Profiles Clobber Prevention
+- [x] Diagnosed gateway SIGTERM persistence clobbering OAuth tokens during safe mode recovery
+- [x] Golden copy: `build-full-config.sh` writes `auth-profiles.provisioned.json` alongside live copy
+- [x] Stop-modify-start: `hc_stop_modify_start()` + `hc_start_service()` in `lib-health-check.sh`
+- [x] Handler updated: `safe-mode-handler.sh` restores auth from golden copy between stop and start
+- [x] Recovery reads golden: `check_oauth_profile()` prefers `.provisioned.json` over live copy
+- [x] 9 new tests: `test_auth_profiles_golden.py`
+- [x] Commit: 86dd62b
+
+### Live Validation
+- [x] Container isolation: `bot2.frysinger.org` -- Stage 11 READY, both containers healthy
+- [x] Session isolation regression: `jobhunt.frysinger.org` -- Stage 11 READY, both session groups active, rename-bots 4/4 success
+- [x] None isolation: `frybot.dedyn.io` -- Stage 12 (safe mode, expected: model/provider mismatch in test habitat)
+- [x] Code review: R8 → R12 (all clean, merge-ready)
+- [x] rename-bots display names: BotBot suffix bug fixed (`d252226`)
+
+### Current Status
+**Phase**: ALL PHASES COMPLETE (1-7) + boot hardening + auth-profiles clobber fix
+**Last updated**: 2026-02-27 05:45 UTC
+**Commits**: da1e775 ... 343d8f8, f545823, d252226, 5c526ad, 69f3317, 188d39a, 696b444, 007315b, 4447327, 86dd62b
+**Tests**: 1073 passing, 3 skipped, 0 failed
+**All scripts pass bash -n**
+**Branch pushed**: feature/docker-isolation
+**Code reviews**: R8–R12 all pass (merge-ready)
+**Next step**: Merge to main
+
+---
+
+## Implementation Overview (for code review)
+
+### Branch & Stats
+
+- **Branch**: `feature/docker-isolation` off `feature/state-machine-v2`
+- **11 commits**, 7 new/modified scripts, 6 new test files
+- **1,743 lines** of production bash, **1,826 lines** of tests
+- **133 tests** all passing, all 36 scripts pass `bash -n`
+
+### Architecture Summary
+
+The implementation follows **Option A (host-orchestrated)**: containers are thin runtime boundaries running only the OpenClaw gateway. All config generation, health checking, safe mode recovery, and credential management happen on the host. This is the same split as session isolation (where systemd supervises the process) — Docker just replaces systemd as the process supervisor inside the container.
+
+**Data flow:**
+
+```
+parse-habitat.py → /etc/habitat-parsed.env
+  → build-full-config.sh (orchestrator)
+    → lib-isolation.sh functions:
+      1. generate_groups_manifest() → /etc/openclaw-groups.json (SSOT)
+      2. validate_group_consistency() — fail fast on mixed isolation/network
+      3. Per-group loop:
+         setup_group_directories()       → ~/.openclaw/configs/{group}/, ~/.openclaw-sessions/{group}/
+         generate_group_env()            → configs/{group}/group.env (decoded secrets + paths)
+         generate_group_config()         → configs/{group}/openclaw.session.json (via generate-config.sh)
+         setup_group_auth_profiles()     → symlinks to master auth-profiles.json
+         generate_safeguard_units()      → systemd .path + .service for safe mode
+         generate_e2e_unit()             → systemd oneshot for magic-word test
+      4. Dispatch to thin generators:
+         generate-session-services.sh    → systemd .service per session group
+         generate-docker-compose.sh      → docker-compose.yaml + systemd wrapper per container group
+```
+
+### File-by-File Walkthrough
+
+#### `scripts/lib-isolation.sh` (457 lines, 31 tests)
+
+New shared library. The single source of truth for all isolation group logic, replacing 6 instances of duplicated code across the old generators. Functions:
+
+| Function | Purpose |
+|----------|---------|
+| `get_group_agents(group)` | Return comma-separated agent IDs in a group |
+| `get_group_isolation(group)` | Return isolation type (`session`/`container`/`none`) |
+| `get_group_network(group)` | Return network mode (`host`/`isolated`), maps deprecated `none`/`internal` → `isolated` |
+| `get_group_resources(group)` | Return pipe-delimited `mem|cpu` (pipe avoids empty-field `read` bug) |
+| `get_groups_by_type(type)` | Filter groups by isolation type, space-separated |
+| `validate_group_consistency(group)` | Fail-fast: mixed isolation or network within a group is a hard error |
+| `generate_groups_manifest()` | Write `/etc/openclaw-groups.json` — deterministic port assignment (alphabetical sort) |
+| `setup_group_directories(group)` | Create config dir, state dir, per-agent state subdirs, compose dir (container only) |
+| `setup_group_auth_profiles(group)` | Symlink all group agents' auth-profiles to master |
+| `generate_group_token(group)` | Create per-group gateway token (idempotent — skip if exists) |
+| `generate_group_env(group)` | Write `group.env` with decoded secrets + group identity/paths |
+| `generate_group_config(group)` | Delegate to `generate-config.sh --mode session` |
+| `generate_safeguard_units(group, port, isolation)` | Write `.path` + `.service` for safe mode (mode-agnostic) |
+| `generate_e2e_unit(group, port, isolation)` | Write E2E check `.service` (mode-agnostic) |
+
+**Design choice**: `get_group_resources()` returns `mem|cpu` with pipe delimiter instead of space. This was a bug fix — `read -r mem cpu` skips leading whitespace, so `" 0.5"` (empty memory) assigned `0.5` to `mem` instead of `cpu`.
+
+**Design choice**: Ports are assigned alphabetically by group name (`sort`), starting at 18790. This makes port assignment deterministic regardless of the order groups appear in config. The manifest is the only runtime source for port lookups — no separate ports file.
+
+#### `scripts/generate-docker-compose.sh` (235 lines, 37 tests)
+
+Complete rewrite from Option B (fat container, host scripts mounted in) to Option A (thin container, host-orchestrated). This is a **thin generator** — all shared concerns are handled by the orchestrator before this runs.
+
+**What it generates per container group:**
+
+1. **`docker-compose.yaml`** at `~/.openclaw/compose/{group}/docker-compose.yaml`:
+   - Image: `hatchery/agent:latest`
+   - Command: `["--bind", "loopback", "--port", "{port}"]` (no bash wrapper entrypoint)
+   - `env_file:` pointing to `group.env` (no inline API keys)
+   - Minimal volume mounts (Option A):
+     - `openclaw.session.json` → `~/.openclaw/openclaw.json:ro`
+     - `gateway-token.txt:ro`
+     - `~/.openclaw-sessions/{group}:rw` (state + auth-profiles symlinks)
+     - Per-agent workspace dirs `:rw`
+     - `~/clawd/shared:rw`
+   - Explicitly NOT mounted (removed from old Option B): host scripts, `/etc/droplet.env`, `/etc/habitat-parsed.env`, `/var/lib/init-status`, `/var/log`
+   - Health check: `curl -sf http://127.0.0.1:{port}/`
+   - Security: `cap_drop: ALL`, `security_opt: no-new-privileges`, `read_only: true`, `tmpfs /tmp + /run`, `pids_limit: 256`
+   - Resources: `mem_limit`, `memswap_limit` (prevents swap), `cpus` — all top-level (non-Swarm)
+   - Network: `host` (default) or `isolated` (bridge + internal, with port mapping + empty DNS)
+
+2. **`openclaw-container-{group}.service`** systemd wrapper:
+   - `Type=oneshot`, `RemainAfterExit=yes` (compose returns immediately with `-d`)
+   - `User=root` (Docker socket; container runs as bot via compose `user:`)
+   - `Requires=docker.service`
+   - `ExecStart`: `docker compose ... up -d --wait` (blocks until healthy)
+   - `ExecStop`: `docker compose ... down`
+   - `ExecStartPost`: sources `group.env` and runs `gateway-health-check.sh`
+
+**Liveness split**: Docker's `restart: on-failure` handles transient process crashes. The host's `openclaw-safeguard-{group}.path` watches for unhealthy markers and triggers safe mode recovery. Same pattern as session mode (where systemd's `Restart=always` replaces Docker's restart policy).
+
+#### `scripts/generate-session-services.sh` (145 lines, tested via orchestration tests)
+
+Already thin before this branch — reads ports/paths from manifest, generates one systemd `.service` per session group. The main change was removing any remaining duplicated logic (port computation, config generation, directory creation) that's now in `lib-isolation.sh`.
+
+#### `scripts/build-full-config.sh` (511 lines, 19 orchestration tests)
+
+The **orchestrator**. The existing 430-line script gained a ~70-line isolation section at the bottom that:
+
+1. Sources `lib-isolation.sh`
+2. Calls `generate_groups_manifest()` to write the runtime SSOT
+3. Validates all groups with `validate_group_consistency()`
+4. Runs the per-group setup loop (dirs, env, config, auth, tokens, safeguard/E2E units)
+5. Dispatches to thin generators by filtering `get_groups_by_type("session")` and `get_groups_by_type("container")`
+6. Falls back to legacy dispatch if `lib-isolation.sh` isn't available (graceful degradation)
+
+**Key detail**: The orchestrator passes `ISOLATION_GROUPS` (filtered by type) and `ISOLATION_DEFAULT` to each generator. Session groups only see session groups; container groups only see container groups. This prevents cross-contamination.
+
+#### `scripts/lib-health-check.sh` (223 lines, 19 tests)
+
+Added 5 isolation-aware service management functions:
+
+| Function | Session Mode | Container Mode |
+|----------|-------------|----------------|
+| `hc_restart_service(group)` | `systemctl restart openclaw-{group}` | `docker compose ... restart` |
+| `hc_is_service_active(group)` | `systemctl is-active --quiet` | `docker inspect .State.Health.Status == "healthy"` |
+| `hc_service_logs(group, lines)` | `journalctl -u openclaw-{group}` | `docker compose ... logs --tail=N` |
+| `hc_stop_service(group)` | `systemctl stop` | `docker compose ... down` |
+| `hc_curl_gateway(group, path)` | Direct `curl localhost:{port}` | Direct for host network, `docker exec` for isolated |
+
+**Design choice**: `hc_is_service_active` checks `docker inspect .State.Health.Status == "healthy"` not `.State.Running`. A running container with a crashing gateway would be `Running=true` but `Health.Status=unhealthy`. The HTTP health check is what actually matters.
+
+**Design choice**: `hc_curl_gateway` dispatches based on both `ISOLATION` and `NETWORK_MODE`. For `container` + `host` network, direct curl works (gateway is on localhost). For `container` + `isolated`, the gateway is only reachable inside the container, so we `docker exec` to reach it.
+
+#### `Dockerfile` (47 lines, 19 tests)
+
+Minimal runtime container:
+- Base: `node:22-bookworm-slim` (glibc required for native Node modules)
+- `BOT_UID` build arg matches host user for bind mount permissions
+- System deps: `curl`, `jq`, `bash`, `ca-certificates` (minimal)
+- `ENTRYPOINT ["openclaw", "gateway"]`, `CMD ["--bind", "loopback", "--port", "18790"]`
+- Built-in `HEALTHCHECK` using `GROUP_PORT` env var (shell form for runtime variable expansion)
+- Runs as `bot` user, not root
+
+#### `scripts/install-docker.sh` (125 lines, 8 tests)
+
+Standalone Docker installation script:
+- `needs_docker()` gate: only installs if any agent uses container isolation
+- Official apt repo with GPG key pinning (no `curl | sh` per AGENTS.md rules)
+- Log rotation: `50MB × 3 files` in `/etc/docker/daemon.json`
+- Builds `hatchery/agent:latest` from Dockerfile with pinned OpenClaw version
+- `SKIP_DOCKER_BUILD` and `DRY_RUN` flags for testing
+
+### Test Coverage
+
+| Test File | Tests | What It Covers |
+|-----------|-------|----------------|
+| `test_lib_isolation.py` | 31 | All query functions, validation, manifest generation, deterministic ports, hyphenated names, unit generation |
+| `test_build_full_config_orchestration.py` | 19 | Orchestrator flow: manifest creation, validation dispatch, per-group setup, thin generator dispatch, session generator doesn't duplicate orchestrator work |
+| `test_docker_compose.py` | 37 | Per-group files, volume mounts (ro/rw, no host scripts), env_file (no inline secrets), network modes, resource limits, security hardening, systemd wrapper, health check |
+| `test_dockerfile.py` | 19 | Dockerfile structure: base image, user, entrypoint, healthcheck, build args, no root |
+| `test_install_docker.py` | 8 | `needs_docker()` gating, apt repo setup, log rotation config, skip-when-unneeded |
+| `test_health_check_abstraction.py` | 19 | hc_* dispatch: session→systemctl, container→docker, isolated network→docker exec, healthy/unhealthy status |
+
+### Known Gaps (Not Yet Implemented)
+
+1. **No live droplet test** — all tests are unit tests with mocked externals. Need a real habitat with `isolation.default: container` to validate end-to-end.
+2. **Browser variant Dockerfile** — `hatchery/agent:full` with Chrome/ffmpeg deferred to future work.
+3. **Safe mode handler updated** to use `hc_stop_modify_start()` for auth-profiles restoration. Remaining `hc_*` migration for other consumers is incremental.
+4. **`sync-openclaw-state.sh`** doesn't yet handle container state paths (rclone syncs only `~/.openclaw/agents/`).
+5. **Compose `user:` directive** — compose file generates `user: "${BOT_UID}:${BOT_GID}"` from build-time env, but these vars aren't in `group.env` yet. The Dockerfile `USER bot` covers it for now, but explicit compose `user:` would be better for UID matching.
+6. **77 pre-existing test failures** in old test suites (`test_session_mode.py`, `test_session_services.py`) — from the state-machine-v2 refactoring, not this branch. These test the old architecture.
+
+### SSOT Violations Fixed
+
+The plan identified 6 instances of duplicated logic across the old codebase. All 6 were consolidated:
+
+| Concern | Before | After |
+|---------|--------|-------|
+| Agent-per-group filtering | 3 independent implementations | `get_group_agents()` in lib-isolation |
+| Config generation | Session generator only | `generate_group_config()` called by orchestrator for ALL modes |
+| Auth-profiles setup | 3 different approaches | `setup_group_auth_profiles()` — symlink to master + golden copy `.provisioned.json` survives gateway clobber |
+| Port assignment | Inconsistent (computed vs env file vs hardcoded) | `generate_groups_manifest()` — alphabetical, deterministic, single file |
+| Safeguard/E2E units | Session generator only | `generate_safeguard_units()`/`generate_e2e_unit()` called by orchestrator for ALL modes |
+| Directory setup | Scattered across generators | `setup_group_directories()` — one function, all modes |

@@ -44,13 +44,16 @@ send_discord_notification() {
   local discord_msg
   discord_msg=$(echo "$message" | sed -e 's/<b>/\*\*/g' -e 's/<\/b>/\*\*/g' -e 's/<code>/`/g' -e 's/<\/code>/`/g')
 
-  # Create DM channel
+  # Create DM channel (guarded: curl -sf returns non-zero on HTTP errors,
+  # which under set -e would abort before the empty check below)
   local dm_channel
-  dm_channel=$(curl -sf --max-time 10 \
+  if ! dm_channel=$(curl -sf --max-time 10 \
     -H "Authorization: Bot ${token}" \
     -H "Content-Type: application/json" \
     -X POST "https://discord.com/api/v10/users/@me/channels" \
-    -d "{\"recipient_id\": \"${owner_id}\"}" 2>/dev/null | jq -r '.id // empty')
+    -d "{\"recipient_id\": \"${owner_id}\"}" 2>/dev/null | jq -r '.id // empty'); then
+    dm_channel=""
+  fi
 
   if [ -z "$dm_channel" ]; then
     log "  Failed to create Discord DM channel"
@@ -79,8 +82,8 @@ notify_find_token() {
   # these may differ from env vars if recovery swapped configs)
   if [ -f "${HC_SAFE_MODE_FILE:-}" ] && [ -f "$config_file" ]; then
     local tg_token dc_token
-    tg_token=$(jq -r '.channels.telegram.botToken // .channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.accounts.default.botToken // empty' "$config_file" 2>/dev/null)
-    dc_token=$(jq -r '.channels.discord.token // .channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // empty' "$config_file" 2>/dev/null)
+    tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // .channels.telegram.accounts.default.botToken // .channels.telegram.botToken // empty' "$config_file" 2>/dev/null)
+    dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // .channels.discord.accounts.default.token // .channels.discord.token // empty' "$config_file" 2>/dev/null)
 
     local preferred="${HC_PLATFORM:-telegram}"
 
@@ -199,11 +202,16 @@ Read MEMORY.md and BOOT_REPORT.md, then reply with: 1) Brief intro 2) What went 
 
   local output exit_code
   # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
-  output=$(timeout 120 sudo -u "${HC_USERNAME:-bot}" env $env_prefix openclaw agent \
+  # Wrap in if/else: under set -e, non-zero from command substitution
+  # would abort the caller before exit_code=$? is reached.
+  if output=$(timeout 120 sudo -u "${HC_USERNAME:-bot}" env $env_prefix openclaw agent \
     --agent "safe-mode" --message "$prompt" --deliver \
     --reply-channel "$channel" --reply-account "safe-mode" --reply-to "$owner_id" \
-    --timeout 90 --json 2>&1)
-  exit_code=$?
+    --timeout 90 --json 2>&1); then
+    exit_code=0
+  else
+    exit_code=$?
+  fi
 
   if [ $exit_code -eq 0 ] && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
     log "  ✓ SafeModeBot intro sent"

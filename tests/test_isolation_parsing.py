@@ -606,12 +606,31 @@ class TestAgentResourcesParsing:
 
 
 class TestIsolationGroupsOutput:
-    """Test ISOLATION_GROUPS aggregate output."""
+    """Test ISOLATION_GROUPS aggregate output.
+    
+    ISOLATION_GROUPS is only populated for agents with actual isolation
+    enabled (per-agent or via global default).  Agents in 'none' mode
+    don't produce groups — this prevents build-full-config.sh from
+    running per-group setup (manifest, dirs, env) for groups that will
+    never be used.
+    """
 
-    def test_single_agent_single_group(self):
-        """Single agent = single implicit group."""
+    def test_none_mode_produces_empty_groups(self):
+        """No isolation = empty ISOLATION_GROUPS."""
         habitat = {
             "name": "TestHabitat",
+            "agents": [{"agent": "Claude"}]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
+        assert env_vars.get("ISOLATION_GROUPS") == ""
+
+    def test_session_mode_produces_groups(self):
+        """Global session isolation populates ISOLATION_GROUPS."""
+        habitat = {
+            "name": "TestHabitat",
+            "isolation": "session",
             "agents": [{"agent": "Claude"}]
         }
         env_vars, stderr, rc = run_parse_habitat(habitat)
@@ -620,9 +639,10 @@ class TestIsolationGroupsOutput:
         assert env_vars.get("ISOLATION_GROUPS") == "Claude"
 
     def test_multiple_agents_unique_groups(self):
-        """Multiple agents, each in own group."""
+        """Multiple agents with session isolation, each in own group."""
         habitat = {
             "name": "TestHabitat",
+            "isolation": "session",
             "agents": [
                 {"agent": "A"},
                 {"agent": "B"},
@@ -636,9 +656,10 @@ class TestIsolationGroupsOutput:
         assert groups == {"A", "B", "C"}
 
     def test_multiple_agents_shared_groups(self):
-        """Multiple agents sharing groups."""
+        """Multiple agents sharing groups with container isolation."""
         habitat = {
             "name": "TestHabitat",
+            "isolation": "container",
             "agents": [
                 {"agent": "A", "isolationGroup": "team1"},
                 {"agent": "B", "isolationGroup": "team1"},
@@ -652,6 +673,39 @@ class TestIsolationGroupsOutput:
         assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
         groups = set(env_vars.get("ISOLATION_GROUPS", "").split(","))
         assert groups == {"team1", "team2", "E"}
+
+    def test_mixed_isolation_only_isolated_agents(self):
+        """Only agents with isolation enabled appear in ISOLATION_GROUPS."""
+        habitat = {
+            "name": "TestHabitat",
+            # global default is none
+            "agents": [
+                {"agent": "A"},  # none — not in groups
+                {"agent": "B", "isolation": "session"},  # isolated
+                {"agent": "C", "isolation": "container"},  # isolated
+                {"agent": "D"}  # none — not in groups
+            ]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
+        groups = set(env_vars.get("ISOLATION_GROUPS", "").split(","))
+        assert groups == {"B", "C"}
+
+    def test_none_explicit_produces_empty_groups(self):
+        """Explicit isolation=none still produces empty ISOLATION_GROUPS."""
+        habitat = {
+            "name": "TestHabitat",
+            "isolation": "none",
+            "agents": [
+                {"agent": "A"},
+                {"agent": "B"}
+            ]
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+        
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
+        assert env_vars.get("ISOLATION_GROUPS") == ""
 
 
 class TestBackwardCompatibility:

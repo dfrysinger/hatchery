@@ -164,6 +164,14 @@ else
   fail "E2E magic word check may not be checking the right variable"
 fi
 
+# Some models (e.g., Gemini Flash) follow heartbeat system prompt instead of
+# the explicit test message. HEARTBEAT_OK still proves the LLM pipeline works.
+if grep 'grep.*HEARTBEAT_OK' "$E2E_CHECK" 2>/dev/null | grep -q 'HEALTH_CHECK_OK'; then
+  pass "E2E also accepts HEARTBEAT_OK as valid response (model behavior tolerance)"
+else
+  fail "E2E should accept HEARTBEAT_OK — proves pipeline works even when model follows system prompt"
+fi
+
 # =============================================================================
 # Bug 5: Emergency.json fallback removed (unnecessary complexity)
 # =============================================================================
@@ -193,6 +201,37 @@ if grep -q 'openclaw\.emergency\.json' "$PHASE1" 2>/dev/null; then
   fail "phase1-critical.sh still generates emergency.json"
 else
   pass "phase1-critical.sh does not generate emergency.json"
+fi
+
+# =============================================================================
+# Bug 8: Safe mode handler notification spam loop
+# .path unit (PathExists) re-triggers handler after oneshot exits because
+# unhealthy marker was not cleaned up on failure path
+# =============================================================================
+echo ""
+echo "=== Bug 8: Safe mode handler breaks .path loop on failure ==="
+
+HANDLER="$REPO_DIR/scripts/safe-mode-handler.sh"
+
+# Critical exit path must remove unhealthy marker
+if grep -A10 'Already exhausted.*recovery attempts' "$HANDLER" | grep -q 'rm.*HC_UNHEALTHY_MARKER'; then
+  pass "Exhausted-attempts path removes unhealthy marker (breaks .path loop)"
+else
+  fail "Exhausted-attempts path does NOT remove unhealthy marker — .path will re-trigger infinitely"
+fi
+
+# restart_and_verify failure must also remove marker
+if grep -A5 'failed to respond' "$HANDLER" | grep -q 'rm.*HC_UNHEALTHY_MARKER'; then
+  pass "restart_and_verify failure removes unhealthy marker"
+else
+  fail "restart_and_verify failure does NOT remove unhealthy marker — .path will re-trigger"
+fi
+
+# Critical notification should have a lockout to prevent spam
+if grep -q 'critical-notified' "$HANDLER"; then
+  pass "Critical failure notification has lockout mechanism"
+else
+  fail "Critical failure notification has no lockout — will spam on re-trigger"
 fi
 
 # =============================================================================
@@ -227,17 +266,25 @@ else
   fail "safe-mode exec ask is not 'off' — bot will be blocked by confirmation prompts"
 fi
 
-# agents.defaults.tools.exec is where OpenClaw actually reads per-agent exec policy
-if echo "$SM_CONFIG" | jq -e '.agents.defaults.tools.exec' >/dev/null 2>&1; then
-  pass "safe-mode agents.defaults includes tools.exec"
+# Per-agent tools.exec is on agents.list[].tools.exec (NOT agents.defaults.tools
+# which is not in the OpenClaw config schema and causes "Config invalid").
+if echo "$SM_CONFIG" | jq -e '.agents.list[0].tools.exec' >/dev/null 2>&1; then
+  pass "safe-mode agent entry includes tools.exec"
 else
-  fail "safe-mode agents.defaults missing tools.exec — agent-level exec policy not set"
+  fail "safe-mode agent entry missing tools.exec — SafeModeBot won't have exec access"
 fi
 
-if echo "$SM_CONFIG" | jq -r '.agents.defaults.tools.exec.security' 2>/dev/null | grep -q 'full'; then
-  pass "safe-mode agents.defaults exec security is 'full'"
+if echo "$SM_CONFIG" | jq -r '.agents.list[0].tools.exec.security' 2>/dev/null | grep -q 'full'; then
+  pass "safe-mode agent entry exec security is 'full'"
 else
-  fail "safe-mode agents.defaults exec security is not 'full'"
+  fail "safe-mode agent entry exec security is not 'full'"
+fi
+
+# agents.defaults.tools must NOT exist (it's not in the config schema)
+if echo "$SM_CONFIG" | jq -e '.agents.defaults.tools' >/dev/null 2>&1; then
+  fail "agents.defaults.tools exists — this key is invalid and will crash the gateway"
+else
+  pass "agents.defaults.tools absent (correct — tools go on per-agent or top-level)"
 fi
 
 # =============================================================================

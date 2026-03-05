@@ -16,7 +16,7 @@
 #   GROUP / GROUP_PORT — per-group session isolation
 # =============================================================================
 
-set -o pipefail
+set -euo pipefail
 
 # Source shared libraries
 for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
@@ -41,9 +41,16 @@ for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0
   [ -f "$lib_path/openclaw-state.sh" ] && { STATE_SCRIPT="$lib_path/openclaw-state.sh"; break; }
 done
 USE_STATE_MACHINE=false
-if [ -n "$STATE_SCRIPT" ] && [ -f "${OPENCLAW_STATE_DIR:-/var/lib/openclaw}/state.json" ]; then
+# State machine lives in controller state dir (/var/lib/openclaw), NOT in OPENCLAW_STATE_DIR
+# (which points to per-group runtime state for the OpenClaw gateway process)
+_state_root="/var/lib/openclaw"
+_state_file="${_state_root}/state.json"
+[ -n "${GROUP:-}" ] && _state_file="${_state_root}/state-${GROUP}.json"
+hc_init_logging "${GROUP:-}"
+
+if [ -n "$STATE_SCRIPT" ] && [ -f "$_state_file" ]; then
   USE_STATE_MACHINE=true
-  log "State machine available at $STATE_SCRIPT"
+  log "State machine available at $STATE_SCRIPT (${_state_file})"
 fi
 
 # Helper: call state controller
@@ -52,8 +59,6 @@ state_cmd() {
     bash "$STATE_SCRIPT" "$@" 2>&1
   fi
 }
-
-hc_init_logging "${GROUP:-}"
 hc_load_environment || exit 0
 
 # --- Skip if state is TRANSITIONING or locked (someone is fixing things) ---
@@ -65,7 +70,7 @@ if [ "$USE_STATE_MACHINE" = "true" ]; then
     state_cmd check-timeout || true
     exit 0
   fi
-  if state_cmd get --field lock.holder | grep -qv '^$'; then
+  if state_cmd get --field lock.holder 2>/dev/null | grep -qv '^$'; then
     lock_holder=$(state_cmd get --field lock.holder)
     if [ -n "$lock_holder" ] && [ "$lock_holder" != "null" ]; then
       log "Skipping E2E — state locked by '$lock_holder'"
@@ -101,50 +106,6 @@ log "ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE, RECOVERY_ATTEMPTS=$RECOVERY_ATT
 # E2E Check Functions
 # =============================================================================
 
-check_api_key_validity() {
-  local service="$1"
-  log "  Checking API key validity..."
-
-  # In safe mode, read keys from the config file (env vars may be stale)
-  if hc_is_in_safe_mode && [ -f "$CONFIG_PATH" ]; then
-    log "  Safe mode — checking API from config"
-    local key
-    for provider in google anthropic openai; do
-      local env_var
-      case "$provider" in
-        anthropic) env_var="ANTHROPIC_API_KEY" ;;
-        openai)    env_var="OPENAI_API_KEY" ;;
-        google)    env_var="GOOGLE_API_KEY" ;;
-      esac
-      key=$(jq -r ".env.${env_var} // empty" "$CONFIG_PATH" 2>/dev/null)
-      if [ -n "$key" ] && validate_api_key "$provider" "$key"; then
-        log "  ${provider} API key OK (${VALIDATION_REASON:-valid})"; return 0
-      fi
-    done
-    log "  No working API key in safe mode config"; return 1
-  fi
-
-  # Normal mode: check journal for recent auth errors first (fast path)
-  local auth_errors
-  auth_errors=$(journalctl -u "$service" --since "30 seconds ago" --no-pager 2>/dev/null | \
-    grep -iE "(authentication_error|Invalid.*bearer.*token|invalid.*api.*key)" | head -3)
-  [ -n "$auth_errors" ] && { log "  Found API auth errors"; return 1; }
-
-  # Direct API validation via lib-auth
-  for provider in anthropic openai google; do
-    local key=""
-    case "$provider" in
-      anthropic) key="${ANTHROPIC_API_KEY:-}" ;;
-      openai)    key="${OPENAI_API_KEY:-}" ;;
-      google)    key="${GOOGLE_API_KEY:-}" ;;
-    esac
-    if [ -n "$key" ] && validate_api_key "$provider" "$key"; then
-      log "  ${provider} API key OK (${VALIDATION_REASON:-valid})"; return 0
-    fi
-  done
-
-  log "  No working API keys found"; return 1
-}
 
 check_channel_connectivity() {
   log "  Checking channel connectivity..."
@@ -191,11 +152,11 @@ check_channel_connectivity() {
     fi
 
     if [ "$agent_valid" = "false" ]; then
-      all_valid=false; failed_agents="${failed_agents} agent${i}"
+      all_valid=false; failed_agents="${failed_agents:+${failed_agents},}agent${i}"
     fi
   done
 
-  [ "$all_valid" = "false" ] && { log "  Channel check FAILED:${failed_agents}"; return 1; }
+  [ "$all_valid" = "false" ] && { log "  Channel check FAILED: ${failed_agents}"; return 1; }
   log "  All $AC agents have valid tokens"; return 0
 }
 
@@ -226,6 +187,8 @@ check_agents_e2e() {
   fi
 
   # Deterministic test prompt — fast, no delivery, verifiable
+  # Some models follow system prompt heartbeat instructions instead of the explicit message,
+  # so we accept HEARTBEAT_OK as proof the LLM pipeline works (API key → provider → model → response)
   local test_prompt="Reply with exactly: HEALTH_CHECK_OK"
 
   for agent_id in "${agents_to_check[@]}"; do
@@ -235,28 +198,32 @@ check_agents_e2e() {
     local env_prefix=""
     [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
 
-    local output
+    local output rc
     # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
-    output=$(timeout 60 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
-      --agent "$agent_id" --message "$test_prompt" --timeout 30 --json 2>&1)
-    local rc=$?
+    # if/else guards against set -e aborting on non-zero exit from command substitution
+    if output=$(timeout 60 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+      --agent "$agent_id" --message "$test_prompt" --timeout 30 --json 2>&1); then
+      rc=0
+    else
+      rc=$?
+    fi
     local dur=$(( $(date +%s) - start_time ))
 
-    if [ $rc -eq 0 ] && echo "$output" | grep -q "HEALTH_CHECK_OK" && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+    if [ $rc -eq 0 ] && echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
       log "  ✓ $agent_id responded in ${dur}s"
     else
       local reason="exit=$rc"
-      [ $rc -eq 0 ] && ! echo "$output" | grep -q "HEALTH_CHECK_OK" && reason="missing HEALTH_CHECK_OK (LLM error?)"
+      [ $rc -eq 0 ] && ! echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && reason="missing HEALTH_CHECK_OK (LLM error?)"
       log "  ✗ $agent_id FAILED ($reason, ${dur}s)"
       echo "$output" | while IFS= read -r line; do log "    | $line"; done
-      all_healthy=false; failed_agents="${failed_agents} ${agent_id}"
+      all_healthy=false; failed_agents="${failed_agents:+${failed_agents},}${agent_id}"
     fi
   done
 
   # Export failed agents for state machine reporting
-  FAILED_AGENTS="${failed_agents## }"
+  FAILED_AGENTS="${failed_agents}"
 
-  [ "$all_healthy" = "false" ] && { log "  RESULT: FAILED —${failed_agents}"; return 1; }
+  [ "$all_healthy" = "false" ] && { log "  RESULT: FAILED — ${failed_agents}"; return 1; }
   log "  RESULT: All agents passed"
   log "========== E2E CHECK COMPLETE ==========="; return 0
 }
@@ -294,19 +261,48 @@ send_agent_intros() {
 
   local intro_prompt="You just came online after a reboot. Reply with a brief introduction (2-3 sentences) - your name, model, and role. Be friendly but concise. Your reply will be automatically delivered."
 
+  # Resolve platform list — "both" means try each available platform
+  local intro_platforms=()
+  if [ "$HC_PLATFORM" = "both" ]; then
+    [ -n "${TELEGRAM_OWNER_ID:-}" ] && intro_platforms+=("telegram")
+    [ -n "${DISCORD_OWNER_ID:-}" ] && intro_platforms+=("discord")
+    # Fallback if neither owner ID is set (shouldn't happen with platform=both)
+    [ ${#intro_platforms[@]} -eq 0 ] && intro_platforms=("telegram")
+  else
+    intro_platforms=("$HC_PLATFORM")
+  fi
+
   for agent_id in "${agents_to_intro[@]}"; do
     local num="${agent_id#agent}"
     local name_var="AGENT${num}_NAME"; local agent_name="${!name_var:-$agent_id}"
-    log "  Sending intro for $agent_id ($agent_name)..."
 
     local env_prefix=""
     [ -n "${GROUP:-}" ] && env_prefix="OPENCLAW_CONFIG_PATH=$CONFIG_PATH OPENCLAW_STATE_DIR=$H/.openclaw-sessions/$GROUP"
 
-    # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
-    timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
-      --agent "$agent_id" --message "$intro_prompt" --deliver \
-      --reply-channel "$HC_PLATFORM" --reply-account "$agent_id" --reply-to "$owner_id" \
-      --timeout 60 --json >> "$HC_LOG" 2>&1 && log "  ✓ $agent_name intro sent" || log "  ✗ $agent_name intro failed"
+    local intro_ok=false
+    for intro_plat in "${intro_platforms[@]}"; do
+      local plat_owner
+      plat_owner=$(get_owner_id_for_platform "$intro_plat" "with_prefix")
+      [ -z "$plat_owner" ] || [ "$plat_owner" = "user:" ] && continue
+
+      log "  Sending intro for $agent_id ($agent_name) via $intro_plat..."
+
+      # Account name: single-agent → "default" (Doctor enforces), multi → agent ID
+      local reply_acct="$agent_id"
+      [ "${#agents_to_intro[@]}" -eq 1 ] && reply_acct="default"
+
+      # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
+      if timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+        --agent "$agent_id" --message "$intro_prompt" --deliver \
+        --reply-channel "$intro_plat" --reply-account "$reply_acct" --reply-to "$plat_owner" \
+        --timeout 60 --json >> "$HC_LOG" 2>&1; then
+        log "  ✓ $agent_name intro sent via $intro_plat"
+        intro_ok=true
+      else
+        log "  ✗ $agent_name intro failed via $intro_plat"
+      fi
+    done
+    $intro_ok || log "  ⚠ $agent_name intro failed on all platforms"
   done
 
   touch "$INTRO_SENT_MARKER"
@@ -343,7 +339,7 @@ fi
 log "========== E2E DECISION =========="
 log "HEALTHY=$HEALTHY, ALREADY_IN_SAFE_MODE=$ALREADY_IN_SAFE_MODE"
 
-# --- Report to state machine (Phase 2) ---
+# --- Report to state machine ---
 if [ "$USE_STATE_MACHINE" = "true" ]; then
   if [ "$HEALTHY" = "true" ]; then
     log "STATE MACHINE: reporting health pass"
@@ -354,7 +350,7 @@ if [ "$USE_STATE_MACHINE" = "true" ]; then
   fi
 fi
 
-# --- Legacy marker handling (kept for Phase 1 compatibility) ---
+# --- Handle health result ---
 if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
   log "DECISION: SAFE MODE STABLE — recovery config working"
   rm -f "$HC_UNHEALTHY_MARKER" "$HC_RECOVERY_COUNTER" "/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}" /var/lib/init-status/needs-post-boot-check
