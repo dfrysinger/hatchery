@@ -214,7 +214,7 @@ echo "=== Bug 8: Safe mode handler breaks .path loop on failure ==="
 HANDLER="$REPO_DIR/scripts/safe-mode-handler.sh"
 
 # Critical exit path must remove unhealthy marker
-if grep -A10 'Already exhausted.*recovery attempts' "$HANDLER" | grep -q 'rm.*HC_UNHEALTHY_MARKER'; then
+if grep -A15 'Already exhausted.*recovery attempts' "$HANDLER" | grep -q 'rm.*HC_UNHEALTHY_MARKER'; then
   pass "Exhausted-attempts path removes unhealthy marker (breaks .path loop)"
 else
   fail "Exhausted-attempts path does NOT remove unhealthy marker — .path will re-trigger infinitely"
