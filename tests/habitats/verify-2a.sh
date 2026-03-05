@@ -135,20 +135,31 @@ if [ "$STOP_COUNT" -ge 2 ]; then pass "hc_stop_service on terminal paths ($STOP_
 
 # --- 12. HTTP endpoints ---
 section "12. HTTP Endpoints"
-echo "$MANIFEST" | jq -r '.groups | to_entries[] | "\(.key) \(.value.port)"' 2>/dev/null | while read -r group port; do
+HTTP_PAIRS=$(echo "$MANIFEST" | jq -r '.groups | to_entries[] | "\(.key) \(.value.port)"' 2>/dev/null)
+while read -r group port; do
+  [ -z "$group" ] && continue
   RESP=$(eval $SSH "curl -sf http://localhost:${port}/ >/dev/null 2>&1 && echo OK || echo FAIL" 2>/dev/null)
-  if [ "$RESP" = "OK" ]; then echo "  ✅ $group (port $port): HTTP OK"; else echo "  ❌ $group (port $port): HTTP FAIL"; fi
-done
+  if [ "$RESP" = "OK" ]; then pass "$group (port $port): HTTP OK"; else fail "$group (port $port): HTTP FAIL"; fi
+done <<< "$HTTP_PAIRS"
 
 # --- 13. Container UID ---
 section "13. Container UID"
 CUID=$(eval $SSH "docker exec openclaw-${CONTAINER_GROUP} id -u 2>/dev/null" 2>/dev/null) || CUID="unknown"
 if [ "$CUID" = "1000" ]; then pass "Container runs as UID 1000 (bot)"; else fail "Container UID=$CUID (expected 1000)"; fi
 
-# --- 14. Intros sent ---
+# --- 14. Intros sent (wait for E2E services to finish first) ---
 section "14. Agent Intros"
+E2E_WAIT=0
+for attempt in $(seq 1 12); do
+  E2E_RUNNING=$(eval $SSH 'systemctl list-units "openclaw-e2e-*.service" --no-pager --no-legend 2>/dev/null | grep -c "running\|activating"' 2>/dev/null) || E2E_RUNNING=0
+  [ "$E2E_RUNNING" -eq 0 ] && break
+  echo "    Waiting for E2E services to finish... (${attempt}/12)"
+  sleep 10
+  E2E_WAIT=$((E2E_WAIT + 10))
+done
+[ "$E2E_WAIT" -gt 0 ] && echo "    Waited ${E2E_WAIT}s for E2E completion"
 INTRO_MARKERS=$(eval $SSH 'ls /var/lib/init-status/intro-sent-* 2>/dev/null | wc -l' 2>/dev/null) || INTRO_MARKERS=0
-if [ "$INTRO_MARKERS" -ge 2 ]; then pass "$INTRO_MARKERS intro markers"; else warn "Only $INTRO_MARKERS intro markers"; fi
+if [ "$INTRO_MARKERS" -ge 2 ]; then pass "$INTRO_MARKERS intro markers"; else warn "Only $INTRO_MARKERS intro markers (E2E may still be running)"; fi
 
 # --- 15. No errors ---
 section "15. Error Check"

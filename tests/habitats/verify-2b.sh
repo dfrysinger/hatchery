@@ -102,10 +102,12 @@ if [ "$REARM" -ge 1 ]; then pass "Safeguard re-arm in health check ($REARM refs)
 
 # --- 9. HTTP endpoints responding ---
 section "9. HTTP Endpoints"
-eval $SSH 'cat /etc/openclaw-groups.json 2>/dev/null' 2>/dev/null | jq -r '.groups | to_entries[] | "\(.key) \(.value.port)"' 2>/dev/null | while read -r group port; do
+HTTP_PAIRS=$(eval $SSH 'cat /etc/openclaw-groups.json 2>/dev/null' 2>/dev/null | jq -r '.groups | to_entries[] | "\(.key) \(.value.port)"' 2>/dev/null)
+while read -r group port; do
+  [ -z "$group" ] && continue
   RESP=$(eval $SSH "curl -sf http://localhost:${port}/ >/dev/null 2>&1 && echo OK || echo FAIL" 2>/dev/null)
-  if [ "$RESP" = "OK" ]; then echo "  ✅ $group (port $port): HTTP OK"; else echo "  ❌ $group (port $port): HTTP FAIL"; fi
-done
+  if [ "$RESP" = "OK" ]; then pass "$group (port $port): HTTP OK"; else fail "$group (port $port): HTTP FAIL"; fi
+done <<< "$HTTP_PAIRS"
 
 # --- 10. Restart policy ---
 section "10. Restart Policy"
@@ -114,10 +116,19 @@ if echo "$RESTART_POLICY" | grep -q "on-failure"; then pass "Restart=on-failure 
 BURST=$(eval $SSH 'grep "StartLimitBurst" /etc/systemd/system/openclaw-group-*.service 2>/dev/null | head -1' 2>/dev/null) || BURST=""
 if echo "$BURST" | grep -q "StartLimitBurst"; then pass "StartLimitBurst set"; else fail "No StartLimitBurst"; fi
 
-# --- 11. Intros sent ---
+# --- 11. Intros sent (wait for E2E services to finish first) ---
 section "11. Agent Intros"
+E2E_WAIT=0
+for attempt in $(seq 1 12); do
+  E2E_RUNNING=$(eval $SSH 'systemctl is-active openclaw-e2e-group-alpha.service openclaw-e2e-group-beta.service 2>/dev/null | grep -c "^activating\|^active"' 2>/dev/null) || E2E_RUNNING=0
+  [ "$E2E_RUNNING" -eq 0 ] && break
+  echo "    Waiting for E2E services to finish... (${attempt}/12)"
+  sleep 10
+  E2E_WAIT=$((E2E_WAIT + 10))
+done
+[ "$E2E_WAIT" -gt 0 ] && echo "    Waited ${E2E_WAIT}s for E2E completion"
 INTRO_MARKERS=$(eval $SSH 'ls /var/lib/init-status/intro-sent-* 2>/dev/null | wc -l' 2>/dev/null) || INTRO_MARKERS=0
-if [ "$INTRO_MARKERS" -ge 2 ]; then pass "$INTRO_MARKERS intro markers found"; else warn "Only $INTRO_MARKERS intro markers"; fi
+if [ "$INTRO_MARKERS" -ge 2 ]; then pass "$INTRO_MARKERS intro markers found"; else warn "Only $INTRO_MARKERS intro markers (E2E may still be running)"; fi
 
 # --- 12. No errors ---
 section "12. Error Check"
