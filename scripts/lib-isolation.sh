@@ -154,6 +154,83 @@ validate_group_consistency() {
 }
 
 # =========================================================================
+# Config Validation (Phase 0a — post-generation checks)
+# =========================================================================
+
+# Validate a generated openclaw config for a group.
+# Checks:
+#   1. Single-agent groups must use account name "default" (Doctor enforcement)
+#   2. Multi-agent groups must have a binding for every agent
+#   3. Every binding must reference an existing channel account
+#
+# Usage: validate_generated_config "group-name"
+# Returns: 0 on valid, 1 on invalid (with diagnostic to stderr)
+validate_generated_config() {
+    local group="$1"
+    local config_path
+    config_path=$(get_group_config_path "$group" 2>/dev/null) || config_path=""
+
+    # If config path not in manifest yet, try conventional path
+    if [ -z "$config_path" ] || [ ! -f "$config_path" ]; then
+        local config_base="${HOME:=/home/bot}/.openclaw/configs"
+        config_path="${config_base}/${group}/openclaw.session.json"
+    fi
+
+    if [ ! -f "$config_path" ]; then
+        echo "WARNING: validate_generated_config: config not found for group '$group' at $config_path" >&2
+        return 0  # Non-fatal — config may not exist yet during first pass
+    fi
+
+    local agent_count binding_count
+    agent_count=$(jq '.agents.list | length' "$config_path" 2>/dev/null) || agent_count=0
+    binding_count=$(jq '.bindings | length' "$config_path" 2>/dev/null) || binding_count=0
+
+    # Check 1: Single-agent account naming (Doctor renames non-"default" single accounts)
+    if [ "$agent_count" -eq 1 ]; then
+        for channel in telegram discord; do
+            local acct_keys
+            acct_keys=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null) || continue
+            if [ -n "$acct_keys" ] && [ "$acct_keys" != "default" ]; then
+                echo "FATAL: group '$group' single-agent $channel account is '$acct_keys' — must be 'default' (Doctor will rename it)" >&2
+                return 1
+            fi
+        done
+    fi
+
+    # Check 2: Multi-agent binding completeness
+    if [ "$agent_count" -gt 1 ]; then
+        local agents_with_bindings
+        agents_with_bindings=$(jq -r '.bindings[].agentId' "$config_path" 2>/dev/null | sort -u | wc -l) || agents_with_bindings=0
+
+        if [ "$agents_with_bindings" -lt "$agent_count" ]; then
+            echo "FATAL: group '$group' has $agent_count agents but only $agents_with_bindings have bindings — messages won't route" >&2
+            return 1
+        fi
+    fi
+
+    # Check 3: Binding-to-account consistency
+    local binding_errors=0
+    for channel in telegram discord; do
+        local channel_accounts
+        channel_accounts=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null) || continue
+        [ -z "$channel_accounts" ] && continue
+
+        local bound_accounts
+        bound_accounts=$(jq -r ".bindings[] | select(.match.channel == \"$channel\") | .match.accountId" "$config_path" 2>/dev/null) || continue
+
+        for acct in $bound_accounts; do
+            if ! echo "$channel_accounts" | grep -qx "$acct"; then
+                echo "FATAL: group '$group' binding references $channel account '$acct' but config has: $(echo "$channel_accounts" | tr '\n' ' ')" >&2
+                binding_errors=$((binding_errors + 1))
+            fi
+        done
+    done
+
+    [ "$binding_errors" -gt 0 ] && return 1
+    return 0
+}
+
+# =========================================================================
 # Port Allocation
 # =========================================================================
 

@@ -490,7 +490,12 @@ if [ -n "${ISOLATION_GROUPS:-}" ] && type generate_groups_manifest &>/dev/null; 
     systemctl enable "openclaw-e2e-${group}.service" 2>/dev/null || true
   done
 
-  # 4. Dispatch to mode-specific generators (thin — service definitions only)
+  # 4. Validate generated configs (fail fast on mismatched accounts/bindings)
+  for group in "${ALL_GROUPS[@]}"; do
+    validate_generated_config "$group" || exit 1
+  done
+
+  # 5. Dispatch to mode-specific generators (thin — service definitions only)
   session_groups=$(get_groups_by_type "session")
   container_groups=$(get_groups_by_type "container")
 

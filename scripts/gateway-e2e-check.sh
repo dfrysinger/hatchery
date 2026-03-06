@@ -292,14 +292,24 @@ send_agent_intros() {
       [ "${#agents_to_intro[@]}" -eq 1 ] && reply_acct="default"
 
       # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
-      if timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+      local intro_output
+      intro_output=$(timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
         --agent "$agent_id" --message "$intro_prompt" --deliver \
         --reply-channel "$intro_plat" --reply-account "$reply_acct" --reply-to "$plat_owner" \
-        --timeout 60 --json >> "$HC_LOG" 2>&1; then
+        --timeout 60 --json 2>&1) || true
+      local intro_rc=$?
+
+      # Log full output for diagnostics
+      echo "$intro_output" >> "$HC_LOG"
+
+      # Verify delivery: exit code AND output content (openclaw exits 0 even on delivery failure)
+      if [ $intro_rc -ne 0 ]; then
+        log "  ✗ $agent_name intro command failed (exit $intro_rc) via $intro_plat"
+      elif echo "$intro_output" | grep -qi "delivery failed\|token missing\|bot token missing"; then
+        log "  ✗ $agent_name intro delivery failed via $intro_plat: $(echo "$intro_output" | grep -i 'delivery\|token missing' | head -1)"
+      else
         log "  ✓ $agent_name intro sent via $intro_plat"
         intro_ok=true
-      else
-        log "  ✗ $agent_name intro failed via $intro_plat"
       fi
     done
     $intro_ok || log "  ⚠ $agent_name intro failed on all platforms"
