@@ -2,9 +2,10 @@
 
 > Eliminate redundant env loading, hand-curated allowlists, and parallel notification paths.
 
-**Status:** Planned (post-merge)
-**Branch:** TBD (off main, after docker-isolation merge)
+**Status:** In progress
+**Branch:** `feature/post-merge-cleanup` (off main v5.0.0)
 **Author:** ClaudeBot + Daniel, 2026-03-04
+**Updated:** 2026-03-05 — added Phase 0 (robustness quick wins) from post-merge analysis
 
 ---
 
@@ -384,14 +385,196 @@ Runtime consumers never see "both" — they see an ordered list.
 
 ---
 
+### Phase 0: Robustness Quick Wins (no env refactor needed)
+
+> Added 2026-03-05 from post-merge robustness analysis (`docs/POST-MERGE-ROBUSTNESS-ANALYSIS.md`).
+> These defend against the 6 bug patterns found across 28 bugs during pre-merge testing.
+> Phase 0 items are independent of env refactor and can land immediately.
+
+**Goal:** Structural defenses that prevent bug recurrence, without changing env loading.
+
+#### 0a. Config Validation Gate
+
+After `build-full-config.sh` generates all configs, validate them before services start.
+
+```bash
+validate_generated_configs() {
+  local manifest="/etc/openclaw-groups.json"
+
+  for group in $(jq -r '.groups | keys[]' "$manifest"); do
+    local config_path
+    config_path=$(jq -r ".groups[\"$group\"].configPath" "$manifest")
+
+    # 1. Binding completeness — every agent has a routing path
+    local agent_count binding_count
+    agent_count=$(jq '.agents.list | length' "$config_path")
+    binding_count=$(jq '.bindings | length' "$config_path")
+
+    if [ "$agent_count" -gt 1 ] && [ "$binding_count" -lt "$agent_count" ]; then
+      log "ERROR: $group has $agent_count agents but only $binding_count bindings"
+      return 1
+    fi
+
+    # 2. Account existence — every binding references a real account
+    for channel in telegram discord; do
+      local channel_accounts
+      channel_accounts=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null)
+      for acct in $(jq -r ".bindings[] | select(.match.channel == \"$channel\") | .match.accountId" "$config_path" 2>/dev/null); do
+        if ! echo "$channel_accounts" | grep -qx "$acct"; then
+          log "ERROR: binding references $channel account '$acct' but it doesn't exist in config"
+          return 1
+        fi
+      done
+    done
+
+    # 3. Account naming — single-agent groups must use "default" (Doctor enforcement)
+    if [ "$agent_count" -eq 1 ]; then
+      for channel in telegram discord; do
+        local acct_keys
+        acct_keys=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null)
+        if [ -n "$acct_keys" ] && [ "$acct_keys" != "default" ]; then
+          log "ERROR: single-agent $group uses account '$acct_keys' instead of 'default' — Doctor will rename it"
+          return 1
+        fi
+      done
+    fi
+  done
+
+  log "All generated configs validated"
+}
+```
+
+**Bugs this prevents:** Account naming mismatch (4 bugs), missing bindings (1 bug), Doctor migration surprises (2 bugs).
+
+**Files changed:** `build-full-config.sh`
+
+**Tests:**
+- Config with mismatched binding → validation fails
+- Config with single-agent `agent1` account → validation fails
+- Config with multi-agent missing binding → validation fails
+- Valid config → validation passes
+
+#### 0b. Systemd Unit Linter (DONE — `c9daaa5`)
+
+Static analysis tests for generated systemd units. Already implemented in `tests/test_systemd_units.py` (12 tests).
+
+Catches:
+- `StartLimitBurst` in `[Service]` instead of `[Unit]`
+- `Restart=always` instead of `on-failure`
+- Missing `CI=true` environment
+- Missing EXIT trap in safe-mode handler
+- `local` keyword outside functions
+- Docker compose missing `cap_drop: ALL`, `no-new-privileges`, retry cap
+
+#### 0c. Delivery Verification in E2E
+
+`openclaw agent --deliver` exits 0 even when delivery fails. The E2E script must parse output for failure indicators.
+
+```bash
+# In gateway-e2e-check.sh, replace the current intro send block:
+local output
+output=$(timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+  --agent "$agent_id" --message "$intro_prompt" --deliver \
+  --reply-channel "$intro_plat" --reply-account "$reply_acct" \
+  --reply-to "$plat_owner" --timeout 60 --json 2>&1)
+rc=$?
+
+if [ $rc -ne 0 ]; then
+  log "  ✗ $agent_name intro command failed (exit $rc)"
+elif echo "$output" | grep -qi "delivery failed\|token missing"; then
+  log "  ✗ $agent_name intro delivery failed: $(echo "$output" | grep -i 'delivery\|token')"
+else
+  log "  ✓ $agent_name intro sent via $intro_plat"
+  intro_ok=true
+fi
+```
+
+**Bugs this prevents:** Silent delivery failure (the bug that cost us 3 droplet provisions to diagnose).
+
+**Files changed:** `gateway-e2e-check.sh`
+
+**Tests:**
+- Mock `openclaw agent` that exits 0 but outputs "Delivery failed" → intro marked as failed
+- Mock that exits 0 with clean output → intro marked as success
+- Mock that exits non-zero → intro marked as failed
+
+#### 0d. Env Contract Test
+
+Verify that every env var consumed by runtime scripts is present in a generated `group.env`. Catches propagation gaps before a droplet provision does.
+
+```python
+# tests/test_env_contract.py
+RUNTIME_SCRIPTS = [
+    "gateway-e2e-check.sh",
+    "gateway-health-check.sh",
+    "safe-mode-handler.sh",
+    "safe-mode-recovery.sh",
+    "try-full-config.sh",
+]
+
+# Vars set by systemd, bash, or computed at runtime — not expected in group.env
+RUNTIME_ONLY = {
+    "HOME", "USER", "PATH", "PWD", "TERM", "SHELL", "LANG",
+    "HOSTNAME", "SHLVL", "OLDPWD", "IFS", "OPTIND", "OPTARG",
+    "BASH_SOURCE", "BASH_LINENO", "FUNCNAME", "LINENO",
+    "PIPESTATUS", "RANDOM", "SECONDS", "BASHPID", "BASH_REMATCH",
+    # Set by hc_load_environment / hc_init_logging
+    "HC_HOME", "HC_USERNAME", "HC_LOG", "HC_SAFE_MODE_FILE",
+    "HC_UNHEALTHY_MARKER", "HC_SETUP_COMPLETE", "HC_PLATFORM",
+    # Set by systemd EnvironmentFile or ExecStart
+    "GROUP", "GROUP_PORT", "CONFIG_PATH",
+    "OPENCLAW_CONFIG_PATH", "OPENCLAW_STATE_DIR",
+}
+
+def extract_env_vars(script_path):
+    """Extract env var names referenced as ${VAR} or $VAR in a script."""
+    ...
+
+def generate_sample_group_env():
+    """Generate a sample group.env from test fixtures and return var names."""
+    ...
+
+def test_all_consumed_vars_available():
+    """Every env var consumed by runtime scripts should be obtainable."""
+    consumed = set()
+    for script in RUNTIME_SCRIPTS:
+        consumed |= extract_env_vars(script)
+    # Vars that must come from group.env or habitat-parsed.env
+    external = consumed - RUNTIME_ONLY
+    # Verify each is produced by parse-habitat.py or generate_group_env
+    ...
+```
+
+**Bugs this prevents:** `group.env` missing owner IDs, missing `HABITAT_NAME`, any future env var propagation gap.
+
+**Files changed:** New test file `tests/test_env_contract.py`
+
+---
+
 ## Migration Strategy
 
-- **Phase 1 first, alone.** It's the highest-value, lowest-risk change. Can be validated on a single test droplet.
+- **Phase 0 first** — quick wins, no architectural changes, can land immediately on `feature/post-merge-cleanup`.
+- **Phase 1 next, alone.** Highest-value env change. Validated on a single test droplet.
 - **Phase 2 after Phase 1 stabilizes.** Notification is sensitive — test with deliberate safe-mode triggers.
 - **Phase 3 is cleanup.** No new behavior, just removing branching.
 - Each phase is a separate PR. Each gets a test droplet provision before merge.
 
 ## Design Principles (learned from pre-merge testing)
+
+### 0. Validate what you generate, verify what you deliver
+
+28 bugs were found across 4 live droplet provisions during pre-merge testing. They fall into 6 structural patterns (full analysis in `docs/POST-MERGE-ROBUSTNESS-ANALYSIS.md`):
+
+| Pattern | Count | Defense |
+|---------|-------|---------|
+| Config gen ↔ consumption mismatch | 4 | Validate configs against Doctor + check binding completeness (Phase 0a) |
+| Silent failures | 2 | Parse delivery output, don't trust exit codes (Phase 0c) |
+| Systemd footguns | 4 | Static analysis linter for generated units (Phase 0b, DONE) |
+| Race conditions / timing | 3 | Wait-for-completion, health check grace periods |
+| State cleanup on failure paths | 3 | EXIT traps, stop-modify-start primitive |
+| Env propagation gaps | 4 | Include-all env generation (Phase 1), env contract test (Phase 0d) |
+
+**Rule:** Every generated artifact (config, unit, compose file) must be validated before deployment. Every external tool invocation must have its outcome verified, not just its exit code.
 
 ### 1. No global defaults in per-group contexts
 
@@ -419,6 +602,13 @@ Compose files, systemd units, and config JSONs are baked at provision time. Upda
 
 ## Success Criteria
 
+### Phase 0
+- [x] Systemd unit linter catches StartLimitBurst, Restart=always, missing CI=true (12 tests)
+- [ ] Config validation gate rejects mismatched account names and missing bindings
+- [ ] E2E intro detects and logs delivery failures (not just exit code)
+- [ ] Env contract test catches missing vars before provisioning
+
+### Phase 1–3
 - [ ] No runtime script contains `source.*habitat-parsed.env`
 - [ ] No runtime script contains `source.*droplet.env`
 - [ ] `grep -r "get_owner_id_for_platform" scripts/` returns 0 results
