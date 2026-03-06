@@ -305,8 +305,8 @@ send_agent_intros() {
       # Verify delivery: exit code AND output content (openclaw exits 0 even on delivery failure)
       if [ $intro_rc -ne 0 ]; then
         log "  ✗ $agent_name intro command failed (exit $intro_rc) via $intro_plat"
-      elif echo "$intro_output" | grep -qi "delivery failed\|token missing\|bot token missing"; then
-        log "  ✗ $agent_name intro delivery failed via $intro_plat: $(echo "$intro_output" | grep -i 'delivery\|token missing' | head -1)"
+      elif echo "$intro_output" | grep -qi "delivery failed\|token missing\|bot token missing\|account mismatch\|routing failed\|outbound not configured"; then
+        log "  ✗ $agent_name intro delivery failed via $intro_plat: $(echo "$intro_output" | grep -i 'delivery\|token missing\|mismatch\|routing\|outbound' | head -1)"
       else
         log "  ✓ $agent_name intro sent via $intro_plat"
         intro_ok=true

@@ -13,6 +13,7 @@ the set of vars produced by parse-habitat.py + generate_group_env().
 import os
 import re
 import subprocess
+import warnings
 
 import pytest
 
@@ -190,9 +191,12 @@ class TestEnvContract:
             unknown -= well_known
 
             if unknown:
-                # This is a warning, not a hard fail — new vars may be legitimate
+                # Warning, not a hard fail — new vars may be legitimate
                 # but should be consciously added to the produced set
-                print(f"  INFO: {script_name} references vars not in known producers: {unknown}")
+                warnings.warn(
+                    f"{script_name} references vars not in known producers: {unknown}",
+                    stacklevel=1,
+                )
 
     def test_owner_id_vars_in_parse_habitat(self):
         """parse-habitat.py must produce per-platform owner IDs."""
@@ -220,10 +224,12 @@ class TestEnvContract:
                 if stripped.startswith("#"):
                     continue
                 if "habitat-parsed.env" in stripped and "source" in stripped:
-                    # This is a pre-existing issue that Phase 1 will fix.
-                    # For now, just warn (don't fail) since this is the lint target.
-                    print(f"  WARN: {script_name}:{i} sources habitat-parsed.env "
-                          f"(Phase 1 will eliminate this)")
+                    # Pre-existing issue that Phase 1 will fix.
+                    warnings.warn(
+                        f"{script_name}:{i} sources habitat-parsed.env "
+                        f"(Phase 1 will eliminate this)",
+                        stacklevel=1,
+                    )
 
 
 class TestConfigValidation:

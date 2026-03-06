@@ -178,7 +178,10 @@ validate_generated_config() {
 
     if [ ! -f "$config_path" ]; then
         echo "WARNING: validate_generated_config: config not found for group '$group' at $config_path" >&2
-        return 0  # Non-fatal — config may not exist yet during first pass
+        # Non-fatal: returns success if config doesn't exist yet.
+        # Callers must ensure config is generated BEFORE calling validation.
+        # In build-full-config.sh this is guaranteed (step 3 generates, step 4 validates).
+        return 0
     fi
 
     local agent_count binding_count
