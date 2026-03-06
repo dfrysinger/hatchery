@@ -39,11 +39,9 @@ Environment variables flow from habitat JSON to runtime scripts through 3 overla
 
 5. **Testable.** Every function has a unit test. The test suite catches missing vars before a droplet provision does.
 
-> **[ChatGPT inline review]**
-> Strong goal set. Recommend explicitly naming two SSOTs to avoid ambiguity later:
-> - **Topology SSOT:** `/etc/openclaw-groups.json`
-> - **Runtime env SSOT:** `group.env`
-> This keeps "single source of truth" precise instead of overloaded.
+**Named SSOTs** (per ChatGPT review):
+- **Topology SSOT:** `/etc/openclaw-groups.json` — group names, ports, isolation mode, service names
+- **Runtime env SSOT:** `group.env` — all env vars a runtime script needs, per group
 
 ---
 
@@ -169,30 +167,25 @@ Runtime:
 ```
 notify_owner(message)                    ← NEW: single entry point
   ├── resolves platform preference       (from NOTIFY_PLATFORMS env var)
-  ├── finds working token                (existing logic from notify_find_token)
-  ├── resolves owner ID                  (from OWNER_ID env var — pre-resolved)
-  └── sends via raw API                  (existing send_telegram/discord_notification)
+  ├── for each platform:
+  │     ├── finds working token          (_find_notify_token)
+  │     ├── resolves owner ID            (_get_owner_id → per-platform ID)
+  │     └── sends via raw API            (send_telegram/discord_notification)
+  └── returns 0 on first success, 1 if all exhausted
 
-OWNER_ID=5874850284                      ← Pre-resolved by parse-habitat.py
+TELEGRAM_OWNER_ID=5874850284             ← Per-platform (different namespaces)
+DISCORD_OWNER_ID=795380005466800159      ← Per-platform
 NOTIFY_PLATFORMS=telegram,discord        ← Ordered preference list
 NOTIFY_TELEGRAM_TOKEN=...               ← Token for notifications (may differ from agent tokens)
 NOTIFY_DISCORD_TOKEN=...
 ```
 
-> **[ChatGPT inline review — important]**
-> I would **not** collapse to a single `OWNER_ID` for multi-platform fallback.
-> Telegram and Discord IDs are different namespaces/formats; a single ID can point to the wrong destination when fallback occurs.
-> Prefer:
-> - `TELEGRAM_OWNER_ID`
-> - `DISCORD_OWNER_ID`
-> - `NOTIFY_PLATFORMS=telegram,discord` (ordered preference)
-> Then resolve owner ID **per platform attempt** inside `notify_owner()`.
-
 **Key changes:**
 - `platform=both` is resolved at parse time into `NOTIFY_PLATFORMS=telegram,discord`
-- `OWNER_ID` is a single var (not per-platform) — it's the Telegram chat ID or Discord user ID depending on the first available platform
-- `notify_owner()` tries platforms in preference order, no case statements
-- Agent intros still use `openclaw agent --deliver` (different mechanism, correct — it needs the LLM) but use the same owner resolution
+- Per-platform owner IDs preserved: `TELEGRAM_OWNER_ID`, `DISCORD_OWNER_ID` (different namespaces — cannot collapse to single `OWNER_ID`)
+- `notify_owner()` tries platforms in preference order, resolves owner ID per platform attempt
+- No mutable global state — token/owner resolution is internal to `notify_owner()`
+- Agent intros still use `openclaw agent --deliver` (different mechanism, correct — it needs the LLM) but use the same `_get_owner_id()` helper
 
 ### Platform Handling
 
@@ -246,11 +239,10 @@ Runtime consumers never see "both" — they see an ordered list.
    }
    ```
 
-> **[ChatGPT inline review]**
-> Add implementation constraints here:
-> 1) Write `GROUP_ENV_VERSION=1` into every generated file for future migrations.
-> 2) Document escaping/serialization guarantees (values with spaces/newlines/`#` should round-trip safely).
-> 3) Decide whether non-isolated mode also gets a generated `group.env` (preferred for consistency), or clearly document fallback behavior as an exception.
+   **Implementation constraints** (per ChatGPT review):
+   - Write `GROUP_ENV_VERSION=1` as the first line. Future migrations can check/bump this.
+   - **Escaping:** All values are single-line `KEY=VALUE`. Values with spaces are double-quoted (`KEY="value with spaces"`). No newlines, no `#` in values. `parse-habitat.py` is responsible for sanitizing at generation time. Habitat JSON values that contain `"`, `$`, or backticks are rejected at parse time.
+   - **Non-isolated mode:** Also gets a generated `group.env` (at the default config path). `hc_load_environment()` has ONE code path: source `group.env`. No fallback to `env_load()`.
 
 2. **Simplify `hc_load_environment()`** — source group.env only:
    ```bash
@@ -261,9 +253,8 @@ Runtime consumers never see "both" — they see an ordered list.
      if [ -n "$group" ]; then
        env_file="${HC_HOME:=/home/bot}/.openclaw/configs/${group}/group.env"
      else
-       # Non-isolated mode: fall back to global files
-       env_load || return 1
-       return 0
+       # Non-isolated mode: group.env is at the default config path
+       env_file="${HC_HOME:=/home/bot}/.openclaw/configs/default/group.env"
      fi
 
      if [ -f "$env_file" ]; then
@@ -307,14 +298,15 @@ Runtime consumers never see "both" — they see an ordered list.
        f.write('NOTIFY_PLATFORMS="{}"\n'.format(platform))
    ```
 
-> **[ChatGPT inline review]**
-> Keep per-platform owner IDs as first-class outputs from parse-habitat (`TELEGRAM_OWNER_ID`, `DISCORD_OWNER_ID`).
-> `NOTIFY_PLATFORMS` should select routing order; owner ID should still be resolved by selected platform.
+   **Owner ID design** (per ChatGPT review): Keep per-platform owner IDs as first-class outputs (`TELEGRAM_OWNER_ID`, `DISCORD_OWNER_ID`). `NOTIFY_PLATFORMS` selects routing order; owner ID is resolved per platform inside `notify_owner()`. No single collapsed `OWNER_ID` — Telegram and Discord IDs are different namespaces.
 
 2. **Rewrite `notify_owner()` in `lib-notify.sh`:**
    ```bash
    # notify_owner "message"
    # Tries platforms in NOTIFY_PLATFORMS order. First working token wins.
+   # Returns: 0 on success, 1 on failure.
+   # Reason codes logged: no_token, no_owner, send_failed.
+   # No mutable global state — all resolution is local.
    notify_owner() {
      local message="$1"
      local platforms="${NOTIFY_PLATFORMS:-telegram}"
@@ -322,27 +314,46 @@ Runtime consumers never see "both" — they see an ordered list.
      IFS=',' read -ra platform_list <<< "$platforms"
      for platform in "${platform_list[@]}"; do
        local token owner_id
-       token=$(_find_notify_token "$platform") || continue
-       owner_id=$(_get_owner_id "$platform") || continue
-       [ -z "$owner_id" ] && continue
+       token=$(_find_notify_token "$platform")
+       if [ -z "$token" ]; then
+         log "  $platform: no_token — skipping"
+         continue
+       fi
+       owner_id=$(_get_owner_id "$platform")
+       if [ -z "$owner_id" ]; then
+         log "  $platform: no_owner — skipping"
+         continue
+       fi
 
        log "  Sending via $platform to $owner_id"
        case "$platform" in
-         telegram) send_telegram_notification "$token" "$owner_id" "$message"; return $? ;;
-         discord)  send_discord_notification "$token" "user:$owner_id" "$message"; return $? ;;
+         telegram)
+           if timeout 10 send_telegram_notification "$token" "$owner_id" "$message"; then
+             return 0
+           else
+             log "  $platform: send_failed (rc=$?)"
+           fi
+           ;;
+         discord)
+           if timeout 10 send_discord_notification "$token" "user:$owner_id" "$message"; then
+             return 0
+           else
+             log "  $platform: send_failed (rc=$?)"
+           fi
+           ;;
        esac
      done
 
-     log "Cannot send notification — no working platform"
+     log "Cannot send notification — all platforms exhausted"
      return 1
    }
    ```
 
-> **[ChatGPT inline review]**
-> Nice direction. Add explicit behavior contract:
-> - timeout/retry/backoff per platform
-> - return reason codes (`no_token`, `no_owner`, `send_failed`) for diagnostics
-> - no mutable global notify state (`NOTIFY_*`) outside function scope
+   **Behavior contract** (per ChatGPT review):
+   - **Timeout:** 10s per platform attempt (prevents hanging on network issues)
+   - **Retry:** No retry within `notify_owner` — caller decides whether to retry. Keeps the function simple.
+   - **Reason codes:** Logged per platform: `no_token`, `no_owner`, `send_failed`. Caller sees exit 0 (success) or 1 (all platforms exhausted).
+   - **No mutable globals:** All `NOTIFY_*` globals are eliminated. Token/owner resolution is local to the function. No side effects.
 
 3. **Replace all callers:**
    - `safe-mode-handler.sh`: `notify_send_message "$msg"` → `notify_owner "$msg"`
