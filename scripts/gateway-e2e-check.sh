@@ -209,11 +209,19 @@ check_agents_e2e() {
     fi
     local dur=$(( $(date +%s) - start_time ))
 
-    if [ $rc -eq 0 ] && echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && ! echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError"; then
+    # Check for valid response: rc=0 AND (magic string OR valid JSON with status:ok and content)
+    # LLMs don't always follow literal instructions, so also accept any valid response with actual content
+    local has_magic has_valid_json
+    has_magic=$(echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && echo "yes" || echo "no")
+    has_valid_json=$(echo "$output" | grep -qE '"status":\s*"ok"' && echo "$output" | grep -qE '"text":\s*"[^"]' && echo "yes" || echo "no")
+    local has_error=$(echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError" && echo "yes" || echo "no")
+    
+    if [ $rc -eq 0 ] && [ "$has_error" = "no" ] && { [ "$has_magic" = "yes" ] || [ "$has_valid_json" = "yes" ]; }; then
       log "  ✓ $agent_id responded in ${dur}s"
     else
       local reason="exit=$rc"
-      [ $rc -eq 0 ] && ! echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && reason="missing HEALTH_CHECK_OK (LLM error?)"
+      [ $rc -eq 0 ] && [ "$has_magic" = "no" ] && [ "$has_valid_json" = "no" ] && reason="no valid response (empty or malformed)"
+      [ "$has_error" = "yes" ] && reason="error in output"
       log "  ✗ $agent_id FAILED ($reason, ${dur}s)"
       echo "$output" | while IFS= read -r line; do log "    | $line"; done
       all_healthy=false; failed_agents="${failed_agents:+${failed_agents},}${agent_id}"
