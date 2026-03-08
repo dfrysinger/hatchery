@@ -109,15 +109,44 @@ for grp in broken-grp healthy-grp; do
 done
 
 # Check critical notification lockout (only for broken group)
-if [ -f "/var/lib/init-status/critical-notified-broken-grp" ]; then
-  pass "Critical notification lockout set for broken-grp"
-else
-  pass "No critical lockout (recovery in progress, max attempts not reached)"
-fi
 if [ -f "/var/lib/init-status/critical-notified-healthy-grp" ]; then
   fail "Unexpected critical lockout for healthy-grp"
 else
   pass "No false lockout for healthy-grp"
+fi
+
+# --- 5b. Force Critical Failure Path ---
+echo
+echo "▸ Critical Failure Path (max recovery attempts)"
+echo "  Forcing recovery cycles until critical lockout..."
+
+# Clear any cooldown markers
+sudo rm -f /var/lib/init-status/recently-recovered-broken-grp
+
+# Get current recovery attempts
+CURRENT_ATTEMPTS=$(cat /var/lib/init-status/recovery-attempts-broken-grp 2>/dev/null || echo "0")
+echo "  Starting at $CURRENT_ATTEMPTS recovery attempts"
+
+# Force cycles until we hit critical (max 3 iterations to avoid infinite loop)
+MAX_LOOPS=3
+for i in $(seq 1 $MAX_LOOPS); do
+  if [ -f "/var/lib/init-status/critical-notified-broken-grp" ]; then
+    break
+  fi
+  echo "  Cycle $i: triggering E2E failure..."
+  sudo rm -f /var/lib/init-status/recently-recovered-broken-grp
+  sudo GROUP=broken-grp GROUP_PORT=18790 /usr/local/bin/gateway-e2e-check.sh >/dev/null 2>&1 || true
+  sudo systemctl start openclaw-safeguard-broken-grp.service 2>/dev/null || true
+  sleep 10
+done
+
+FINAL_ATTEMPTS=$(cat /var/lib/init-status/recovery-attempts-broken-grp 2>/dev/null || echo "0")
+echo "  Final recovery attempts: $FINAL_ATTEMPTS"
+
+if [ -f "/var/lib/init-status/critical-notified-broken-grp" ]; then
+  pass "Critical failure triggered after max recovery attempts"
+else
+  fail "Critical lockout not set after $FINAL_ATTEMPTS attempts"
 fi
 
 # --- 6. Cross-Group Isolation ---
