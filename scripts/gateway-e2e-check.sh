@@ -214,7 +214,8 @@ check_agents_e2e() {
     local has_magic has_valid_json
     has_magic=$(echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && echo "yes" || echo "no")
     has_valid_json=$(echo "$output" | grep -qE '"status":\s*"ok"' && echo "$output" | grep -qE '"text":\s*"[^"]' && echo "yes" || echo "no")
-    local has_error=$(echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError" && echo "yes" || echo "no")
+    # Check for error patterns in output (including LLM API errors)
+    local has_error=$(echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError|authentication_error|invalid.*api.key|401|403|rate.limit" && echo "yes" || echo "no")
     
     if [ $rc -eq 0 ] && [ "$has_error" = "no" ] && { [ "$has_magic" = "yes" ] || [ "$has_valid_json" = "yes" ]; }; then
       log "  ✓ $agent_id responded in ${dur}s"
