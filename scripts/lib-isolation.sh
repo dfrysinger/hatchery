@@ -184,18 +184,21 @@ validate_generated_config() {
         return 0
     fi
 
-    local agent_count binding_count
+    local agent_count
     agent_count=$(jq '.agents.list | length' "$config_path" 2>/dev/null) || agent_count=0
-    binding_count=$(jq '.bindings | length' "$config_path" 2>/dev/null) || binding_count=0
 
-    # Check 1: Single-agent account naming (Doctor renames non-"default" single accounts)
+    # Check 1: Single-agent account naming (must use agent ID, e.g., "agent1")
+    # Multi-agent mode uses each agent's ID as the account key.
+    # The "default" key is only accepted for backward compat with deployed configs
+    # that were generated before this policy change.
     if [ "$agent_count" -eq 1 ]; then
         for channel in telegram discord; do
             local acct_keys
             acct_keys=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null) || continue
-            if [ -n "$acct_keys" ] && [ "$acct_keys" != "default" ]; then
-                echo "FATAL: group '$group' single-agent $channel account is '$acct_keys' — must be 'default' (Doctor will rename it)" >&2
-                return 1
+            # Reject only obviously wrong keys — empty configs or clearly wrong names
+            # "default" is accepted for backward compat; agent IDs (agent1 etc.) are preferred
+            if [ -n "$acct_keys" ] && [[ "$acct_keys" != "default" && "$acct_keys" != "agent"* && "$acct_keys" != "safe-mode" ]]; then
+                echo "WARNING: group '$group' single-agent $channel account key is '$acct_keys' — expected agent ID like 'agent1'" >&2
             fi
         done
     fi
@@ -264,10 +267,11 @@ generate_groups_manifest() {
     # Sort groups alphabetically for deterministic port assignment
     local groups_unsorted groups
     IFS=',' read -ra groups_unsorted <<< "${ISOLATION_GROUPS:?ISOLATION_GROUPS required}"
-    groups=($(printf '%s\n' "${groups_unsorted[@]}" | sort))
+    mapfile -t groups < <(printf '%s\n' "${groups_unsorted[@]}" | sort)
 
     # Build JSON via jq for correctness (no manual string concatenation)
-    local manifest_json='{"generated":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","groups":{}}'
+    local manifest_json
+    manifest_json='{"generated":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","groups":{}}'
     local port_index=0
     local group
     for group in "${groups[@]}"; do

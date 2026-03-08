@@ -66,6 +66,7 @@ hc_load_environment() {
   # Source group.env (the SSOT for runtime)
   if [ -f "$group_env_file" ]; then
     set -a
+    # shellcheck source=/dev/null
     source "$group_env_file"
     set +a
   elif [ -z "${TEST_MODE:-}" ]; then

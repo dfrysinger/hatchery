@@ -485,11 +485,11 @@ fi
 type log &>/dev/null || log() { echo "[build-full-config] $*"; }
 
 if [ -x /usr/local/bin/openclaw-state.sh ]; then
-  sudo -u "${USERNAME:-bot}" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+  sudo -u "${USERNAME:-bot}" /usr/local/bin/openclaw-state.sh init 2>&1 | sudo tee -a "$LOG" >/dev/null || true
   if [ -n "${ISOLATION_GROUPS:-}" ]; then
     IFS=',' read -ra _groups <<< "$ISOLATION_GROUPS"
     for grp in "${_groups[@]}"; do
-      sudo -u "${USERNAME:-bot}" GROUP="$grp" /usr/local/bin/openclaw-state.sh init >> "$LOG" 2>&1 || true
+      sudo -u "${USERNAME:-bot}" GROUP="$grp" /usr/local/bin/openclaw-state.sh init 2>&1 | sudo tee -a "$LOG" >/dev/null || true
     done
   fi
   log "State machine initialized"

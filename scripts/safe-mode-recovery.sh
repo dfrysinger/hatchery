@@ -170,10 +170,11 @@ test_oauth_token() {
 
 # Check if OAuth profile exists and is valid in auth-profiles.json
 # Sets globals (avoids subshell issues with array modifications):
-#   OAUTH_CHECK_RESULT:   "oauth:<actual_provider>" on success, empty on failure  
+#   OAUTH_CHECK_RESULT:   "oauth:<actual_provider>" on success, empty on failure
 #   OAUTH_CHECK_REASON:   failure reason for diagnostics
 #   OAUTH_CHECK_PROVIDER: actual provider name (e.g., openai-codex for openai)
 # Returns: 0=success, 1=failure
+# shellcheck disable=SC2034  # OAUTH_CHECK_REASON/PROVIDER are output globals for callers
 check_oauth_profile() {
   local provider="$1"
   local auth_file="${AUTH_PROFILES_PATH:-}"
@@ -297,8 +298,6 @@ check_oauth_profile() {
 
 # Global for OAuth check result (avoids subshell issues)
 OAUTH_CHECK_RESULT=""
-OAUTH_CHECK_REASON=""
-OAUTH_CHECK_PROVIDER=""
 
 # Default log_recovery to no-op if not defined (allows function use outside run_smart_recovery)
 type log_recovery &>/dev/null || log_recovery() { :; }

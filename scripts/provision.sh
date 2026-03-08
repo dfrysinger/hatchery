@@ -530,7 +530,7 @@ touch /var/lib/init-status/needs-post-boot-check
 #   Stage 7: build-full-config (required for valid OpenClaw config)
 # Stages 4-6 are non-critical — OpenClaw boots without desktop/tools/extras
 # and safe mode can recover from those missing packages.
-# Without this marker, cloud-init power_state condition fails → no reboot →
+# Without this marker, cloud-init power_state condition fails → reboot skipped →
 # droplet stays up for SSH debugging.
 if [ -f /var/lib/init-status/build-failed ]; then
   ELAPSED=$(( $(date +%s) - START ))

@@ -213,17 +213,16 @@ check_agents_e2e() {
     # If output_tokens == 0, the LLM never responded (auth error, timeout, etc.)
     local output_tokens
     output_tokens=$(echo "$output" | jq -r '.result.meta.agentMeta.lastCallUsage.output // .result.meta.agentMeta.usage.output // 0' 2>/dev/null || echo "0")
-    
-    # Also check for magic strings as fallback (some responses may not have token info)
-    local has_magic
-    has_magic=$(echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && echo "yes" || echo "no")
-    
-    # Success if: command succeeded AND (LLM produced tokens OR magic string present)
-    if [ $rc -eq 0 ] && { [ "$output_tokens" -gt 0 ] || [ "$has_magic" = "yes" ]; }; then
+
+    # Success if: command succeeded AND (magic word HEALTH_CHECK_OK present OR tokens > 0)
+    if [ $rc -eq 0 ] && echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK"; then
+      log "  ✓ $agent_id responded in ${dur}s (magic word detected)"
+    elif [ $rc -eq 0 ] && [ "$output_tokens" -gt 0 ]; then
       log "  ✓ $agent_id responded in ${dur}s (${output_tokens} tokens)"
     else
       local reason="exit=$rc"
       [ $rc -eq 0 ] && [ "$output_tokens" -eq 0 ] && reason="LLM produced 0 output tokens (auth/API error)"
+      [ $rc -eq 0 ] && ! echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && reason="missing HEALTH_CHECK_OK (LLM error?)"
       log "  ✗ $agent_id FAILED ($reason, ${dur}s)"
       echo "$output" | while IFS= read -r line; do log "    | $line"; done
       all_healthy=false; failed_agents="${failed_agents:+${failed_agents},}${agent_id}"
