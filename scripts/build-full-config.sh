@@ -409,6 +409,52 @@ E2EFILE
 
   systemctl enable openclaw-safeguard.path 2>/dev/null || true
   systemctl enable openclaw-e2e.service 2>/dev/null || true
+
+  # Phase 1 (ENV-REFACTOR): Generate default group.env for non-isolated mode
+  # This is the SSOT for runtime scripts (hc_load_environment sources this)
+  DEFAULT_CONFIG_DIR="$H/.openclaw/configs/default"
+  if type ensure_bot_dir &>/dev/null; then
+    ensure_bot_dir "$DEFAULT_CONFIG_DIR" 700
+  else
+    mkdir -p "$DEFAULT_CONFIG_DIR"
+    chown "$USERNAME:$USERNAME" "$DEFAULT_CONFIG_DIR" 2>/dev/null || true
+    chmod 700 "$DEFAULT_CONFIG_DIR" 2>/dev/null || true
+  fi
+
+  # Write default group.env with all habitat vars + decoded secrets
+  cat > "$DEFAULT_CONFIG_DIR/group.env" <<DEFENV
+# Runtime environment for non-isolated mode — GENERATED, DO NOT EDIT
+# This is the SINGLE SOURCE OF TRUTH for runtime scripts.
+GROUP_ENV_VERSION=1
+DEFENV
+
+  # Include all vars from habitat-parsed.env
+  if [ -f /etc/habitat-parsed.env ]; then
+    grep -v '^#\|^$' /etc/habitat-parsed.env >> "$DEFAULT_CONFIG_DIR/group.env"
+  fi
+
+  # Add runtime overrides for non-isolated mode
+  cat >> "$DEFAULT_CONFIG_DIR/group.env" <<DEFOVERRIDES
+
+# Non-isolated mode settings
+GROUP=
+GROUP_PORT=18789
+ISOLATION=none
+NETWORK_MODE=host
+OPENCLAW_CONFIG_PATH=$H/.openclaw/openclaw.json
+OPENCLAW_STATE_DIR=$H/.openclaw
+
+# Decoded secrets
+ANTHROPIC_API_KEY=${AK:-}
+OPENAI_API_KEY=
+GOOGLE_API_KEY=${GK:-}
+GEMINI_API_KEY=${GK:-}
+BRAVE_API_KEY=${BK:-}
+DEFOVERRIDES
+
+  chmod 600 "$DEFAULT_CONFIG_DIR/group.env"
+  chown "$USERNAME:$USERNAME" "$DEFAULT_CONFIG_DIR/group.env" 2>/dev/null || true
+  echo "Generated default group.env for non-isolated mode"
 fi
 
 # Enable the main openclaw service ONLY when not using session/container isolation.
@@ -490,7 +536,12 @@ if [ -n "${ISOLATION_GROUPS:-}" ] && type generate_groups_manifest &>/dev/null; 
     systemctl enable "openclaw-e2e-${group}.service" 2>/dev/null || true
   done
 
-  # 4. Dispatch to mode-specific generators (thin — service definitions only)
+  # 4. Validate generated configs (fail fast on mismatched accounts/bindings)
+  for group in "${ALL_GROUPS[@]}"; do
+    validate_generated_config "$group" || exit 1
+  done
+
+  # 5. Dispatch to mode-specific generators (thin — service definitions only)
   session_groups=$(get_groups_by_type "session")
   container_groups=$(get_groups_by_type "container")
 
