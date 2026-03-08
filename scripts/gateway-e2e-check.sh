@@ -209,20 +209,22 @@ check_agents_e2e() {
     fi
     local dur=$(( $(date +%s) - start_time ))
 
-    # Check for valid response: rc=0 AND (magic string OR valid JSON with status:ok and content)
-    # LLMs don't always follow literal instructions, so also accept any valid response with actual content
-    local has_magic has_valid_json
-    has_magic=$(echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && echo "yes" || echo "no")
-    has_valid_json=$(echo "$output" | grep -qE '"status":\s*"ok"' && echo "$output" | grep -qE '"text":\s*"[^"]' && echo "yes" || echo "no")
-    # Check for error patterns in output (including LLM API errors)
-    local has_error=$(echo "$output" | grep -qE "No API key found|Embedded agent failed|FailoverError|authentication_error|invalid.*api.key|401|403|rate.limit" && echo "yes" || echo "no")
+    # Robust health check: verify LLM actually responded by checking token usage
+    # If output_tokens > 0, the LLM definitely responded (regardless of content)
+    # If output_tokens == 0, the LLM never responded (auth error, timeout, etc.)
+    local output_tokens
+    output_tokens=$(echo "$output" | jq -r '.result.meta.agentMeta.lastCallUsage.output // .result.meta.agentMeta.usage.output // 0' 2>/dev/null || echo "0")
     
-    if [ $rc -eq 0 ] && [ "$has_error" = "no" ] && { [ "$has_magic" = "yes" ] || [ "$has_valid_json" = "yes" ]; }; then
-      log "  ✓ $agent_id responded in ${dur}s"
+    # Also check for magic strings as fallback (some responses may not have token info)
+    local has_magic
+    has_magic=$(echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && echo "yes" || echo "no")
+    
+    # Success if: command succeeded AND (LLM produced tokens OR magic string present)
+    if [ $rc -eq 0 ] && { [ "$output_tokens" -gt 0 ] || [ "$has_magic" = "yes" ]; }; then
+      log "  ✓ $agent_id responded in ${dur}s (${output_tokens} tokens)"
     else
       local reason="exit=$rc"
-      [ $rc -eq 0 ] && [ "$has_magic" = "no" ] && [ "$has_valid_json" = "no" ] && reason="no valid response (empty or malformed)"
-      [ "$has_error" = "yes" ] && reason="error in output"
+      [ $rc -eq 0 ] && [ "$output_tokens" -eq 0 ] && reason="LLM produced 0 output tokens (auth/API error)"
       log "  ✗ $agent_id FAILED ($reason, ${dur}s)"
       echo "$output" | while IFS= read -r line; do log "    | $line"; done
       all_healthy=false; failed_agents="${failed_agents:+${failed_agents},}${agent_id}"
