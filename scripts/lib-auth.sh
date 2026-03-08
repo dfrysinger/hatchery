@@ -249,7 +249,7 @@ find_working_telegram_token() {
       continue
     fi
 
-    if validate_telegram_token "$token"; then
+    if "${VALIDATE_TELEGRAM_TOKEN_FN:-validate_telegram_token}" "$token"; then
       _diag "telegram:agent${i}:✅:valid"
       FOUND_TOKEN_RESULT="${i}:${token}"
       return 0
@@ -283,7 +283,7 @@ find_working_discord_token() {
       continue
     fi
 
-    if validate_discord_token "$token"; then
+    if "${VALIDATE_DISCORD_TOKEN_FN:-validate_discord_token}" "$token"; then
       _diag "discord:agent${i}:✅:valid"
       FOUND_TOKEN_RESULT="${i}:${token}"
       return 0
@@ -354,7 +354,7 @@ find_working_api_provider() {
       continue
     fi
 
-    if validate_api_key "$provider" "$key"; then
+    if "${VALIDATE_API_KEY_FN:-validate_api_key}" "$provider" "$key"; then
       _diag "api:${provider}:✅:${VALIDATION_REASON:-valid}"
       # shellcheck disable=SC2034  # Read by callers
       FOUND_API_PROVIDER="$provider"
@@ -365,4 +365,38 @@ find_working_api_provider() {
   done
 
   return 1
+}
+
+# Generate a minimal emergency config for safe mode recovery.
+# Args: $1=bot_token $2=platform $3=provider $4=api_key $5=agent_name (optional)
+# Output: JSON config (stdout)
+generate_emergency_config() {
+  local token="$1"
+  local platform="${2:-telegram}"
+  local provider="${3:-anthropic}"
+  local api_key="${4:-}"
+  local _agent_name="${5:-SafeModeBot}"  # accepted for API compat, name comes from generate-config.sh
+
+  local GEN_CONFIG_SCRIPT=""
+  for _gc_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+    [ -f "$_gc_path/generate-config.sh" ] && { GEN_CONFIG_SCRIPT="$_gc_path/generate-config.sh"; break; }
+  done
+
+  if [ -z "$GEN_CONFIG_SCRIPT" ]; then
+    echo "FATAL: generate-config.sh not found" >&2
+    return 1
+  fi
+
+  local owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
+  local gw_token
+  gw_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
+
+  "$GEN_CONFIG_SCRIPT" --mode safe-mode \
+    --token "$api_key" \
+    --provider "$provider" \
+    --platform "$platform" \
+    --bot-token "$token" \
+    --owner-id "$owner_id" \
+    --gateway-token "$gw_token" \
+    --port "${GROUP_PORT:-18789}" 2>/dev/null
 }

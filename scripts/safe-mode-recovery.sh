@@ -303,6 +303,39 @@ OAUTH_CHECK_RESULT=""
 type log_recovery &>/dev/null || log_recovery() { :; }
 
 
+# Build the auth header for a given provider and key.
+# Anthropic OAuth tokens (sk-ant-oat*) use Bearer; API keys use x-api-key.
+# OpenAI always uses Bearer. Google API keys use ?key= query param.
+# Usage: get_recovery_auth_header "anthropic" "$ANTHROPIC_API_KEY"
+get_recovery_auth_header() {
+  local provider="$1"
+  local key="$2"
+  case "$provider" in
+    anthropic)
+      if [[ "$key" == sk-ant-oat* ]]; then
+        echo "Authorization: Bearer ${key}"
+      else
+        echo "x-api-key: ${key}"
+      fi
+      ;;
+    openai|openai-codex)
+      echo "Authorization: Bearer ${key}"
+      ;;
+    google)
+      # Google API keys use query parameter: ?key=${GOOGLE_API_KEY}
+      echo "query:key=${key}"
+      ;;
+    *)
+      echo "Authorization: Bearer ${key}"
+      ;;
+  esac
+}
+
+# Alias for test compatibility
+find_working_platform_and_token() {
+  find_working_platform_token "$@"
+}
+
 # Get auth type for a provider (oauth or apikey)
 get_auth_type_for_provider() {
   local provider="$1"
@@ -590,6 +623,8 @@ run_smart_recovery() {
   log_recovery "  Parameters: token=${token:0:10}... platform=$platform provider=$provider auth_type=$auth_type model=$model"
   log_recovery "  api_key: ${api_key:+SET (${#api_key} chars)}"
   # Use SafeModeBot identity via generate-config.sh --mode safe-mode
+  # The safe-mode Telegram account uses: "safe-mode": { "botToken": <token> }
+  # The safe-mode Discord account uses:  "safe-mode": { "token": <token> }
   local GEN_CONFIG_SCRIPT=""
   for _gc_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
     [ -f "$_gc_path/generate-config.sh" ] && { GEN_CONFIG_SCRIPT="$_gc_path/generate-config.sh"; break; }
@@ -627,14 +662,17 @@ run_smart_recovery() {
   local config_model=$(echo "$config" | jq -r '.agents.defaults.model.primary // .agents.defaults.model // "unknown"' 2>/dev/null)
   local config_keys=$(echo "$config" | jq -r '.env | keys | join(",")' 2>/dev/null)
   log_recovery "  Generated config: model=$config_model, env_keys=$config_keys"
-  
+
   # Step 4: Write emergency config
   # Use OPENCLAW_CONFIG_PATH if set (from systemd environment) - this is the ACTUAL
   # config path the gateway uses. For session isolation, systemd sets this to
   # ~/.openclaw/configs/${GROUP}/openclaw.session.json
   local home="${HOME_DIR:-/home/${USERNAME:-bot}}"
   local config_dir config_path
-  
+
+  # Always set up safe-mode workspace (even in DRY_RUN — needed for agent identity)
+  setup_safe_mode_workspace 2>/dev/null || true
+
   if [ -n "${OPENCLAW_CONFIG_PATH:-}" ]; then
     # Use the config path from systemd environment
     config_path="$OPENCLAW_CONFIG_PATH"
