@@ -130,7 +130,7 @@ check_channel_connectivity() {
   fi
 
   # Normal mode: validate ALL agents
-  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  # Note: AGENT${i}_* vars are already available via hc_load_environment() → group.env
 
   local all_valid=true failed_agents=""
   log "  Platform: $HC_PLATFORM, Agent count: $AC"
@@ -165,8 +165,7 @@ check_channel_connectivity() {
 # Uses deterministic test prompt, no --deliver (fast, re-runnable).
 check_agents_e2e() {
   log "========== E2E AGENT CHECK =========="
-
-  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  # Note: AGENT${i}_* vars are already available via hc_load_environment() → group.env
 
   local all_healthy=true failed_agents=""
   local agents_to_check=("$@")
@@ -242,8 +241,7 @@ send_agent_intros() {
     log "  Intros already sent (marker exists) — skipping"
     return 0
   fi
-
-  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  # Note: AGENT${i}_* vars are already available via hc_load_environment() → group.env
 
   local owner_id
   owner_id=$(get_owner_id_for_platform "$HC_PLATFORM" "with_prefix")
