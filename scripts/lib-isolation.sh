@@ -415,14 +415,34 @@ generate_group_token() {
     cat "$token_file"
 }
 
-# Write per-group environment file with decoded secrets and group metadata.
+# Append decoded secrets to a group.env file.
+# Called by generate_group_env after writing base vars.
+# Expects caller to have decoded secrets in env (via env_decode_keys or manual export).
+append_decoded_secrets() {
+    local env_file="$1"
+    cat >> "$env_file" <<SECRETS
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+OPENAI_API_KEY=${OPENAI_API_KEY:-}
+GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+GEMINI_API_KEY=${GOOGLE_API_KEY:-}
+BRAVE_API_KEY=${BRAVE_API_KEY:-}
+SECRETS
+}
+
+# Write per-group environment file with ALL habitat vars plus group-specific overrides.
 # Consumed by systemd EnvironmentFile= and compose env_file:.
 #
-# Note: GROUP, GROUP_PORT, ISOLATION, NETWORK_MODE are intentionally duplicated
-# from the manifest into group.env. Systemd EnvironmentFile= cannot read JSON,
-# and consumer scripts (health check, safe-mode-handler) need these values at
-# runtime without parsing the manifest. The manifest remains SSOT for generation;
-# group.env is the runtime delivery mechanism.
+# Phase 1 (ENV-REFACTOR): group.env is now the SINGLE SOURCE OF TRUTH for runtime scripts.
+# No runtime script should source habitat-parsed.env directly. All vars flow through group.env.
+#
+# Structure:
+#   1. GROUP_ENV_VERSION=1 (allows future format detection)
+#   2. All habitat-parsed.env vars (include-all approach)
+#   3. Group-specific overrides (GROUP, GROUP_PORT, ISOLATION, etc.)
+#   4. Decoded secrets (override B64 versions from habitat-parsed.env)
+#
+# Note: GROUP, GROUP_PORT, ISOLATION, NETWORK_MODE are derived from the manifest.
+# Systemd EnvironmentFile= cannot read JSON, so these are duplicated here.
 generate_group_env() {
     local group="$1"
     local config_dir="${CONFIG_BASE}/${group}"
@@ -435,26 +455,33 @@ generate_group_env() {
 
     local env_file="${config_dir}/group.env"
 
-    cat > "$env_file" <<ENVFILE
+    # Start fresh with version marker
+    cat > "$env_file" <<HEADER
 # Runtime environment for group '${group}' — GENERATED, DO NOT EDIT
-# Topology values below are derived from /etc/openclaw-groups.json (the SSOT).
-# They are duplicated here because systemd EnvironmentFile cannot read JSON.
+# This is the SINGLE SOURCE OF TRUTH for runtime scripts.
 # To change topology, update the habitat config and re-run build-full-config.sh.
+GROUP_ENV_VERSION=1
+HEADER
+
+    # Include all vars from habitat-parsed.env (exclude comments and empty lines)
+    if [ -f /etc/habitat-parsed.env ] && [ -r /etc/habitat-parsed.env ]; then
+        grep -v '^#\|^$' /etc/habitat-parsed.env >> "$env_file" 2>/dev/null || true
+    fi
+
+    # Group-specific overrides (these take precedence over habitat-parsed.env values)
+    cat >> "$env_file" <<OVERRIDES
+
+# Group-specific overrides (derived from manifest)
 GROUP=${group}
 GROUP_PORT=${port}
 ISOLATION=${isolation}
 NETWORK_MODE=${network}
 OPENCLAW_CONFIG_PATH=${config_dir}/openclaw.session.json
 OPENCLAW_STATE_DIR=${STATE_BASE}/${group}
-ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-OPENAI_API_KEY=${OPENAI_API_KEY:-}
-GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-GEMINI_API_KEY=${GOOGLE_API_KEY:-}
-BRAVE_API_KEY=${BRAVE_API_KEY:-}
-TELEGRAM_OWNER_ID=${TELEGRAM_OWNER_ID:-}
-DISCORD_OWNER_ID=${DISCORD_OWNER_ID:-}
-HC_HABITAT_NAME=${HC_HABITAT_NAME:-}
-ENVFILE
+OVERRIDES
+
+    # Decoded secrets (override B64 versions from habitat-parsed.env)
+    append_decoded_secrets "$env_file"
 
     chmod 600 "$env_file"
     chown "${svc_user}:${svc_user}" "$env_file" 2>/dev/null || true
