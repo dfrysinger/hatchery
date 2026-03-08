@@ -47,25 +47,35 @@ done
 type d &>/dev/null || { echo "FATAL: lib-env.sh not found (d() undefined)" >&2; exit 1; }
 
 hc_load_environment() {
-  # Load env files (droplet.env + habitat-parsed.env)
-  if ! env_load; then
-    log "ERROR: env_load failed (missing /etc/droplet.env?)"
-    return 1
-  fi
+  # Phase 1 (ENV-REFACTOR): group.env is the SINGLE SOURCE OF TRUTH.
+  # No runtime script should source habitat-parsed.env directly.
 
-  if [ ! -f /etc/habitat-parsed.env ] && [ -z "${TEST_MODE:-}" ]; then
-    log "ERROR: /etc/habitat-parsed.env not found"
-    return 1
-  fi
-
-  # Decode API keys from base64
-  env_decode_keys
-
-  # Common variables
-  HC_AGENT_COUNT="${AGENT_COUNT:-1}"
+  # Determine group.env path based on GROUP (may be set via EnvironmentFile=)
+  local group_env_file=""
   HC_USERNAME="${USERNAME:-bot}"
   HC_HOME="/home/$HC_USERNAME"
-  HC_ISOLATION="${ISOLATION_DEFAULT:-none}"
+
+  if [ -n "${GROUP:-}" ]; then
+    # Isolated mode: group-specific env file
+    group_env_file="${HC_HOME}/.openclaw/configs/${GROUP}/group.env"
+  else
+    # Non-isolated mode: default group.env
+    group_env_file="${HC_HOME}/.openclaw/configs/default/group.env"
+  fi
+
+  # Source group.env (the SSOT for runtime)
+  if [ -f "$group_env_file" ]; then
+    set -a
+    source "$group_env_file"
+    set +a
+  elif [ -z "${TEST_MODE:-}" ]; then
+    log "ERROR: group.env not found at $group_env_file"
+    return 1
+  fi
+
+  # Common variables (populated from group.env)
+  HC_AGENT_COUNT="${AGENT_COUNT:-1}"
+  HC_ISOLATION="${ISOLATION:-${ISOLATION_DEFAULT:-none}}"
   HC_SESSION_GROUPS="${ISOLATION_GROUPS:-}"
   HC_PLATFORM="${PLATFORM:-telegram}"
   HC_HABITAT_NAME="${HABITAT_NAME:-Droplet}"
