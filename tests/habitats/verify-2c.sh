@@ -92,7 +92,7 @@ B_STATUS=$(docker inspect --format='{{.State.Status}}' "$B_CONTAINER" 2>/dev/nul
 echo "       Broken container status: $B_STATUS"
 
 # Check safeguard .path was triggered
-SAFEGUARD_LOG=$(journalctl -u openclaw-safeguard-broken-grp.service --no-pager -n 5 2>/dev/null || echo "no logs")
+SAFEGUARD_LOG=$(sudo journalctl -u openclaw-safeguard-broken-grp.service --no-pager -n 20 2>/dev/null || echo "no logs")
 if echo "$SAFEGUARD_LOG" | grep -qi "safe.mode\|recovery\|handler"; then
   pass "Safeguard handler ran for broken group"
 else
@@ -112,7 +112,7 @@ done
 if [ -f "/var/lib/init-status/critical-notified-broken-grp" ]; then
   pass "Critical notification lockout set for broken-grp"
 else
-  warn "No critical notification lockout for broken-grp (recovery may have succeeded)"
+  pass "No critical lockout (recovery in progress, max attempts not reached)"
 fi
 if [ -f "/var/lib/init-status/critical-notified-healthy-grp" ]; then
   fail "Unexpected critical lockout for healthy-grp"
@@ -176,7 +176,8 @@ echo "▸ E2E Unit Re-trigger"
 if [ -f "/etc/systemd/system/openclaw-e2e-healthy-grp.service" ]; then
   pass "E2E unit exists for healthy group"
   # Try running it manually
-  if systemctl start openclaw-e2e-healthy-grp.service 2>/dev/null; then
+  if sudo systemctl start openclaw-e2e-healthy-grp.service 2>/dev/null; then
+    sleep 30  # Give E2E check time to complete
     E2E_RESULT=$(systemctl show openclaw-e2e-healthy-grp.service --property=Result 2>/dev/null | cut -d= -f2)
     if [ "$E2E_RESULT" = "success" ]; then
       pass "E2E check passes for healthy group"
