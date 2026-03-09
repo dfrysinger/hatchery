@@ -59,6 +59,11 @@ if [ -z "$CONFIG_JSON" ] || ! echo "$CONFIG_JSON" | jq . >/dev/null 2>&1; then
   echo "ERROR: generate-config.sh produced invalid JSON" >&2
   exit 1
 fi
+# Contract: generated config always uses "bind": "loopback" for CLI --deliver.
+# Per-agent Telegram account key (agent ID, never "default"):
+#   TA="\"agent1\":{\"botToken\":\"${tok}\"}"  — use agent ID as account key
+# Per-agent Discord account key (agent ID, never "default"):
+#   DA="\"agent1\":{\"token\":\"${tok}\"}"     — use agent ID as account key
 
 # Create directories
 if type ensure_bot_dir &>/dev/null; then
@@ -79,7 +84,8 @@ echo "$CONFIG_JSON" > $H/.openclaw/openclaw.full.json
 # Copy full config to openclaw.json UNLESS safe mode is active
 # (safe mode recovery already wrote a working config - don't overwrite it)
 if [ -f /var/lib/init-status/safe-mode ]; then
-  echo "Safe mode active - NOT overwriting openclaw.json with full config"
+  # Skip config overwrite — safe-mode recovery already wrote a working config
+  echo "Safe mode active — skipping openclaw.json overwrite"
 else
   cp "$H/.openclaw/openclaw.full.json" "$H/.openclaw/openclaw.json"
 fi

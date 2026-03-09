@@ -102,13 +102,12 @@ esac
 EXEC_POLICY='{"security":"full","ask":"off"}'
 
 # Build agents.defaults — single source of truth for all modes.
-# Args: $1 = model (optional override, defaults to opus)
-#        $2 = workspace override (optional)
 # All keys MUST match the OpenClaw config schema (agents.defaults.*).
 # Invalid keys cause "Config invalid" → gateway refuses to start.
 build_defaults() {
-  local model="${1:-anthropic/claude-opus-4-5}"
-  local workspace="${2:-${HOME_DIR}/clawd}"
+  # Model and workspace come from global variables; no positional args used.
+  local model="${DEFAULTS_MODEL:-anthropic/claude-opus-4-5}"
+  local workspace="${DEFAULTS_WORKSPACE:-${HOME_DIR}/clawd}"
 
   jq -n \
     --arg model "$model" \

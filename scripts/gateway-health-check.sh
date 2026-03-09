@@ -162,7 +162,7 @@ check_channel_connectivity() {
 # Google API key uses query param: ?key=${GOOGLE_API_KEY}.
 # =============================================================================
 check_api_connectivity() {
-  local key provider="${1:-}"
+  local key
   # Anthropic: detect OAuth token vs API key
   key="${ANTHROPIC_API_KEY:-}"
   if [ -n "$key" ]; then
@@ -247,24 +247,19 @@ send_boot_notification() {
 # standard:  systemctl restart openclaw
 # =============================================================================
 restart_gateway() {
-  local iso="${ISOLATION:-none}"
   local user="${HC_USERNAME:-bot}"
-  log "Restarting gateway isolation='${iso}' GROUP='${GROUP:-}'..."
-  case "$iso" in
-    container)
-      docker compose \
-        -f "/home/${user}/.openclaw/compose/${GROUP:-default}/docker-compose.yaml" \
-        -p "openclaw-${GROUP:-default}" restart 2>&1 || true
-      ;;
-    session)
-      # Session mode: restart the per-group openclaw service
-      systemctl restart "openclaw-${GROUP}.service" 2>&1 || true
-      ;;
-    *)
-      # Standard (none) mode — single openclaw service
-      systemctl restart "openclaw.service" 2>&1 || true
-      ;;
-  esac
+  log "Restarting gateway ISOLATION='${ISOLATION:-none}' GROUP='${GROUP:-}'..."
+  if [ "${ISOLATION:-none}" = "session" ] && [ -n "${GROUP:-}" ]; then
+    # Session isolation: restart only this group's service
+    systemctl restart "openclaw-${GROUP}.service" 2>&1 || true
+  elif [ "${ISOLATION:-none}" = "container" ]; then
+    docker compose \
+      -f "/home/${user}/.openclaw/compose/${GROUP:-default}/docker-compose.yaml" \
+      -p "openclaw-${GROUP:-default}" restart 2>&1 || true
+  else
+    # Standard (none) mode — single openclaw service
+    systemctl restart "openclaw.service" 2>&1 || true
+  fi
 }
 
 # =============================================================================
@@ -373,11 +368,8 @@ if [ "$HEALTHY" = "true" ]; then
   log "✓ Gateway healthy — validating channel connectivity..."
 
   # Validate channel tokens before running E2E checks
-  if ! check_channel_connectivity "$SERVICE_NAME"; then
-    log "Channel connectivity failed — marking unhealthy"
-    touch "$UNHEALTHY_MARKER"
-    exit 1
-  fi
+  # EXIT_CODE=2: channel connectivity failure is critical (broken tokens can't restart-recover)
+  check_channel_connectivity "$SERVICE_NAME" || { log "Channel connectivity failed — marking unhealthy (critical)"; touch "$UNHEALTHY_MARKER"; EXIT_CODE=2; exit $EXIT_CODE; }
 
   check_agents_e2e 2>/dev/null || true
 
@@ -416,4 +408,5 @@ else
 fi
 
 log "========== HEALTH CHECK FAILED =========="
-exit 1
+EXIT_CODE=1
+exit $EXIT_CODE
