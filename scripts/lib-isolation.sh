@@ -159,7 +159,8 @@ validate_group_consistency() {
 
 # Validate a generated openclaw config for a group.
 # Checks:
-#   1. Single-agent groups must use account name "default" (Doctor enforcement)
+#   1. Single-agent groups prefer per-agent account bindings (by agent ID);
+#      a "default" account binding is allowed only as a backward-compatible fallback.
 #   2. Multi-agent groups must have a binding for every agent
 #   3. Every binding must reference an existing channel account
 #
@@ -172,7 +173,8 @@ validate_generated_config() {
 
     # If config path not in manifest yet, try conventional path
     if [ -z "$config_path" ] || [ ! -f "$config_path" ]; then
-        local config_base="${HOME:=/home/bot}/.openclaw/configs"
+        local home="${HOME:-/home/bot}"
+        local config_base="${home}/.openclaw/configs"
         config_path="${config_base}/${group}/openclaw.session.json"
     fi
 

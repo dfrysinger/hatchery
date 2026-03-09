@@ -61,10 +61,16 @@ else
   LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
 fi
 touch "$LOG" && chmod 644 "$LOG" 2>/dev/null || true
+HEALTH_CHECK_LOG="$LOG"
 
 # Initialize logging via shared lib
 hc_init_logging "${GROUP:-}"
-hc_load_environment || exit 0
+if ! hc_load_environment; then
+  if [ "${TEST_MODE:-}" != "1" ] && [ "${DRY_RUN:-}" != "1" ]; then
+    echo "FATAL: failed to load runtime environment" >&2
+    exit 1
+  fi
+fi
 
 # =============================================================================
 # Universal: Config path per isolation mode
@@ -128,7 +134,6 @@ check_channel_connectivity() {
 
     # Check telegram token when platform is telegram or both
     if [ "$_platform" = "telegram" ] || [ "$_platform" = "both" ]; then
-      local _TELEGRAM_BOT_TOKEN_VAR="AGENT${_i}_TELEGRAM_BOT_TOKEN"
       if [ -n "$tg_token" ] && validate_telegram_token "$tg_token" 2>/dev/null; then
         agent_valid=true
       fi
@@ -136,7 +141,6 @@ check_channel_connectivity() {
 
     # Check discord token when platform is discord or both
     if [ "$_platform" = "discord" ] || [ "$_platform" = "both" ]; then
-      local _DISCORD_BOT_TOKEN_VAR="AGENT${_i}_DISCORD_BOT_TOKEN"
       if [ -n "$dc_token" ] && validate_discord_token "$dc_token" 2>/dev/null; then
         agent_valid=true
       fi
@@ -177,12 +181,12 @@ check_api_connectivity() {
   # OpenAI: always Authorization: Bearer ${OPENAI_API_KEY}
   key="${OPENAI_API_KEY:-}"
   if [ -n "$key" ]; then
-    log "OpenAI: Authorization: Bearer ${OPENAI_API_KEY:-<unset>}"
+    log "OpenAI: API key configured (Bearer)"
   fi
   # Google: query param ?key=${GOOGLE_API_KEY}
   key="${GOOGLE_API_KEY:-}"
   if [ -n "$key" ]; then
-    log "Google: query param key=${GOOGLE_API_KEY:-<unset>}"
+    log "Google: API key configured (query param)"
   fi
 }
 
@@ -192,13 +196,15 @@ check_api_connectivity() {
 # =============================================================================
 send_entering_safe_mode_warning() {
   local config="${CONFIG_PATH:-}"
-  local tg_token dc_token
+  local tg_token dc_token owner_id
   # Look for accounts["safe-mode"] telegram token
   tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // empty' "$config" 2>/dev/null || echo "")
   # Look for accounts["safe-mode"] discord token (accounts.safe-mode.token)
   dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
   local msg="⚠️ Gateway health check failing — entering safe mode..."
-  notify_send_message "$msg" 2>/dev/null || true
+  owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
+  [ -n "$tg_token" ] && send_telegram_notification "$msg" "$tg_token" "$owner_id" 2>/dev/null || true
+  [ -n "$dc_token" ] && send_discord_notification "$msg" "$dc_token" "$owner_id" 2>/dev/null || true
 }
 
 # =============================================================================
@@ -296,12 +302,14 @@ enter_safe_mode() {
 check_service_health() {
   local svc="${1:-$SERVICE_NAME}" port="${2:-$PORT}"
   log "Checking $svc on port $port..."
-  hc_curl_gateway "${GROUP:-}" "/" >/dev/null 2>&1
+  GROUP_PORT="$port" hc_curl_gateway "${GROUP:-}" "/" >/dev/null 2>&1
 }
 
 # =============================================================================
 # Main Health Check
 # =============================================================================
+
+RUN_MODE="${RUN_MODE:-execstartpost}"
 
 # --- Skip is-active check in ExecStartPost mode (service is starting up) ---
 if [ "$RUN_MODE" != "execstartpost" ]; then

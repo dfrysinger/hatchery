@@ -2,15 +2,16 @@
 # =============================================================================
 # generate-session-services.sh — Generate per-group systemd service units
 # =============================================================================
-# Generates systemd .service files, session config JSON, and state directories
-# for each session isolation group.
+# Generates systemd .service files for each session isolation group.
+# This is a thin generator: it only writes unit files and does NOT create
+# config JSON or state directories (orchestrator concerns).
 #
 # Two modes:
 #   Manifest mode: MANIFEST is set and points to a valid openclaw-groups.json.
 #     Uses manifest for ports, config paths, state paths, and env files.
 #   Fallback mode: MANIFEST not set or absent.
 #     Derives configuration from AGENT*_ISOLATION_GROUP env vars.
-#     Creates config JSON and state directories itself.
+#     Computes paths from HOME_DIR and group name conventions.
 #
 # Inputs:
 #   MANIFEST         — path to /etc/openclaw-groups.json (manifest mode)
@@ -25,8 +26,6 @@
 #
 # Outputs:
 #   ${OUTPUT_DIR}/openclaw-{group}.service — one systemd unit per group
-#   ${OUTPUT_DIR}/{group}/openclaw.session.json — session config (fallback)
-#   ${HOME_DIR}/.openclaw-sessions/{group}/agents/agent{n}/agent — state dirs
 #
 # Env:
 #   SESSION_OUTPUT_DIR — output directory (default: /etc/systemd/system)
@@ -126,7 +125,7 @@ for group in "${SESSION_GROUPS[@]}"; do
         state_path="${HOME_DIR}/.openclaw-sessions/${group}"
     fi
     if [ -z "$env_file" ]; then
-        env_file="${HOME_DIR}/.openclaw-sessions/${group}/group.env"
+        env_file="${HOME_DIR}/.openclaw/configs/${group}/group.env"
     fi
 
     # Generate the systemd service unit
