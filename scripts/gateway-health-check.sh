@@ -386,7 +386,7 @@ if [ "$HEALTHY" = "true" ]; then
     systemctl restart "$_sg" 2>/dev/null || true
 
   send_boot_notification "healthy"
-  log "========== HEALTH CHECK PASSED =========="
+  log "========== HTTP CHECK PASSED =========="
   exit 0
 fi
 
@@ -407,6 +407,6 @@ else
   enter_safe_mode
 fi
 
-log "========== HEALTH CHECK FAILED =========="
+log "========== HTTP CHECK FAILED =========="
 EXIT_CODE=1
 exit $EXIT_CODE

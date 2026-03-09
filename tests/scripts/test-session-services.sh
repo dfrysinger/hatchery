@@ -2,7 +2,9 @@
 # =============================================================================
 # test-session-services.sh -- Unit tests for generate-session-services.sh
 # =============================================================================
-# Tests that session service generation works correctly
+# Tests that session service generation works correctly.
+# The script is a thin generator: it reads from a manifest and writes .service
+# files. Config/state directories are created by the orchestrator, not here.
 # =============================================================================
 
 set -uo pipefail
@@ -30,7 +32,7 @@ fail() {
 }
 
 # =============================================================================
-# Test: Session services generation (dry run)
+# Test: Session services generation (dry run with manifest)
 # =============================================================================
 echo ""
 echo "=== Test: Generate Session Services ==="
@@ -38,12 +40,37 @@ echo "=== Test: Generate Session Services ==="
 # Create temp directories
 TMPDIR=$(mktemp -d)
 OUTPUT_DIR="$TMPDIR/systemd"
-HOME_DIR="$TMPDIR/home/bot"
-mkdir -p "$OUTPUT_DIR" "$HOME_DIR/.openclaw/agents/agent1/agent" "$HOME_DIR/.openclaw/agents/agent2/agent"
+HOME_DIR_TEST="$TMPDIR/home/bot"
+CONFIG_DIR="$HOME_DIR_TEST/.openclaw/configs/test-group"
+STATE_DIR="$HOME_DIR_TEST/.openclaw-sessions/test-group"
+ENV_FILE="$CONFIG_DIR/group.env"
+CONFIG_FILE="$CONFIG_DIR/openclaw.session.json"
 
-# Create mock auth-profiles.json
-echo '{"version":1,"profiles":{}}' > "$HOME_DIR/.openclaw/agents/agent1/agent/auth-profiles.json"
-echo '{"version":1,"profiles":{}}' > "$HOME_DIR/.openclaw/agents/agent2/agent/auth-profiles.json"
+# Create pre-existing config/state (as orchestrator would)
+mkdir -p "$OUTPUT_DIR" "$CONFIG_DIR" "$STATE_DIR/agents/agent1/agent" "$STATE_DIR/agents/agent2/agent"
+echo '{}' > "$CONFIG_FILE"
+echo 'PLATFORM=telegram' > "$ENV_FILE"
+
+# Create manifest (as build-full-config.sh would)
+MANIFEST_FILE="$TMPDIR/groups.json"
+cat > "$MANIFEST_FILE" <<EOF
+{
+  "generated": "2026-01-01T00:00:00Z",
+  "groups": {
+    "test-group": {
+      "isolation": "session",
+      "port": 18790,
+      "network": "host",
+      "agents": ["agent1", "agent2"],
+      "configPath": "$CONFIG_FILE",
+      "statePath": "$STATE_DIR",
+      "envFile": "$ENV_FILE",
+      "serviceName": "openclaw-test-group",
+      "composePath": null
+    }
+  }
+}
+EOF
 
 # Set up environment
 export AGENT_COUNT=2
@@ -71,7 +98,8 @@ export GOOGLE_API_KEY=""
 export BRAVE_API_KEY=""
 
 export SESSION_OUTPUT_DIR="$OUTPUT_DIR"
-export HOME_DIR="$HOME_DIR"
+export HOME_DIR="$HOME_DIR_TEST"
+export MANIFEST="$MANIFEST_FILE"
 export DRY_RUN=1
 
 # Run the script
@@ -88,47 +116,11 @@ else
   fail "Service file not created"
 fi
 
-# Check config file was created
-if [ -f "$OUTPUT_DIR/test-group/openclaw.session.json" ]; then
-  pass "Config file created: test-group/openclaw.session.json"
+# Check gateway port in service (read from manifest)
+if grep -q -- "--port 18790" "$OUTPUT_DIR/openclaw-test-group.service" 2>/dev/null; then
+  pass "Gateway port is 18790"
 else
-  fail "Config file not created"
-fi
-
-# Validate config is valid JSON
-if [ -f "$OUTPUT_DIR/test-group/openclaw.session.json" ]; then
-  if jq . "$OUTPUT_DIR/test-group/openclaw.session.json" >/dev/null 2>&1; then
-    pass "Config file is valid JSON"
-  else
-    fail "Config file is not valid JSON"
-  fi
-fi
-
-# Check config contains expected fields
-if [ -f "$OUTPUT_DIR/test-group/openclaw.session.json" ]; then
-  # Check agents list
-  agent_count=$(jq '.agents.list | length' "$OUTPUT_DIR/test-group/openclaw.session.json" 2>/dev/null || echo 0)
-  if [ "$agent_count" = "2" ]; then
-    pass "Config contains 2 agents"
-  else
-    fail "Config should have 2 agents, got $agent_count"
-  fi
-  
-  # Check telegram is enabled
-  tg_enabled=$(jq '.channels.telegram.enabled' "$OUTPUT_DIR/test-group/openclaw.session.json" 2>/dev/null || echo false)
-  if [ "$tg_enabled" = "true" ]; then
-    pass "Telegram channel enabled"
-  else
-    fail "Telegram channel should be enabled"
-  fi
-  
-  # Check port
-  port=$(jq '.gateway.port' "$OUTPUT_DIR/test-group/openclaw.session.json" 2>/dev/null || echo 0)
-  if [ "$port" = "18790" ]; then
-    pass "Gateway port is 18790"
-  else
-    fail "Gateway port should be 18790, got $port"
-  fi
+  fail "Gateway port should be 18790"
 fi
 
 # Check service file contents
@@ -138,19 +130,18 @@ if [ -f "$OUTPUT_DIR/openclaw-test-group.service" ]; then
   else
     fail "Service file should set OPENCLAW_STATE_DIR"
   fi
-  
+
   if grep -q "ANTHROPIC_API_KEY" "$OUTPUT_DIR/openclaw-test-group.service"; then
     pass "Service file sets ANTHROPIC_API_KEY"
   else
     fail "Service file should set ANTHROPIC_API_KEY"
   fi
-fi
 
-# Check state directories were created
-if [ -d "$HOME_DIR/.openclaw-sessions/test-group/agents/agent1/agent" ]; then
-  pass "State directory created for agent1"
-else
-  fail "State directory not created for agent1"
+  if grep -q "GROUP=test-group" "$OUTPUT_DIR/openclaw-test-group.service"; then
+    pass "Service file sets GROUP"
+  else
+    fail "Service file should set GROUP"
+  fi
 fi
 
 # Cleanup
@@ -169,6 +160,7 @@ mkdir -p "$OUTPUT_DIR"
 export ISOLATION_DEFAULT="none"
 export ISOLATION_GROUPS=""
 export SESSION_OUTPUT_DIR="$OUTPUT_DIR"
+unset MANIFEST 2>/dev/null || true
 export DRY_RUN=1
 
 output=$(bash "$REPO_DIR/scripts/generate-session-services.sh" 2>&1)

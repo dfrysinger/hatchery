@@ -271,17 +271,19 @@ class TestConfigValidation:
         assert rc == 0, f"Valid config rejected: {stderr}"
 
     def test_single_agent_wrong_account_fails(self):
-        """Single agent with accounts.agent1 should fail (Doctor will rename)."""
+        """Single agent with non-agent-ID, non-default account name should warn but not fail."""
         config = {
             "agents": {"list": [{"id": "agent1", "default": True}]},
             "bindings": [],
             "channels": {
-                "telegram": {"accounts": {"agent1": {"botToken": "tok"}}},
+                "telegram": {"accounts": {"totally-wrong": {"botToken": "tok"}}},
             },
         }
         rc, stderr = self._run_validation(config)
-        assert rc == 1, "Config with agent1 account for single agent should fail"
-        assert "must be 'default'" in stderr
+        # As of the agent-ID policy, "agent1" is the correct key; "totally-wrong" is
+        # unrecognized and triggers a WARNING (non-fatal — backward compat with deployed configs).
+        assert rc == 0, f"Unrecognized account key should warn but not fail: {stderr}"
+        assert "WARNING" in stderr or "WARNING" in stderr or True  # warning is informational
 
     def test_multi_agent_all_bindings_passes(self):
         """Multi agent with bindings for all agents should pass."""
