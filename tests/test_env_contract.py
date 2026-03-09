@@ -231,6 +231,18 @@ class TestEnvContract:
                         stacklevel=1,
                     )
 
+    def test_lib_notify_does_not_source_habitat_parsed_env(self):
+        """lib-notify must rely on group.env-loaded vars, not runtime habitat source."""
+        lib_notify = os.path.join(SCRIPTS_DIR, "lib-notify.sh")
+        with open(lib_notify) as f:
+            for i, line in enumerate(f, 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                assert not (
+                    "source" in stripped and "habitat-parsed.env" in stripped
+                ), f"lib-notify.sh:{i} must not source habitat-parsed.env at runtime"
+
 
 class TestConfigValidation:
     """Test the validate_generated_config function in lib-isolation.sh."""

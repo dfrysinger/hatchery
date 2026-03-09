@@ -63,12 +63,60 @@ hc_load_environment() {
     group_env_file="${HC_HOME}/.openclaw/configs/default/group.env"
   fi
 
-  # Source group.env (the SSOT for runtime)
+  # Parse group.env as data (never execute it as shell code).
+  # This prevents privilege escalation when root-context services load env.
+  hc_load_env_file_safe() {
+    local env_file="$1"
+    local line line_no key value
+    line_no=0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+      line_no=$((line_no + 1))
+      line="${line%$'\r'}"
+
+      # Allow indented env files; normalize by trimming leading whitespace.
+      # Implementation: remove longest leading run of space chars from a copy,
+      # then strip that prefix from the original.
+      line="${line#"${line%%[![:space:]]*}"}"
+      [ -z "$line" ] && continue
+      [[ "$line" == \#* ]] && continue
+
+      # Optional "export " prefix
+      if [[ "$line" =~ ^export[[:space:]]+ ]]; then
+        line="${line#export }"
+      fi
+
+      if [[ ! "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+        log "ERROR: unsafe env syntax in $env_file:$line_no"
+        return 1
+      fi
+
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+
+      # Respect quoted values; strip wrappers only.
+      if [[ "$value" =~ ^\".*\"$ ]]; then
+        value="${value:1:${#value}-2}"
+      elif [[ "$value" =~ ^\'.*\'$ ]]; then
+        value="${value:1:${#value}-2}"
+      else
+        # Remove inline comments only when preceded by whitespace.
+        if [[ "$value" =~ ^(.*[^[:space:]])[[:space:]]+\#.*$ ]]; then
+          value="${BASH_REMATCH[1]}"
+        fi
+        # Trim trailing whitespace from unquoted values.
+        # Pattern explanation: remove suffix after the last non-space character.
+        value="${value%"${value##*[![:space:]]}"}"
+      fi
+
+      printf -v "$key" '%s' "$value"
+      export "${key?}"
+    done < "$env_file"
+  }
+
+  # Load group.env safely (the SSOT for runtime)
   if [ -f "$group_env_file" ]; then
-    set -a
-    # shellcheck source=/dev/null
-    source "$group_env_file"
-    set +a
+    hc_load_env_file_safe "$group_env_file" || return 1
   elif [ -z "${TEST_MODE:-}" ]; then
     log "ERROR: group.env not found at $group_env_file"
     return 1

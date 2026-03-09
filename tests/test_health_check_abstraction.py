@@ -12,6 +12,8 @@ Validates the hc_* isolation-aware functions:
 """
 import subprocess
 import os
+import tempfile
+import uuid
 import pytest
 
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts')
@@ -70,6 +72,48 @@ class TestSyntax:
             capture_output=True, text=True,
         )
         assert result.returncode == 0, f"bash -n failed: {result.stderr}"
+
+
+class TestSafeEnvLoading:
+    """hc_load_environment must treat group.env as data, not executable shell."""
+
+    def test_group_env_command_substitution_not_executed(self):
+        marker = os.path.join(tempfile.gettempdir(), f"hc-load-env-marker-{uuid.uuid4().hex}")
+        result = run_hc_function(
+            f'''
+rm -f "{marker}"
+mkdir -p /home/runner/.openclaw/configs/default
+cat > /home/runner/.openclaw/configs/default/group.env <<'EOF'
+GROUP_ENV_VERSION=1
+PLATFORM=telegram
+DANGEROUS=$(touch {marker})
+EOF
+USERNAME=runner hc_load_environment
+[ -f "{marker}" ] && echo "PWNED" || echo "SAFE"
+echo "DANGEROUS=$DANGEROUS"
+rm -f "{marker}"
+''',
+            env={'USERNAME': 'runner'},
+        )
+        assert "SAFE" in result.stdout
+        assert "PWNED" not in result.stdout
+        assert f"DANGEROUS=$(touch {marker})" in result.stdout
+
+    def test_group_env_quoted_values_load(self):
+        result = run_hc_function(
+            '''
+mkdir -p /home/runner/.openclaw/configs/default
+cat > /home/runner/.openclaw/configs/default/group.env <<'EOF'
+GROUP_ENV_VERSION=1
+HABITAT_NAME="My Habitat Name"
+PLATFORM=telegram
+EOF
+USERNAME=runner hc_load_environment
+echo "HABITAT=$HABITAT_NAME"
+''',
+            env={'USERNAME': 'runner'},
+        )
+        assert "HABITAT=My Habitat Name" in result.stdout
 
 
 class TestRestartService:
