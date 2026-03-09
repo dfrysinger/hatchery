@@ -299,12 +299,16 @@ send_agent_intros() {
       local reply_acct="$agent_id"
 
       # shellcheck disable=SC2086  # $env_prefix is intentionally word-split (KEY=VALUE pairs)
+      # if/else guards against set -e aborting on non-zero exit from command substitution
       local intro_output intro_rc
-      intro_output=$(timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
+      if intro_output=$(timeout 90 sudo -u "$HC_USERNAME" env $env_prefix openclaw agent \
         --agent "$agent_id" --message "$intro_prompt" --deliver \
         --reply-channel "$intro_plat" --reply-account "$reply_acct" --reply-to "$plat_owner" \
-        --timeout 60 --json 2>&1)
-      intro_rc=$?
+        --timeout 60 --json 2>&1); then
+        intro_rc=0
+      else
+        intro_rc=$?
+      fi
 
       # Log full output for diagnostics
       echo "$intro_output" >> "$HC_LOG"

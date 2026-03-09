@@ -131,10 +131,10 @@ if [ -f "$OUTPUT_DIR/openclaw-test-group.service" ]; then
     fail "Service file should set OPENCLAW_STATE_DIR"
   fi
 
-  if grep -q "ANTHROPIC_API_KEY" "$OUTPUT_DIR/openclaw-test-group.service"; then
-    pass "Service file sets ANTHROPIC_API_KEY"
+  if ! grep -q "Environment=ANTHROPIC_API_KEY" "$OUTPUT_DIR/openclaw-test-group.service"; then
+    pass "Service file does not embed ANTHROPIC_API_KEY (secret stays in EnvironmentFile)"
   else
-    fail "Service file should set ANTHROPIC_API_KEY"
+    fail "Service file should NOT embed ANTHROPIC_API_KEY (use EnvironmentFile with mode 600)"
   fi
 
   if grep -q "GROUP=test-group" "$OUTPUT_DIR/openclaw-test-group.service"; then

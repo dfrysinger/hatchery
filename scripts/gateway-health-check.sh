@@ -236,7 +236,7 @@ send_boot_notification() {
       owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
       send_telegram_notification "$tg_token" "$owner_id" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
       send_discord_notification "$dc_token" "$owner_id" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
-      openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." --agent safe-mode --reply-account safe-mode 2>/dev/null || true
+      openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." --agent safe-mode --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
       ;;
     degraded)
       notify_send_message "⚠️ Gateway degraded — some features may be unavailable" 2>/dev/null || true
@@ -395,8 +395,8 @@ if [ "$HEALTHY" = "true" ]; then
   rm -f "$UNHEALTHY_MARKER"
   rm -f "$SAFE_MODE_FILE"
 
-  # Set stage=11 and create setup-complete on full health
-  echo '11' > /var/lib/init-status/stage 2>/dev/null || true
+  # Set stage=11 and create setup-complete on full health (use set_stage for monotonic guarantee)
+  set_stage 11 "ready" || true
   touch /var/lib/init-status/setup-complete 2>/dev/null || true
 
   # Re-arm safeguard path unit

@@ -22,7 +22,6 @@
 #   HABITAT_NAME     — habitat name (for unit descriptions)
 #   AGENT_COUNT      — number of agents (fallback mode)
 #   AGENT{n}_*       — per-agent vars (fallback mode)
-#   ANTHROPIC_API_KEY — API key (embedded in service env)
 #
 # Outputs:
 #   ${OUTPUT_DIR}/openclaw-{group}.service — one systemd unit per group
@@ -142,7 +141,7 @@ Type=simple
 User=${SVC_USER}
 WorkingDirectory=${HOME_DIR}
 ExecStart=/usr/local/bin/openclaw gateway --bind loopback --port ${port}
-ExecStartPost=+/bin/bash -c 'source ${env_file} && GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
+ExecStartPost=+/bin/bash -c 'GROUP=${group} GROUP_PORT=${port} RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 Restart=on-failure
 RestartSec=10
 RestartPreventExitStatus=2
@@ -156,7 +155,6 @@ Environment=GROUP=${group}
 Environment=GROUP_PORT=${port}
 Environment=OPENCLAW_CONFIG_PATH=${config_path}
 Environment=OPENCLAW_STATE_DIR=${state_path}
-Environment=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 
 [Install]
 WantedBy=multi-user.target

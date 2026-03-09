@@ -389,9 +389,17 @@ generate_emergency_config() {
 
   local owner_id
   case "$platform" in
-    discord) owner_id="${DISCORD_OWNER_ID:-${TELEGRAM_OWNER_ID:-}}" ;;
-    *)       owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}" ;;
+    discord) owner_id="${DISCORD_OWNER_ID:-}" ;;
+    *)       owner_id="${TELEGRAM_OWNER_ID:-}" ;;
   esac
+
+  if [ -z "$owner_id" ]; then
+    case "$platform" in
+      discord) echo "FATAL: DISCORD_OWNER_ID must be set to generate emergency config for Discord." >&2 ;;
+      *)       echo "FATAL: TELEGRAM_OWNER_ID must be set to generate emergency config for Telegram." >&2 ;;
+    esac
+    return 1
+  fi
   local gw_token
   gw_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
 

@@ -187,7 +187,10 @@ validate_generated_config() {
     fi
 
     local agent_count
-    agent_count=$(jq '.agents.list | length' "$config_path" 2>/dev/null) || agent_count=0
+    if ! agent_count=$(jq '.agents.list | length' "$config_path" 2>/dev/null); then
+        echo "FATAL: validate_generated_config: failed to parse agents list for group '$group' at $config_path; ensure jq is installed and the JSON is valid" >&2
+        return 1
+    fi
 
     # Check 1: Single-agent account naming (must use agent ID, e.g., "agent1")
     # Multi-agent mode uses each agent's ID as the account key.
@@ -424,8 +427,11 @@ generate_group_token() {
 # Append decoded secrets to a group.env file.
 # Called by generate_group_env after writing base vars.
 # Expects caller to have decoded secrets in env (via env_decode_keys or manual export).
+# If env_decode_keys is available (from lib-env.sh), it is called defensively to ensure
+# *_B64 vars are decoded before writing — prevents silently writing empty secrets.
 append_decoded_secrets() {
     local env_file="$1"
+    type env_decode_keys &>/dev/null && env_decode_keys
     cat >> "$env_file" <<SECRETS
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 OPENAI_API_KEY=${OPENAI_API_KEY:-}
