@@ -356,6 +356,7 @@ class TestSystemdUnit:
         u = get_unit(ud, 'sandbox')
         assert 'ExecStartPost' in u
         assert 'gateway-health-check.sh' in u
+        assert 'source ' not in u
 
 
 # =========================================================================

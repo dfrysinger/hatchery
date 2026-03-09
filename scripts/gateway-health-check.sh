@@ -269,11 +269,7 @@ send_boot_notification() {
       local primary_platform owner_id
       primary_platform="${NOTIFY_PLATFORMS%%,*}"
       [ -z "$primary_platform" ] && primary_platform="${PLATFORM:-telegram}"
-      if [ "$primary_platform" = "discord" ]; then
-        owner_id=$(get_owner_id_for_platform "$primary_platform" with_prefix)
-      else
-        owner_id=$(get_owner_id_for_platform "$primary_platform")
-      fi
+      owner_id=$(get_owner_id_for_platform "$primary_platform" with_prefix)
       local -a env_args=()
       [ -n "${CONFIG_PATH:-}" ] && env_args+=("OPENCLAW_CONFIG_PATH=$CONFIG_PATH")
       [ -n "${GROUP:-}" ] && env_args+=("OPENCLAW_STATE_DIR=$HC_HOME/.openclaw-sessions/$GROUP")

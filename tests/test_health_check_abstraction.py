@@ -82,8 +82,9 @@ class TestSafeEnvLoading:
         result = run_hc_function(
             f'''
 rm -f "{marker}"
-mkdir -p /home/runner/.openclaw/configs/default
-cat > /home/runner/.openclaw/configs/default/group.env <<'EOF'
+home_dir="/home/${{USERNAME:-runner}}"
+mkdir -p "$home_dir/.openclaw/configs/default"
+cat > "$home_dir/.openclaw/configs/default/group.env" <<'EOF'
 GROUP_ENV_VERSION=1
 PLATFORM=telegram
 DANGEROUS=$(touch {marker})
@@ -102,8 +103,9 @@ rm -f "{marker}"
     def test_group_env_quoted_values_load(self):
         result = run_hc_function(
             '''
-mkdir -p /home/runner/.openclaw/configs/default
-cat > /home/runner/.openclaw/configs/default/group.env <<'EOF'
+home_dir="/home/${USERNAME:-runner}"
+mkdir -p "$home_dir/.openclaw/configs/default"
+cat > "$home_dir/.openclaw/configs/default/group.env" <<'EOF'
 GROUP_ENV_VERSION=1
 HABITAT_NAME="My Habitat Name"
 PLATFORM=telegram
