@@ -215,11 +215,31 @@ validate_generated_config() {
 
     # Check 2: Multi-agent binding completeness
     if [ "$agent_count" -gt 1 ]; then
-        local agents_with_bindings
-        agents_with_bindings=$(jq -r '.bindings[].agentId' "$config_path" 2>/dev/null | sort -u | wc -l) || agents_with_bindings=0
+        local bound_agent_ids real_agent_ids missing_agents
+        missing_agents=0
 
-        if [ "$agents_with_bindings" -lt "$agent_count" ]; then
-            echo "FATAL: group '$group' has $agent_count agents but only $agents_with_bindings have bindings — messages won't route" >&2
+        # Collect distinct agentIds that have bindings
+        if ! bound_agent_ids=$(jq -r '.bindings[].agentId' "$config_path" 2>/dev/null | sort -u); then
+            bound_agent_ids=""
+        fi
+
+        # Collect the list of real agent IDs defined in the config
+        if ! real_agent_ids=$(jq -r '.agents.list[].id' "$config_path" 2>/dev/null); then
+            echo "FATAL: validate_generated_config: failed to read agent IDs for group '$group' at $config_path; ensure jq is installed and the JSON is valid" >&2
+            return 1
+        fi
+
+        # Ensure every real agent has at least one binding
+        local agent_id
+        while IFS= read -r agent_id; do
+            [ -z "$agent_id" ] && continue
+            if ! echo "$bound_agent_ids" | grep -qx "$agent_id"; then
+                missing_agents=$((missing_agents + 1))
+            fi
+        done <<< "$real_agent_ids"
+
+        if [ "$missing_agents" -gt 0 ]; then
+            echo "FATAL: group '$group' has $agent_count agents but $missing_agents lack bindings — messages won't route" >&2
             return 1
         fi
     fi

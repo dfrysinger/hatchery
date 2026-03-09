@@ -114,44 +114,60 @@ log "SERVICE=${SERVICE_NAME} | PORT=$PORT | GROUP=${GROUP:-none} | ISOLATION=${I
 # Returns 0 if all agents have valid tokens for their platform, 1 otherwise.
 # =============================================================================
 check_channel_connectivity() {
-  local _svc="${1:-$SERVICE_NAME}"
   local _count="${AGENT_COUNT:-${AC:-1}}"
-  local _platform="${PLATFORM:-telegram}"
   local _all_valid=true
+  local _platforms
+
+  # Derive the list of platforms to check from NOTIFY_PLATFORMS (preferred) or PLATFORM (legacy)
+  if [ -n "${NOTIFY_PLATFORMS:-}" ]; then
+    # NOTIFY_PLATFORMS is comma-separated (e.g. "telegram,discord"); normalize to space-separated
+    _platforms="${NOTIFY_PLATFORMS//,/ }"
+  else
+    case "${PLATFORM:-telegram}" in
+      both)
+        # Legacy tri-state: expand to both concrete platforms
+        _platforms="telegram discord"
+        ;;
+      telegram|discord)
+        _platforms="${PLATFORM}"
+        ;;
+      *)
+        _platforms="telegram"
+        ;;
+    esac
+  fi
 
   for _i in $(seq 1 "$_count"); do
     local agent_valid=false
     local tg_token dc_token
 
-    # Collect telegram token for platform=telegram or platform=both
+    # Collect telegram token
     local _tg_var="AGENT${_i}_TELEGRAM_BOT_TOKEN"
     tg_token="${!_tg_var:-}"
     [ -z "$tg_token" ] && { _tg_var="AGENT${_i}_BOT_TOKEN"; tg_token="${!_tg_var:-}"; }
 
-    # Collect discord token for platform=discord or platform=both
+    # Collect discord token
     local _dc_var="AGENT${_i}_DISCORD_BOT_TOKEN"
     dc_token="${!_dc_var:-}"
 
-    # Check telegram token when platform is telegram or both
-    if [ "$_platform" = "telegram" ] || [ "$_platform" = "both" ]; then
-      if [ -n "$tg_token" ] && validate_telegram_token "$tg_token" 2>/dev/null; then
-        agent_valid=true
-      fi
-    fi
+    # Iterate over configured platforms; an agent is valid if any platform's token is valid
+    local _platform
+    for _platform in $_platforms; do
+      case "$_platform" in
+        telegram)
+          if [ -n "$tg_token" ] && validate_telegram_token "$tg_token" 2>/dev/null; then
+            agent_valid=true
+          fi
+          ;;
+        discord)
+          if [ -n "$dc_token" ] && validate_discord_token "$dc_token" 2>/dev/null; then
+            agent_valid=true
+          fi
+          ;;
+      esac
+    done
 
-    # Check discord token when platform is discord or both
-    if [ "$_platform" = "discord" ] || [ "$_platform" = "both" ]; then
-      if [ -n "$dc_token" ] && validate_discord_token "$dc_token" 2>/dev/null; then
-        agent_valid=true
-      fi
-    fi
-
-    # Single-platform mode: the configured platform token must be valid
-    if [ "$_platform" = "telegram" ] && [ "$agent_valid" = "false" ]; then
-      _all_valid=false
-    elif [ "$_platform" = "discord" ] && [ "$agent_valid" = "false" ]; then
-      _all_valid=false
-    elif [ "$_platform" = "both" ] && [ "$agent_valid" = "false" ]; then
+    if [ "$agent_valid" = "false" ]; then
       _all_valid=false
     fi
   done
@@ -238,8 +254,13 @@ send_boot_notification() {
       dc_owner=$(get_owner_id_for_platform discord)
       send_telegram_notification "$tg_token" "$tg_owner" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
       send_discord_notification "$dc_token" "$dc_owner" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
-      local owner_id
-      owner_id=$(get_owner_id_for_platform "${NOTIFY_PLATFORMS%% *}")
+      local primary_platform owner_id
+      primary_platform="${NOTIFY_PLATFORMS%%,*}"
+      if [ "$primary_platform" = "discord" ]; then
+        owner_id=$(get_owner_id_for_platform "$primary_platform" with_prefix)
+      else
+        owner_id=$(get_owner_id_for_platform "$primary_platform")
+      fi
       openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." --agent safe-mode --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
       ;;
     degraded)

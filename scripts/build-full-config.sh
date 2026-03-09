@@ -436,7 +436,7 @@ DEFENV
 
   # Include all vars from habitat-parsed.env
   if [ -f /etc/habitat-parsed.env ]; then
-    grep -v '^#\|^$' /etc/habitat-parsed.env >> "$DEFAULT_CONFIG_DIR/group.env"
+    grep -v '^#\|^$' /etc/habitat-parsed.env >> "$DEFAULT_CONFIG_DIR/group.env" || true
   fi
 
   # Add runtime overrides for non-isolated mode
