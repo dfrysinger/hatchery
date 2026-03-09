@@ -157,6 +157,21 @@ validate_group_consistency() {
 # Config Validation (Phase 0a — post-generation checks)
 # =========================================================================
 
+get_group_config_path() {
+    local group="$1"
+    local config_path=""
+
+    if [ -f "$MANIFEST" ]; then
+        config_path=$(jq -r --arg g "$group" '.groups[$g].configPath // empty' "$MANIFEST" 2>/dev/null) || config_path=""
+    fi
+
+    if [ -n "$config_path" ]; then
+        echo "$config_path"
+    else
+        echo "${CONFIG_BASE}/${group}/openclaw.session.json"
+    fi
+}
+
 # Validate a generated openclaw config for a group.
 # Checks:
 #   1. Single-agent groups prefer per-agent account bindings (by agent ID);
@@ -170,13 +185,6 @@ validate_generated_config() {
     local group="$1"
     local config_path
     config_path=$(get_group_config_path "$group" 2>/dev/null) || config_path=""
-
-    # If config path not in manifest yet, try conventional path
-    if [ -z "$config_path" ] || [ ! -f "$config_path" ]; then
-        local home="${HOME:-/home/bot}"
-        local config_base="${home}/.openclaw/configs"
-        config_path="${config_base}/${group}/openclaw.session.json"
-    fi
 
     if [ ! -f "$config_path" ]; then
         echo "FATAL: validate_generated_config: config not found for group '$group' at $config_path" >&2

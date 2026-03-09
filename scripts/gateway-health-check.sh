@@ -42,6 +42,10 @@ for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0
   # shellcheck source=/dev/null
   [ -f "$lib_path/lib-auth.sh" ] && { source "$lib_path/lib-auth.sh"; break; }
 done
+type validate_telegram_token &>/dev/null && type validate_discord_token &>/dev/null || {
+  echo "FATAL: lib-auth.sh not found or incomplete (missing validate_telegram_token/validate_discord_token)" >&2
+  exit 1
+}
 
 # =============================================================================
 # Universal: SERVICE_NAME derivation
@@ -118,16 +122,12 @@ check_channel_connectivity() {
   local _all_valid=true
   local _platforms
 
-  # Derive the list of platforms to check from NOTIFY_PLATFORMS (preferred) or PLATFORM (legacy)
+  # Derive the list of platforms to check from NOTIFY_PLATFORMS (preferred) or PLATFORM
   if [ -n "${NOTIFY_PLATFORMS:-}" ]; then
     # NOTIFY_PLATFORMS is comma-separated (e.g. "telegram,discord"); normalize to space-separated
     _platforms="${NOTIFY_PLATFORMS//,/ }"
   else
     case "${PLATFORM:-telegram}" in
-      both)
-        # Legacy tri-state: expand to both concrete platforms
-        _platforms="telegram discord"
-        ;;
       telegram|discord)
         _platforms="${PLATFORM}"
         ;;
@@ -212,7 +212,7 @@ check_api_connectivity() {
 # =============================================================================
 send_entering_safe_mode_warning() {
   local config="${CONFIG_PATH:-}"
-  local tg_token dc_token tg_owner dc_owner
+  local tg_token dc_token tg_owner dc_owner sent=false
   # Look for accounts["safe-mode"] telegram token
   tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // empty' "$config" 2>/dev/null || echo "")
   # Look for accounts["safe-mode"] discord token (accounts.safe-mode.token)
@@ -220,8 +220,16 @@ send_entering_safe_mode_warning() {
   local msg="⚠️ Gateway health check failing — entering safe mode..."
   tg_owner=$(get_owner_id_for_platform telegram)
   dc_owner=$(get_owner_id_for_platform discord)
-  [ -n "$tg_token" ] && send_telegram_notification "$tg_token" "$tg_owner" "$msg" 2>/dev/null || true
-  [ -n "$dc_token" ] && send_discord_notification "$dc_token" "$dc_owner" "$msg" 2>/dev/null || true
+  if [ -n "$tg_token" ] && send_telegram_notification "$tg_token" "$tg_owner" "$msg" 2>/dev/null; then
+    sent=true
+  fi
+  if [ -n "$dc_token" ] && send_discord_notification "$dc_token" "$dc_owner" "$msg" 2>/dev/null; then
+    sent=true
+  fi
+  if [ "$sent" != "true" ]; then
+    log "Both Telegram and Discord safe-mode notifications failed, attempting fallback notification method"
+    notify_send_message "$msg" 2>/dev/null || true
+  fi
 }
 
 # =============================================================================
