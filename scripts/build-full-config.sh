@@ -429,9 +429,9 @@ E2EFILE
 
   # Write default group.env with all habitat vars + decoded secrets
   cat > "$DEFAULT_CONFIG_DIR/group.env" <<DEFENV
+GROUP_ENV_VERSION=1
 # Runtime environment for non-isolated mode — GENERATED, DO NOT EDIT
 # This is the SINGLE SOURCE OF TRUTH for runtime scripts.
-GROUP_ENV_VERSION=1
 DEFENV
 
   # Include all vars from habitat-parsed.env

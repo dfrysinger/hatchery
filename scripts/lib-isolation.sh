@@ -463,10 +463,10 @@ generate_group_env() {
 
     # Start fresh with version marker
     cat > "$env_file" <<HEADER
+GROUP_ENV_VERSION=1
 # Runtime environment for group '${group}' — GENERATED, DO NOT EDIT
 # This is the SINGLE SOURCE OF TRUTH for runtime scripts.
 # To change topology, update the habitat config and re-run build-full-config.sh.
-GROUP_ENV_VERSION=1
 HEADER
 
     # Include all vars from habitat-parsed.env (exclude comments and empty lines)

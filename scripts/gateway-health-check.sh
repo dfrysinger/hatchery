@@ -80,7 +80,7 @@ fi
 HC_USERNAME="${USERNAME:-${HC_USERNAME:-bot}}"
 HC_HOME="/home/$HC_USERNAME"
 if [ -n "${GROUP:-}" ]; then
-  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$HC_HOME/.openclaw/openclaw.json}"
+  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$HC_HOME/.openclaw/configs/${GROUP}/openclaw.session.json}"
 else
   CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$HC_HOME/.openclaw/openclaw.json}"
 fi
@@ -203,8 +203,8 @@ send_entering_safe_mode_warning() {
   dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
   local msg="⚠️ Gateway health check failing — entering safe mode..."
   owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
-  [ -n "$tg_token" ] && send_telegram_notification "$msg" "$tg_token" "$owner_id" 2>/dev/null || true
-  [ -n "$dc_token" ] && send_discord_notification "$msg" "$dc_token" "$owner_id" 2>/dev/null || true
+  [ -n "$tg_token" ] && send_telegram_notification "$tg_token" "$owner_id" "$msg" 2>/dev/null || true
+  [ -n "$dc_token" ] && send_discord_notification "$dc_token" "$owner_id" "$msg" 2>/dev/null || true
 }
 
 # =============================================================================
@@ -234,8 +234,8 @@ send_boot_notification() {
       tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // empty' "$config" 2>/dev/null || echo "")
       dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
       owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
-      send_telegram_notification "🔴 Safe Mode active — recovery in progress" "$tg_token" "$owner_id" 2>/dev/null || true
-      send_discord_notification "🔴 Safe Mode active — recovery in progress" "$dc_token" "$owner_id" 2>/dev/null || true
+      send_telegram_notification "$tg_token" "$owner_id" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
+      send_discord_notification "$dc_token" "$owner_id" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
       openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." --agent safe-mode --reply-account safe-mode 2>/dev/null || true
       ;;
     degraded)

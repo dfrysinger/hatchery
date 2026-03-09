@@ -108,9 +108,9 @@ A1N="$AGENT1_NAME"
 EMERGENCY_MODEL="${AGENT1_MODEL:-anthropic/claude-opus-4-5}"
 EMERGENCY_TOKEN="$TBT"
 case "$EMERGENCY_MODEL" in
-  openai/*) EMERGENCY_KEY="${OPENAI_API_KEY:-$AK}" ;;
-  google/*) EMERGENCY_KEY="${GOOGLE_API_KEY:-${GK:-$AK}}" ;;
-  *)        EMERGENCY_KEY="$AK" ;;
+  openai/*) EMERGENCY_KEY="${OPENAI_API_KEY:-$AK}"; EMERGENCY_KEY_VAR="OPENAI_API_KEY" ;;
+  google/*) EMERGENCY_KEY="${GOOGLE_API_KEY:-${GK:-$AK}}"; EMERGENCY_KEY_VAR="GOOGLE_API_KEY" ;;
+  *)        EMERGENCY_KEY="$AK"; EMERGENCY_KEY_VAR="ANTHROPIC_API_KEY" ;;
 esac
 # PLATFORM must be explicitly set - no silent defaults
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
@@ -154,7 +154,7 @@ fi
 cat > $H/.openclaw/openclaw.json <<CFG
 {
   "env": {
-    "ANTHROPIC_API_KEY": "${EMERGENCY_KEY}"
+    "${EMERGENCY_KEY_VAR}": "${EMERGENCY_KEY}"
   },
   "agents": {
     "defaults": {
@@ -191,7 +191,7 @@ cat > $H/.openclaw/openclaw.json <<CFG
 }
 CFG
 # .env with API keys (used by OpenClaw at runtime)
-echo "ANTHROPIC_API_KEY=${EMERGENCY_KEY}" > $H/.openclaw/.env
+echo "${EMERGENCY_KEY_VAR}=${EMERGENCY_KEY}" > $H/.openclaw/.env
 [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
 GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
 [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.openclaw/.env
