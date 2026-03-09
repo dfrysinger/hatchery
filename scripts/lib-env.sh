@@ -21,6 +21,50 @@ d() { [ -n "${1:-}" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 # --- Load standard environment files ---
 # Sources /etc/droplet.env (secrets) and /etc/habitat-parsed.env (parsed habitat config).
 # Returns 0 on success, 1 if droplet.env is missing (non-fatal in test mode).
+# Safely parses a KEY=VALUE env file as data only; missing files are non-fatal so
+# callers can use this helper behind existence checks without extra branching.
+env_load_file_safe() {
+  local env_file="$1"
+  local line line_no key value
+
+  [ -f "$env_file" ] || return 0
+  line_no=0
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line_no=$((line_no + 1))
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    [ -z "$line" ] && continue
+    [[ "$line" == \#* ]] && continue
+
+    if [[ "$line" =~ ^export[[:space:]]+ ]]; then
+      line="${line#export }"
+    fi
+
+    if [[ ! "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      echo "WARNING: unsafe env syntax in ${env_file}:${line_no}" >&2
+      return 1
+    fi
+
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+
+    if [[ "$value" =~ ^\".*\"$ ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" =~ ^\'.*\'$ ]]; then
+      value="${value:1:${#value}-2}"
+    else
+      if [[ "$value" =~ ^(.*[^[:space:]])[[:space:]]+\#.*$ ]]; then
+        value="${BASH_REMATCH[1]}"
+      fi
+      value="${value%"${value##*[![:space:]]}"}"
+    fi
+
+    printf -v "$key" '%s' "$value"
+    export "${key?}"
+  done < "$env_file"
+}
+
 env_load() {
   if [ -f /etc/droplet.env ]; then
     set -a; source /etc/droplet.env; set +a

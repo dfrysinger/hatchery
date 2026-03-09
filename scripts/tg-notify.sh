@@ -22,12 +22,10 @@ done
 # Fallback d() when lib-env.sh is unavailable (e.g., test environment without system paths).
 # The function is intentionally not at line-start so simplification-pr2's '^d() {' grep skips it.
 type d &>/dev/null || d() { [ -n "${1:-}" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
-# Direct env sourcing: test stubs can replace these exact patterns for isolation.
-# shellcheck source=/etc/droplet.env
-[ -f /etc/droplet.env ] && source /etc/droplet.env
+# Load env files as data only; never execute habitat-derived shell syntax.
+[ -f /etc/droplet.env ] && env_load_file_safe /etc/droplet.env
 [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
-# shellcheck source=/etc/habitat-parsed.env
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+[ -f /etc/habitat-parsed.env ] && env_load_file_safe /etc/habitat-parsed.env
 # PLATFORM must be explicitly set - no silent defaults
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 MSG="$1"

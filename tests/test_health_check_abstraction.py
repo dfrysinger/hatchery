@@ -117,6 +117,28 @@ echo "HABITAT=$HABITAT_NAME"
         )
         assert "HABITAT=My Habitat Name" in result.stdout
 
+    def test_preloaded_group_env_skips_disk_lookup(self):
+        result = run_hc_function(
+            '''
+unset USERNAME
+GROUP=browser \
+GROUP_ENV_VERSION=1 \
+PLATFORM=telegram \
+AGENT_COUNT=2 \
+OPENCLAW_CONFIG_PATH=/srv/openclaw/.openclaw/configs/browser/openclaw.session.json \
+hc_load_environment
+echo "HOME=$HC_HOME"
+echo "CONFIG=$HC_CONFIG_PATH"
+echo "SERVICE=$HC_SERVICE_NAME"
+echo "COUNT=$HC_AGENT_COUNT"
+''',
+            env={'USERNAME': ''},
+        )
+        assert "HOME=/srv/openclaw" in result.stdout
+        assert "CONFIG=/srv/openclaw/.openclaw/configs/browser/openclaw.session.json" in result.stdout
+        assert "SERVICE=openclaw-browser" in result.stdout
+        assert "COUNT=2" in result.stdout
+
 
 class TestRestartService:
     """hc_restart_service dispatches to systemctl or docker compose."""

@@ -41,7 +41,6 @@ def make_notify_stub(script_content, tmp_dir, curl_behavior="success"):
     droplet_env = os.path.join(tmp_dir, "droplet.env")
     parsed_env = os.path.join(tmp_dir, "habitat-parsed.env")
     curl_log = os.path.join(tmp_dir, "curl_calls.log")
-
     # Create fake curl
     curl_path = os.path.join(tmp_dir, "bin", "curl")
     os.makedirs(os.path.join(tmp_dir, "bin"), exist_ok=True)
@@ -99,12 +98,16 @@ exit 0
     # Modify the script to use our test paths
     modified = script_content
     modified = modified.replace(
-        "source /etc/droplet.env",
-        f"source {droplet_env}",
+        "env_load_file_safe /etc/droplet.env",
+        f"env_load_file_safe {droplet_env}",
     )
     modified = modified.replace(
-        "source /etc/habitat-parsed.env",
-        f"source {parsed_env}",
+        "[ -f /etc/droplet.env ]",
+        f"[ -f {droplet_env} ]",
+    )
+    modified = modified.replace(
+        "env_load_file_safe /etc/habitat-parsed.env",
+        f"env_load_file_safe {parsed_env}",
     )
     modified = modified.replace(
         "[ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null",
@@ -118,9 +121,11 @@ exit 0
     # Prepend PATH override so our fake curl is used
     # Also isolate Discord DM cache per test run to avoid cross-test contamination.
     dm_cache_path = os.path.join(tmp_dir, "discord-dm-cache")
+    lib_env = os.path.join(os.path.dirname(__file__), "..", "scripts", "lib-env.sh")
     modified = (
         f'export PATH="{os.path.join(tmp_dir, "bin")}:$PATH"\n'
         f'export DISCORD_DM_CACHE_FILE="{dm_cache_path}"\n'
+        f'source "{lib_env}"\n'
         + modified
     )
 
@@ -130,7 +135,7 @@ exit 0
 def run_notify(platform="telegram", message="Test notification",
                tg_token="tg-bot-token", tg_user_id="12345",
                dc_token="dc-bot-token", dc_owner_id="owner-999",
-               curl_behavior="success"):
+               curl_behavior="success", extra_droplet_env="", extra_parsed_env=""):
     """Run tg-notify.sh and return (exit_code, curl_calls)."""
     script_content = extract_notify_script()
 
@@ -144,6 +149,7 @@ def run_notify(platform="telegram", message="Test notification",
             f.write(f'TELEGRAM_USER_ID_B64="{b64(tg_user_id)}"\n')
             f.write(f'PLATFORM_B64="{b64(platform)}"\n')
             f.write(f'DISCORD_OWNER_ID_B64="{b64(dc_owner_id)}"\n')
+            f.write(extra_droplet_env)
 
         with open(parsed_env, "w") as f:
             f.write(f'AGENT1_BOT_TOKEN="{tg_token}"\n')
@@ -151,6 +157,7 @@ def run_notify(platform="telegram", message="Test notification",
             f.write(f'PLATFORM="{platform}"\n')
             f.write(f'DISCORD_OWNER_ID="{dc_owner_id}"\n')
             f.write(f'TELEGRAM_USER_ID_B64="{b64(tg_user_id)}"\n')
+            f.write(extra_parsed_env)
 
         script_path = os.path.join(tmp_dir, "test-notify.sh")
         with open(script_path, "w") as f:
@@ -199,6 +206,18 @@ class TestNotifyTelegram:
     def test_fails_without_user_id(self):
         rc, calls = run_notify(platform="telegram", tg_user_id="")
         assert rc != 0
+
+    def test_discord_owner_id_is_loaded_as_data_not_shell(self):
+        fd, marker = tempfile.mkstemp(prefix="tg-notify-safe-parse-")
+        os.close(fd)
+        os.unlink(marker)
+        rc, calls = run_notify(
+            platform="discord",
+            dc_owner_id="",
+            extra_parsed_env=f'DISCORD_OWNER_ID="$(touch {marker})"\n',
+        )
+        assert rc == 0
+        assert not os.path.exists(marker)
 
 
 class TestNotifyDiscord:
