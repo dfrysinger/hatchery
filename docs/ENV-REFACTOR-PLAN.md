@@ -438,13 +438,16 @@ validate_generated_configs() {
       done
     done
 
-    # 3. Account naming — single-agent groups must use "default" (Doctor enforcement)
+    # 3. Account naming — single-agent groups should use the real agent ID key.
+    # "default" is accepted only for backward compatibility.
     if [ "$agent_count" -eq 1 ]; then
+      local single_agent_id
+      single_agent_id=$(jq -r '.agents.list[0].id // empty' "$config_path" 2>/dev/null)
       for channel in telegram discord; do
         local acct_keys
         acct_keys=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null)
-        if [ -n "$acct_keys" ] && [ "$acct_keys" != "default" ]; then
-          log "ERROR: single-agent $group uses account '$acct_keys' instead of 'default' — Doctor will rename it"
+        if [ -n "$acct_keys" ] && [ "$acct_keys" != "$single_agent_id" ] && [ "$acct_keys" != "default" ]; then
+          log "ERROR: single-agent $group should use account key '$single_agent_id' (or legacy 'default'), but found '$acct_keys'"
           return 1
         fi
       done

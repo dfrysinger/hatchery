@@ -375,7 +375,8 @@ generate_emergency_config() {
   local platform="${2:-telegram}"
   local provider="${3:-anthropic}"
   local api_key="${4:-}"
-  local _agent_name="${5:-SafeModeBot}"  # accepted for API compat, name comes from generate-config.sh
+  # shellcheck disable=SC2034  # accepted for API compat, name comes from generate-config.sh
+  local _agent_name="${5:-SafeModeBot}"
 
   local GEN_CONFIG_SCRIPT=""
   for _gc_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do

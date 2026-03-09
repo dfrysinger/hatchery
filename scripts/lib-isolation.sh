@@ -179,11 +179,8 @@ validate_generated_config() {
     fi
 
     if [ ! -f "$config_path" ]; then
-        echo "WARNING: validate_generated_config: config not found for group '$group' at $config_path" >&2
-        # Non-fatal: returns success if config doesn't exist yet.
-        # Callers must ensure config is generated BEFORE calling validation.
-        # In build-full-config.sh this is guaranteed (step 3 generates, step 4 validates).
-        return 0
+        echo "FATAL: validate_generated_config: config not found for group '$group' at $config_path" >&2
+        return 1
     fi
 
     local agent_count
@@ -197,16 +194,22 @@ validate_generated_config() {
     # The "default" key is only accepted for backward compat with deployed configs
     # that were generated before this policy change.
     if [ "$agent_count" -eq 1 ]; then
+        local single_agent_id
+        if ! single_agent_id=$(jq -r '.agents.list[0].id // empty' "$config_path" 2>/dev/null) || [ -z "$single_agent_id" ]; then
+            echo "FATAL: validate_generated_config: failed to read single agent ID for group '$group' at $config_path; ensure jq is installed, JSON is valid, and .agents.list[0].id is present" >&2
+            return 1
+        fi
+
         for channel in telegram discord; do
             local acct_keys
             acct_keys=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null) || continue
             # Reject only obviously wrong keys — empty configs or clearly wrong names
-            # "default" is accepted for backward compat; agent IDs (agent1 etc.) are preferred
+            # "default" is accepted for backward compat; the actual agent ID is preferred
             if [ -n "$acct_keys" ]; then
                 while IFS= read -r acct_key; do
                     [ -z "$acct_key" ] && continue
-                    if [[ "$acct_key" != "default" && "$acct_key" != "agent"* && "$acct_key" != "safe-mode" ]]; then
-                        echo "WARNING: group '$group' single-agent $channel account key is '$acct_key' — expected agent ID like 'agent1'" >&2
+                    if [[ "$acct_key" != "default" && "$acct_key" != "$single_agent_id" && "$acct_key" != "safe-mode" ]]; then
+                        echo "WARNING: group '$group' single-agent $channel account key is '$acct_key' — expected agent ID '$single_agent_id'" >&2
                     fi
                 done <<< "$acct_keys"
             fi

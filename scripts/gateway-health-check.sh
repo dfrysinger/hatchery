@@ -256,6 +256,7 @@ send_boot_notification() {
       send_discord_notification "$dc_token" "$dc_owner" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
       local primary_platform owner_id
       primary_platform="${NOTIFY_PLATFORMS%%,*}"
+      [ -z "$primary_platform" ] && primary_platform="${PLATFORM:-telegram}"
       if [ "$primary_platform" = "discord" ]; then
         owner_id=$(get_owner_id_for_platform "$primary_platform" with_prefix)
       else
@@ -389,7 +390,7 @@ while true; do
     notify_send_message "⏳ Gateway slow to start (${elapsed}s). Still trying..." 2>/dev/null || true
   fi
 
-  if check_service_health "$SERVICE_NAME" "$GROUP_PORT"; then
+  if check_service_health "$SERVICE_NAME" "${GROUP_PORT:-$PORT}"; then
     HEALTHY=true
     log "✓ HTTP responding at ${elapsed}s"
     break

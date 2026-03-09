@@ -325,7 +325,7 @@ class TestConfigValidation:
         }
         rc, stderr = self._run_validation(config)
         assert rc == 1, "Config with missing binding should fail"
-        assert "only 1 have bindings" in stderr
+        assert "1 lack bindings" in stderr
 
     def test_binding_references_missing_account_fails(self):
         """Binding referencing non-existent account should fail."""
