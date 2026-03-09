@@ -118,7 +118,7 @@ for group in "${SESSION_GROUPS[@]}"; do
 
     # Fallback mode: derive paths from HOME_DIR and group name
     if [ -z "$config_path" ]; then
-        config_path="${OUTPUT_DIR}/${group}/openclaw.session.json"
+        config_path="${HOME_DIR}/.openclaw/configs/${group}/openclaw.session.json"
     fi
     if [ -z "$state_path" ]; then
         state_path="${HOME_DIR}/.openclaw-sessions/${group}"
