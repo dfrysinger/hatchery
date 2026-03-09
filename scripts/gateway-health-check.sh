@@ -297,6 +297,17 @@ enter_safe_mode() {
 }
 
 # =============================================================================
+# check_agents_e2e — delegates to the dedicated E2E check script
+# =============================================================================
+check_agents_e2e() {
+  local _e2e=""
+  for _ep in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+    [ -f "$_ep/gateway-e2e-check.sh" ] && { _e2e="$_ep/gateway-e2e-check.sh"; break; }
+  done
+  [ -n "${_e2e}" ] && [ -x "${_e2e}" ] && bash "${_e2e}" || true
+}
+
+# =============================================================================
 # check_service_health — universal HTTP check
 # =============================================================================
 check_service_health() {

@@ -387,7 +387,11 @@ generate_emergency_config() {
     return 1
   fi
 
-  local owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
+  local owner_id
+  case "$platform" in
+    discord) owner_id="${DISCORD_OWNER_ID:-${TELEGRAM_OWNER_ID:-}}" ;;
+    *)       owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}" ;;
+  esac
   local gw_token
   gw_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
 
