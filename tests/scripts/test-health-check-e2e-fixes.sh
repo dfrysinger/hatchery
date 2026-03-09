@@ -200,7 +200,8 @@ else
 fi
 
 # Also must trigger SafeModeBot intro
-if echo "$SAFE_MODE_CASE" | grep -q 'openclaw agent.*deliver.*safe-mode'; then
+if echo "$SAFE_MODE_CASE" | grep -q 'openclaw agent --deliver' && \
+   echo "$SAFE_MODE_CASE" | grep -q -- '--agent safe-mode'; then
   pass "Safe-mode case triggers SafeModeBot intro via --deliver"
 else
   fail "Safe-mode case should trigger SafeModeBot intro via openclaw agent --deliver"

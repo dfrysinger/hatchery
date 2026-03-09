@@ -128,6 +128,10 @@ check_channel_connectivity() {
     _platforms="${NOTIFY_PLATFORMS//,/ }"
   else
     case "${PLATFORM:-telegram}" in
+      both)
+        # Backward-compat fallback while legacy PLATFORM may still be emitted.
+        _platforms="telegram discord"
+        ;;
       telegram|discord)
         _platforms="${PLATFORM}"
         ;;
@@ -270,7 +274,12 @@ send_boot_notification() {
       else
         owner_id=$(get_owner_id_for_platform "$primary_platform")
       fi
-      openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." --agent safe-mode --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
+      local -a env_args=()
+      [ -n "${CONFIG_PATH:-}" ] && env_args+=("OPENCLAW_CONFIG_PATH=$CONFIG_PATH")
+      [ -n "${GROUP:-}" ] && env_args+=("OPENCLAW_STATE_DIR=$HC_HOME/.openclaw-sessions/$GROUP")
+      sudo -u "${HC_USERNAME:-bot}" env "${env_args[@]}" \
+        openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." \
+        --agent safe-mode --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
       ;;
     degraded)
       notify_send_message "⚠️ Gateway degraded — some features may be unavailable" 2>/dev/null || true

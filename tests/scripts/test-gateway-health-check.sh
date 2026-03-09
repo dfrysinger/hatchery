@@ -222,6 +222,21 @@ result=$(run_check)
 assert_eq "1" "$result" "multi_platforms_csv_one_missing: FAILS when one agent has no tokens"
 
 # =============================================================================
+# Tests: Legacy PLATFORM=both backward compatibility
+# =============================================================================
+echo ""
+echo "=== legacy platform: both (backward compatibility) ==="
+
+# Test: Agent has valid Discord only - should pass (legacy both => telegram+discord)
+cat > "$TEST_TMPDIR/env.sh" << EOF
+PLATFORM="both"
+AGENT_COUNT=1
+AGENT1_DISCORD_BOT_TOKEN="$VALID_DC_TOKEN"
+EOF
+result=$(run_check)
+assert_eq "0" "$result" "platform_legacy_both_dc_only: passes with valid Discord token"
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""
