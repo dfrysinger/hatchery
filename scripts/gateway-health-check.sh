@@ -196,15 +196,16 @@ check_api_connectivity() {
 # =============================================================================
 send_entering_safe_mode_warning() {
   local config="${CONFIG_PATH:-}"
-  local tg_token dc_token owner_id
+  local tg_token dc_token tg_owner dc_owner
   # Look for accounts["safe-mode"] telegram token
   tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // empty' "$config" 2>/dev/null || echo "")
   # Look for accounts["safe-mode"] discord token (accounts.safe-mode.token)
   dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
   local msg="⚠️ Gateway health check failing — entering safe mode..."
-  owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
-  [ -n "$tg_token" ] && send_telegram_notification "$tg_token" "$owner_id" "$msg" 2>/dev/null || true
-  [ -n "$dc_token" ] && send_discord_notification "$dc_token" "$owner_id" "$msg" 2>/dev/null || true
+  tg_owner=$(get_owner_id_for_platform telegram)
+  dc_owner=$(get_owner_id_for_platform discord)
+  [ -n "$tg_token" ] && send_telegram_notification "$tg_token" "$tg_owner" "$msg" 2>/dev/null || true
+  [ -n "$dc_token" ] && send_discord_notification "$dc_token" "$dc_owner" "$msg" 2>/dev/null || true
 }
 
 # =============================================================================
@@ -230,12 +231,15 @@ send_boot_notification() {
       ;;
     safe-mode)
       # Safe-mode case: send raw API notification then deliver via SafeModeBot
-      local tg_token dc_token owner_id
+      local tg_token dc_token tg_owner dc_owner
       tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // empty' "$config" 2>/dev/null || echo "")
       dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
-      owner_id="${TELEGRAM_OWNER_ID:-${DISCORD_OWNER_ID:-}}"
-      send_telegram_notification "$tg_token" "$owner_id" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
-      send_discord_notification "$dc_token" "$owner_id" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
+      tg_owner=$(get_owner_id_for_platform telegram)
+      dc_owner=$(get_owner_id_for_platform discord)
+      send_telegram_notification "$tg_token" "$tg_owner" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
+      send_discord_notification "$dc_token" "$dc_owner" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
+      local owner_id
+      owner_id=$(get_owner_id_for_platform "${NOTIFY_PLATFORMS%% *}")
       openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." --agent safe-mode --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
       ;;
     degraded)

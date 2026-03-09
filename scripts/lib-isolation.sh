@@ -202,8 +202,13 @@ validate_generated_config() {
             acct_keys=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null) || continue
             # Reject only obviously wrong keys — empty configs or clearly wrong names
             # "default" is accepted for backward compat; agent IDs (agent1 etc.) are preferred
-            if [ -n "$acct_keys" ] && [[ "$acct_keys" != "default" && "$acct_keys" != "agent"* && "$acct_keys" != "safe-mode" ]]; then
-                echo "WARNING: group '$group' single-agent $channel account key is '$acct_keys' — expected agent ID like 'agent1'" >&2
+            if [ -n "$acct_keys" ]; then
+                while IFS= read -r acct_key; do
+                    [ -z "$acct_key" ] && continue
+                    if [[ "$acct_key" != "default" && "$acct_key" != "agent"* && "$acct_key" != "safe-mode" ]]; then
+                        echo "WARNING: group '$group' single-agent $channel account key is '$acct_key' — expected agent ID like 'agent1'" >&2
+                    fi
+                done <<< "$acct_keys"
             fi
         done
     fi

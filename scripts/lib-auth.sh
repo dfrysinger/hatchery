@@ -401,7 +401,17 @@ generate_emergency_config() {
     return 1
   fi
   local gw_token
-  gw_token=$(openssl rand -hex 16 2>/dev/null || echo "emergency-$(date +%s)")
+  if ! gw_token=$(openssl rand -hex 16 2>/dev/null); then
+    if [ -r /dev/urandom ]; then
+      if ! gw_token=$(head -c 16 /dev/urandom 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n'); then
+        echo "FATAL: Unable to generate cryptographically secure gateway token from /dev/urandom." >&2
+        return 1
+      fi
+    else
+      echo "FATAL: Unable to generate cryptographically secure gateway token (no working openssl and no readable /dev/urandom)." >&2
+      return 1
+    fi
+  fi
 
   "$GEN_CONFIG_SCRIPT" --mode safe-mode \
     --token "$api_key" \
