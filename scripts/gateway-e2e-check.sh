@@ -220,9 +220,14 @@ check_agents_e2e() {
     elif [ $rc -eq 0 ] && [ "$output_tokens" -gt 0 ]; then
       log "  ✓ $agent_id responded in ${dur}s (${output_tokens} tokens)"
     else
-      local reason="exit=$rc"
-      [ $rc -eq 0 ] && [ "$output_tokens" -eq 0 ] && reason="LLM produced 0 output tokens (auth/API error)"
-      [ $rc -eq 0 ] && ! echo "$output" | grep -qE "HEALTH_CHECK_OK|HEARTBEAT_OK" && reason="missing HEALTH_CHECK_OK (LLM error?)"
+      local reason
+      if [ $rc -eq 0 ] && [ "$output_tokens" -eq 0 ]; then
+        reason="LLM produced 0 output tokens (auth/API error)"
+      elif [ $rc -eq 0 ]; then
+        reason="missing HEALTH_CHECK_OK (LLM error?)"
+      else
+        reason="exit=$rc"
+      fi
       log "  ✗ $agent_id FAILED ($reason, ${dur}s)"
       echo "$output" | while IFS= read -r line; do log "    | $line"; done
       all_healthy=false; failed_agents="${failed_agents:+${failed_agents},}${agent_id}"

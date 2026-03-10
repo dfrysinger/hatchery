@@ -241,7 +241,7 @@ Runtime consumers never see "both" — they see an ordered list.
 
    **Implementation constraints** (per ChatGPT review):
    - Write `GROUP_ENV_VERSION=1` as the first line. Future migrations can check/bump this.
-   - **Escaping:** All values are single-line `KEY=VALUE`. Values with spaces are double-quoted (`KEY="value with spaces"`). No newlines, no `#` in values. `parse-habitat.py` is responsible for sanitizing at generation time. Habitat JSON values that contain `"`, `$`, or backticks are rejected at parse time.
+   - **Escaping:** All values are single-line `KEY=VALUE`. Values with spaces are double-quoted (`KEY="value with spaces"`). No newlines, no `#` in values. `parse-habitat.py` writes env data, and runtime loaders (`env_load_file_safe()` / `hc_load_env_file_safe()`) parse these files as data rather than shell, so shell metacharacters are not executed at runtime.
    - **Non-isolated mode:** Also gets a generated `group.env` (at the default config path). `hc_load_environment()` has ONE code path: source `group.env`. No fallback to `env_load()`.
 
 2. **Simplify `hc_load_environment()`** — source group.env only:
