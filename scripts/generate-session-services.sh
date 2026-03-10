@@ -78,14 +78,33 @@ fi
 
 # --- Compute port for a group ---
 # Reads from manifest; falls back to position-based offset from 18790.
+_manifest_group_value() {
+  local target_group="$1"
+  local jq_expr="$2"
+  local field_name="$3"
+  local _manifest="${MANIFEST_CALLER:-${MANIFEST:-}}"
+  local value=""
+
+  if ! value=$(jq -er --arg g "$target_group" "$jq_expr" "${_manifest}" 2>/dev/null); then
+    echo "ERROR: manifest missing ${field_name} for group '${target_group}' in ${_manifest}" >&2
+    return 1
+  fi
+
+  if [ -z "$value" ] || [ "$value" = "null" ]; then
+    echo "ERROR: manifest has empty ${field_name} for group '${target_group}' in ${_manifest}" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$value"
+}
+
 _get_port_for_group() {
   local target_group="$1"
   local _manifest="${MANIFEST_CALLER:-${MANIFEST:-}}"
   # Manifest mode: try to read port from manifest JSON
   if [ -n "${_manifest}" ] && [ -f "${_manifest}" ]; then
-    local mp
-    mp=$(jq -r --arg g "$target_group" '.groups[$g].port // empty' "${_manifest}" 2>/dev/null)
-    [ -n "$mp" ] && { echo "$mp"; return; }
+    _manifest_group_value "$target_group" '.groups[$g].port' "port"
+    return
   fi
   # Fallback: compute from position in SESSION_GROUPS array (first group = 18790)
   local idx=0
@@ -108,12 +127,10 @@ for group in "${SESSION_GROUPS[@]}"; do
     # Manifest mode: read paths from manifest (use the caller's MANIFEST if set)
     _manifest="${MANIFEST_CALLER:-${MANIFEST:-}}"
     if [ -n "${_manifest}" ] && [ -f "${_manifest}" ]; then
-        config_path=$(jq -r --arg g "$group" '.groups[$g].configPath // empty' "${_manifest}" 2>/dev/null)
-        state_path=$(jq -r --arg g "$group" '.groups[$g].statePath // empty' "${_manifest}" 2>/dev/null)
-        env_file=$(jq -r --arg g "$group" '.groups[$g].envFile // empty' "${_manifest}" 2>/dev/null)
-        # Also read port from manifest if available
-        _mport=$(jq -r --arg g "$group" '.groups[$g].port // empty' "${_manifest}" 2>/dev/null)
-        [ -n "${_mport}" ] && port="${_mport}"
+        config_path=$(_manifest_group_value "$group" '.groups[$g].configPath' "configPath")
+        state_path=$(_manifest_group_value "$group" '.groups[$g].statePath' "statePath")
+        env_file=$(_manifest_group_value "$group" '.groups[$g].envFile' "envFile")
+        port=$(_manifest_group_value "$group" '.groups[$g].port' "port")
     fi
 
     # Fallback mode: derive paths from HOME_DIR and group name

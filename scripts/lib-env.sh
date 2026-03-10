@@ -38,7 +38,8 @@ env_load_file_safe() {
     [[ "$line" == \#* ]] && continue
 
     if [[ "$line" =~ ^export[[:space:]]+ ]]; then
-      line="${line#export }"
+      line="${line#export}"
+      line="${line#"${line%%[![:space:]]*}"}"
     fi
 
     if [[ ! "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
