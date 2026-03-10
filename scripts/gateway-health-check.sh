@@ -82,11 +82,15 @@ fi
 # Session mode:  CONFIG_PATH = ~/.openclaw/configs/${GROUP}/openclaw.session.json
 # =============================================================================
 HC_USERNAME="${USERNAME:-${HC_USERNAME:-bot}}"
-HC_HOME="/home/$HC_USERNAME"
-if [ -n "${GROUP:-}" ]; then
-  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$HC_HOME/.openclaw/configs/${GROUP}/openclaw.session.json}"
-else
-  CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$HC_HOME/.openclaw/openclaw.json}"
+HC_HOME="${HC_HOME:-/home/${HC_USERNAME:-bot}}"
+if [ -z "${CONFIG_PATH:-}" ]; then
+  if [ -n "${HC_CONFIG_PATH:-}" ]; then
+    CONFIG_PATH="$HC_CONFIG_PATH"
+  elif [ -n "${GROUP:-}" ]; then
+    CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-${HC_HOME}/.openclaw/configs/${GROUP}/openclaw.session.json}"
+  else
+    CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-${HC_HOME}/.openclaw/openclaw.json}"
+  fi
 fi
 
 # =============================================================================
@@ -109,6 +113,8 @@ SETTLE="${HEALTH_CHECK_SETTLE_SECS:-10}"
 HARD_MAX="${HEALTH_CHECK_HARD_MAX_SECS:-300}"
 WARN_AT="${HEALTH_CHECK_WARN_SECS:-120}"
 ISOLATION="${ISOLATION:-${HC_ISOLATION:-none}}"
+SAFE_MODE_WARNING_MESSAGE="⚠️ Gateway health check failing — entering safe mode..."
+SAFE_MODE_ACTIVE_MESSAGE="🔴 Safe Mode active — recovery in progress"
 
 log "========== HEALTH CHECK =========="
 log "SERVICE=${SERVICE_NAME} | PORT=$PORT | GROUP=${GROUP:-none} | ISOLATION=${ISOLATION}"
@@ -221,18 +227,17 @@ send_entering_safe_mode_warning() {
   tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // empty' "$config" 2>/dev/null || echo "")
   # Look for accounts["safe-mode"] discord token (accounts.safe-mode.token)
   dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
-  local msg="⚠️ Gateway health check failing — entering safe mode..."
   tg_owner=$(get_owner_id_for_platform telegram)
   dc_owner=$(get_owner_id_for_platform discord)
-  if [ -n "$tg_token" ] && send_telegram_notification "$tg_token" "$tg_owner" "$msg" 2>/dev/null; then
+  if [ -n "$tg_token" ] && [ -n "$tg_owner" ] && send_telegram_notification "$tg_token" "$tg_owner" "$SAFE_MODE_WARNING_MESSAGE" 2>/dev/null; then
     sent=true
   fi
-  if [ -n "$dc_token" ] && send_discord_notification "$dc_token" "$dc_owner" "$msg" 2>/dev/null; then
+  if [ -n "$dc_token" ] && [ -n "$dc_owner" ] && send_discord_notification "$dc_token" "$dc_owner" "$SAFE_MODE_WARNING_MESSAGE" 2>/dev/null; then
     sent=true
   fi
   if [ "$sent" != "true" ]; then
     log "Both Telegram and Discord safe-mode notifications failed, attempting fallback notification method"
-    notify_send_message "$msg" 2>/dev/null || true
+    notify_send_message "$SAFE_MODE_WARNING_MESSAGE" 2>/dev/null || true
   fi
 }
 
@@ -264,15 +269,21 @@ send_boot_notification() {
       dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
       tg_owner=$(get_owner_id_for_platform telegram)
       dc_owner=$(get_owner_id_for_platform discord)
-      send_telegram_notification "$tg_token" "$tg_owner" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
-      send_discord_notification "$dc_token" "$dc_owner" "🔴 Safe Mode active — recovery in progress" 2>/dev/null || true
+      if [ -n "$tg_token" ] && [ -n "$tg_owner" ]; then
+        send_telegram_notification "$tg_token" "$tg_owner" "$SAFE_MODE_ACTIVE_MESSAGE" 2>/dev/null || true
+      fi
+      if [ -n "$dc_token" ] && [ -n "$dc_owner" ]; then
+        send_discord_notification "$dc_token" "$dc_owner" "$SAFE_MODE_ACTIVE_MESSAGE" 2>/dev/null || true
+      fi
       local primary_platform owner_id
       primary_platform="${NOTIFY_PLATFORMS%%,*}"
       [ -z "$primary_platform" ] && primary_platform="${PLATFORM:-telegram}"
       owner_id=$(get_owner_id_for_platform "$primary_platform" with_prefix)
       local -a env_args=()
       [ -n "${CONFIG_PATH:-}" ] && env_args+=("OPENCLAW_CONFIG_PATH=$CONFIG_PATH")
-      [ -n "${GROUP:-}" ] && env_args+=("OPENCLAW_STATE_DIR=$HC_HOME/.openclaw-sessions/$GROUP")
+      if [ -n "${GROUP:-}" ]; then
+        env_args+=("OPENCLAW_STATE_DIR=$(_hc_state_dir "$GROUP")")
+      fi
       sudo -u "${HC_USERNAME:-bot}" env "${env_args[@]}" \
         openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." \
         --agent safe-mode --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
@@ -291,15 +302,31 @@ send_boot_notification() {
 # container: docker restart openclaw-${GROUP} (or docker compose)
 # standard:  systemctl restart openclaw
 # =============================================================================
+_hc_compose_file() {
+  local group="${1:-${GROUP:-default}}"
+  local compose_base="${COMPOSE_BASE:-${HC_HOME}/.openclaw/compose}"
+  echo "${compose_base}/${group}/docker-compose.yaml"
+}
+
+_hc_state_dir() {
+  local group="${1:-${GROUP:-default}}"
+  if [ -n "${OPENCLAW_STATE_DIR:-}" ]; then
+    echo "$OPENCLAW_STATE_DIR"
+  else
+    echo "${HC_HOME}/.openclaw-sessions/${group}"
+  fi
+}
+
 restart_gateway() {
-  local user="${HC_USERNAME:-bot}"
+  local compose_file
   log "Restarting gateway ISOLATION='${ISOLATION:-none}' GROUP='${GROUP:-}'..."
   if [ "${ISOLATION:-none}" = "session" ] && [ -n "${GROUP:-}" ]; then
     # Session isolation: restart only this group's service
     systemctl restart "openclaw-${GROUP}.service" 2>&1 || true
   elif [ "${ISOLATION:-none}" = "container" ]; then
+    compose_file=$(_hc_compose_file "${GROUP:-default}")
     docker compose \
-      -f "/home/${user}/.openclaw/compose/${GROUP:-default}/docker-compose.yaml" \
+      -f "$compose_file" \
       -p "openclaw-${GROUP:-default}" restart 2>&1 || true
   else
     # Standard (none) mode — single openclaw service
@@ -318,9 +345,10 @@ enter_safe_mode() {
   # Stop isolation services for this group only
   case "$iso" in
     container)
-      local user="${HC_USERNAME:-bot}"
+      local compose_file
+      compose_file=$(_hc_compose_file "${GROUP:-default}")
       docker compose \
-        -f "/home/${user}/.openclaw/compose/${GROUP:-default}/docker-compose.yaml" \
+        -f "$compose_file" \
         -p "openclaw-${GROUP:-default}" down 2>&1 || true
       systemctl stop "openclaw-container-${GROUP}.service" 2>/dev/null || true
       ;;
