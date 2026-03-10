@@ -73,6 +73,11 @@ class TestSyntax:
         )
         assert result.returncode == 0, f"bash -n failed: {result.stderr}"
 
+    def test_requires_env_load_file_safe_helper(self):
+        content = open(LIB_PATH).read()
+        assert 'type env_load_file_safe &>/dev/null || {' in content
+        assert 'FATAL: lib-env.sh missing env_load_file_safe()' in content
+
 
 class TestSafeEnvLoading:
     """hc_load_environment must treat group.env as data, not executable shell."""

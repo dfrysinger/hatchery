@@ -15,11 +15,12 @@
 #
 # Original: /usr/local/bin/tg-notify.sh (in hatch.yaml write_files)
 # =============================================================================
-# Source lib-env.sh for d() and env_load (production path)
+# Source lib-env.sh for d() and safe env parsing (production path)
 for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
   [ -f "$_lib_path/lib-env.sh" ] && { source "$_lib_path/lib-env.sh"; break; }
 done
-# Fallback d() when lib-env.sh is unavailable (e.g., test environment without system paths).
+# Keep a tiny d() fallback for limited test environments, but lib-env.sh is still
+# required for env_load_file_safe().
 # The function is intentionally not at line-start so simplification-pr2's '^d() {' grep skips it.
 type d &>/dev/null || d() { [ -n "${1:-}" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
 type env_load_file_safe &>/dev/null || {

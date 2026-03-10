@@ -45,6 +45,10 @@ for _hc_lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOUR
   [ -f "$_hc_lib_path/lib-env.sh" ] && { source "$_hc_lib_path/lib-env.sh"; break; }
 done
 type d &>/dev/null || { echo "FATAL: lib-env.sh not found (d() undefined)" >&2; exit 1; }
+type env_load_file_safe &>/dev/null || {
+  echo "FATAL: lib-env.sh missing env_load_file_safe()" >&2
+  exit 1
+}
 
 hc_load_environment() {
   # Phase 1 (ENV-REFACTOR): group.env is the SINGLE SOURCE OF TRUTH.
