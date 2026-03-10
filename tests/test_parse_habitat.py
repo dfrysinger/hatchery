@@ -42,6 +42,16 @@ def get_platform_config(hab, platform_name):
     return hab.get(platform_name, {})
 
 
+def get_notify_platforms(hab):
+    """Resolve notification platform preference order for runtime consumers."""
+    platform = hab.get("platform", "telegram")
+    if platform == "both":
+        return ["telegram", "discord"]
+    if platform in ("telegram", "discord"):
+        return [platform]
+    return ["telegram"]
+
+
 def normalize_agent_ref(agent_ref):
     """Normalize agent reference to dict format.
     
@@ -86,6 +96,7 @@ def run_parse_habitat(habitat_json, agent_lib_json=None):
     platform = hab.get("platform", "telegram")
     lines.append('PLATFORM="{}"\n'.format(platform))
     lines.append('PLATFORM_B64="{}"\n'.format(_b64(platform)))
+    lines.append('NOTIFY_PLATFORMS="{}"\n'.format(",".join(get_notify_platforms(hab))))
 
     # Discord config (v2: platforms.discord, v1: discord)
     discord_cfg = get_platform_config(hab, "discord")
@@ -352,6 +363,7 @@ class TestV2Schema:
         }
         env = run_parse_habitat(hab)
         assert env["PLATFORM"] == "telegram"
+        assert env["NOTIFY_PLATFORMS"] == "telegram"
         assert env["TELEGRAM_OWNER_ID"] == "789012"
         assert env["AGENT1_TELEGRAM_BOT_TOKEN"] == "tg_token"
 
@@ -620,6 +632,7 @@ class TestPlatformField:
         }
         env = run_parse_habitat(hab)
         assert env["PLATFORM"] == "both"
+        assert env["NOTIFY_PLATFORMS"] == "telegram,discord"
         assert env["DISCORD_GUILD_ID"] == "111"
         assert env["TELEGRAM_OWNER_ID"] == "333"
 
@@ -630,6 +643,7 @@ class TestPlatformField:
         }
         env = run_parse_habitat(hab)
         assert env["PLATFORM"] == "telegram"
+        assert env["NOTIFY_PLATFORMS"] == "telegram"
 
 
 # ---------------------------------------------------------------------------

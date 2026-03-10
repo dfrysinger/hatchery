@@ -74,8 +74,10 @@ run_test() {
   echo "=== Test: $test_name ==="
   
   # Create temp output directory
-  local tmpdir=$(mktemp -d)
-  local habitat_b64=$(base64 -w0 < "$FIXTURES_DIR/$fixture")
+  local tmpdir
+  local habitat_b64
+  tmpdir=$(mktemp -d)
+  habitat_b64=$(base64 -w0 < "$FIXTURES_DIR/$fixture")
   
   # Run parse-habitat.py with output to temp dir
   if ! HABITAT_B64="$habitat_b64" HABITAT_OUTPUT_DIR="$tmpdir" python3 "$REPO_DIR/scripts/parse-habitat.py" > /dev/null 2>&1; then
@@ -98,6 +100,7 @@ run_test "habitat-single-agent-telegram.json" "Single Agent Telegram"
 
 assert_env "HABITAT_NAME" "TestHabitat-SingleTelegram"
 assert_env "PLATFORM" "telegram"
+assert_env "NOTIFY_PLATFORMS" "telegram"
 assert_env "AGENT_COUNT" "1"
 assert_env "AGENT1_NAME" "TestBot"
 assert_env "AGENT1_BOT_TOKEN" "TEST_BOT_TOKEN_1"
@@ -130,6 +133,7 @@ run_test "habitat-single-agent-discord.json" "Single Agent Discord"
 
 assert_env "HABITAT_NAME" "TestHabitat-SingleDiscord"
 assert_env "PLATFORM" "discord"
+assert_env "NOTIFY_PLATFORMS" "discord"
 assert_env "AGENT_COUNT" "1"
 assert_env "AGENT1_DISCORD_BOT_TOKEN" "TEST_DISCORD_TOKEN_1"
 assert_env "DISCORD_OWNER_ID" "987654321"

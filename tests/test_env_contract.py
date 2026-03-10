@@ -208,6 +208,15 @@ class TestEnvContract:
         assert "TELEGRAM_OWNER_ID" in vars_produced or "DISCORD_OWNER_ID" in vars_produced, \
             "parse-habitat.py must produce TELEGRAM_OWNER_ID and/or DISCORD_OWNER_ID"
 
+    def test_notify_platforms_var_in_parse_habitat(self):
+        """parse-habitat.py must produce NOTIFY_PLATFORMS for runtime routing."""
+        vars_produced = get_parse_habitat_output_vars()
+        if not vars_produced:
+            pytest.skip("Could not extract vars from parse-habitat.py")
+
+        assert "NOTIFY_PLATFORMS" in vars_produced, \
+            "parse-habitat.py must produce NOTIFY_PLATFORMS"
+
     def test_no_habitat_parsed_env_in_runtime_scripts(self):
         """Runtime scripts must not source habitat-parsed.env directly."""
         for script_name in RUNTIME_SCRIPTS:

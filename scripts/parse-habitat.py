@@ -360,6 +360,15 @@ def get_platform_config(hab, platform_name):
         return hab[platform_name]
     return {}
 
+def get_notify_platforms(hab):
+    """Resolve notification platform preference order for runtime consumers."""
+    platform = hab.get("platform", "telegram")
+    if platform == "both":
+        return ["telegram", "discord"]
+    if platform in ("telegram", "discord"):
+        return [platform]
+    return ["telegram"]
+
 # Helper: normalize agent reference (string shorthand to dict)
 def normalize_agent_ref(agent_ref):
     """Normalize agent reference to dict format.
@@ -415,6 +424,7 @@ with open(os.path.join(output_dir, 'habitat-parsed.env'), 'w') as f:
     platform = hab.get("platform", "telegram")
     f.write('PLATFORM="{}"\n'.format(platform))
     f.write('PLATFORM_B64="{}"\n'.format(b64(platform)))
+    f.write('NOTIFY_PLATFORMS="{}"\n'.format(",".join(get_notify_platforms(hab))))
 
     # Discord config (v2: platforms.discord, v1: discord)
     discord_cfg = get_platform_config(hab, "discord")
