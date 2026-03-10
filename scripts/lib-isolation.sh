@@ -265,12 +265,13 @@ validate_generated_config() {
         local bound_accounts
         bound_accounts=$(jq -r ".bindings[] | select(.match.channel == \"$channel\") | .match.accountId" "$config_path" 2>/dev/null) || continue
 
-        for acct in $bound_accounts; do
+        while IFS= read -r acct; do
+            [ -z "$acct" ] && continue
             if ! echo "$channel_accounts" | grep -qx "$acct"; then
                 echo "FATAL: group '$group' binding references $channel account '$acct' but config has: $(echo "$channel_accounts" | tr '\n' ' ')" >&2
                 binding_errors=$((binding_errors + 1))
             fi
-        done
+        done <<< "$bound_accounts"
     done
 
     [ "$binding_errors" -gt 0 ] && return 1

@@ -126,28 +126,23 @@ log "SERVICE=${SERVICE_NAME} | PORT=$PORT | GROUP=${GROUP:-none} | ISOLATION=${I
 check_channel_connectivity() {
   local _count="${AGENT_COUNT:-${AC:-1}}"
   local _all_valid=true
-  local _platforms
+  local -a _platforms=()
 
   # Derive the list of platforms to check from NOTIFY_PLATFORMS (preferred) or PLATFORM
   if [ -n "${NOTIFY_PLATFORMS:-}" ]; then
-    # NOTIFY_PLATFORMS is comma-separated (e.g. "telegram,discord"); normalize to space-separated
-    _platforms="${NOTIFY_PLATFORMS//,/ }"
+    IFS=',' read -r -a _platforms <<< "$NOTIFY_PLATFORMS"
   else
-    case "${PLATFORM:-telegram}" in
-      both)
-        # Backward-compat fallback while legacy PLATFORM may still be emitted.
-        _platforms="telegram discord"
-        ;;
-      telegram|discord)
-        _platforms="${PLATFORM}"
-        ;;
-      *)
-        _platforms="telegram"
-        ;;
-    esac
+    if [ "${PLATFORM:-telegram}" = "both" ]; then
+      # Backward-compat fallback while legacy PLATFORM may still be emitted.
+      _platforms=("telegram" "discord")
+    elif [ "${PLATFORM:-telegram}" = "discord" ]; then
+      _platforms=("discord")
+    else
+      _platforms=("telegram")
+    fi
   fi
 
-  for _i in $(seq 1 "$_count"); do
+  for ((_i=1; _i<=_count; _i++)); do
     local agent_valid=false
     local tg_token dc_token
 
@@ -162,7 +157,8 @@ check_channel_connectivity() {
 
     # Iterate over configured platforms; an agent is valid if any platform's token is valid
     local _platform
-    for _platform in $_platforms; do
+    for _platform in "${_platforms[@]}"; do
+      _platform="${_platform//[[:space:]]/}"
       case "$_platform" in
         telegram)
           if [ -n "$tg_token" ] && validate_telegram_token "$tg_token" 2>/dev/null; then
@@ -276,8 +272,24 @@ send_boot_notification() {
         send_discord_notification "$dc_token" "$dc_owner" "$SAFE_MODE_ACTIVE_MESSAGE" 2>/dev/null || true
       fi
       local primary_platform owner_id
-      primary_platform="${NOTIFY_PLATFORMS%%,*}"
-      [ -z "$primary_platform" ] && primary_platform="${PLATFORM:-telegram}"
+      if [ -n "${NOTIFY_PLATFORMS:-}" ]; then
+        local -a notify_platforms=()
+        IFS=',' read -r -a notify_platforms <<< "$NOTIFY_PLATFORMS"
+        primary_platform="${notify_platforms[0]:-telegram}"
+        primary_platform="${primary_platform//[[:space:]]/}"
+      else
+        case "${PLATFORM:-telegram}" in
+          both)
+            primary_platform="telegram"
+            ;;
+          telegram|discord)
+            primary_platform="${PLATFORM}"
+            ;;
+          *)
+            primary_platform="telegram"
+            ;;
+        esac
+      fi
       owner_id=$(get_owner_id_for_platform "$primary_platform" with_prefix)
       local -a env_args=()
       [ -n "${CONFIG_PATH:-}" ] && env_args+=("OPENCLAW_CONFIG_PATH=$CONFIG_PATH")
@@ -286,7 +298,7 @@ send_boot_notification() {
       fi
       sudo -u "${HC_USERNAME:-bot}" env "${env_args[@]}" \
         openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." \
-        --agent safe-mode --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
+        --agent safe-mode --reply-channel "$primary_platform" --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
       ;;
     degraded)
       notify_send_message "⚠️ Gateway degraded — some features may be unavailable" 2>/dev/null || true

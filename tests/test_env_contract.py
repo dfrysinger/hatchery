@@ -339,6 +339,12 @@ class TestConfigValidation:
         assert rc == 1, "Config with missing binding should fail"
         assert "1 lack bindings" in stderr
 
+    def test_binding_validation_avoids_word_splitting_loop(self):
+        with open(os.path.join(SCRIPTS_DIR, "lib-isolation.sh")) as f:
+            content = f.read()
+        assert "while IFS= read -r acct; do" in content
+        assert "for acct in $bound_accounts; do" not in content
+
     def test_binding_references_missing_account_fails(self):
         """Binding referencing non-existent account should fail."""
         config = {

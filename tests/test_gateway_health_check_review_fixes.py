@@ -69,6 +69,16 @@ def test_container_paths_use_computed_compose_helper():
 def test_send_boot_notification_uses_state_dir_helper():
     fn = _extract_function("send_boot_notification")
     assert 'OPENCLAW_STATE_DIR=$(_hc_state_dir "$GROUP")' in fn
+    assert '--reply-channel "$primary_platform"' in fn
+
+
+def test_check_channel_connectivity_uses_array_iteration():
+    fn = _extract_function("check_channel_connectivity")
+    assert "IFS=',' read -r -a _platforms <<< \"$NOTIFY_PLATFORMS\"" in fn
+    assert 'for ((_i=1; _i<=_count; _i++)); do' in fn
+    assert 'for _platform in "${_platforms[@]}"; do' in fn
+    assert 'for _platform in $_platforms; do' not in fn
+    assert 'for _i in $(seq 1 "$_count"); do' not in fn
 
 
 def test_state_dir_helper_has_safe_fallbacks():
