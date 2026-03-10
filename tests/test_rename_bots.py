@@ -26,7 +26,7 @@ def extract_rename_script():
         return f.read()
 
 
-def make_rename_stub(script_content, tmp_dir):
+def make_rename_stub(script_content, tmp_dir, source_lib_env=True):
     """Create a test-friendly version of rename-bots.sh.
 
     Stubs:
@@ -76,18 +76,18 @@ exit 0
 
     # Prepend PATH override so our fake curl is used
     lib_env = os.path.join(os.path.dirname(__file__), "..", "scripts", "lib-env.sh")
-    modified = (
-        f'export PATH="{os.path.join(tmp_dir, "bin")}:$PATH"\n'
-        f'source "{lib_env}"\n'
-        + modified
-    )
+    prefix = f'export PATH="{os.path.join(tmp_dir, "bin")}:$PATH"\n'
+    if source_lib_env:
+        prefix += f'source "{lib_env}"\n'
+    modified = prefix + modified
 
     return modified, droplet_env, parsed_env, curl_log
 
 
 def run_rename(platform="telegram", agent_count=1, agents=None,
-               habitat_name="test-habitat", extra_droplet_env="", extra_parsed_env=""):
-    """Run rename-bots.sh and return (exit_code, stdout, curl_calls).
+               habitat_name="test-habitat", extra_droplet_env="", extra_parsed_env="",
+               source_lib_env=True):
+    """Run rename-bots.sh and return (exit_code, combined_output, curl_calls).
 
     agents: list of dicts with 'name' and 'bot_token' keys.
              Defaults to [{"name": "Claude", "bot_token": "tg-token-123"}]
@@ -99,7 +99,7 @@ def run_rename(platform="telegram", agent_count=1, agents=None,
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         modified, droplet_env, parsed_env, curl_log = make_rename_stub(
-            script_content, tmp_dir
+            script_content, tmp_dir, source_lib_env=source_lib_env
         )
 
         # Write env files
@@ -133,7 +133,7 @@ def run_rename(platform="telegram", agent_count=1, agents=None,
             with open(curl_log) as f:
                 curl_calls = [line.strip() for line in f if line.strip()]
 
-        return result.returncode, result.stdout, curl_calls
+        return result.returncode, result.stdout + result.stderr, curl_calls
 
 
 # === Tests ===
@@ -211,6 +211,15 @@ class TestRenameTelegram:
         )
         assert rc == 0
         assert not os.path.exists(marker)
+
+    def test_fails_clearly_when_env_loader_helper_is_unavailable(self):
+        rc, stdout, calls = run_rename(
+            platform="telegram",
+            source_lib_env=False,
+        )
+        assert rc != 0
+        assert "env_load_file_safe undefined" in stdout
+        assert not calls
 
     def test_multi_agent(self):
         agents = [

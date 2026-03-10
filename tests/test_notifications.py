@@ -27,7 +27,7 @@ def extract_notify_script():
         return f.read()
 
 
-def make_notify_stub(script_content, tmp_dir, curl_behavior="success"):
+def make_notify_stub(script_content, tmp_dir, curl_behavior="success", source_lib_env=True):
     """Create a test-friendly version of tg-notify.sh.
 
     Stubs:
@@ -122,12 +122,13 @@ exit 0
     # Also isolate Discord DM cache per test run to avoid cross-test contamination.
     dm_cache_path = os.path.join(tmp_dir, "discord-dm-cache")
     lib_env = os.path.join(os.path.dirname(__file__), "..", "scripts", "lib-env.sh")
-    modified = (
+    prefix = (
         f'export PATH="{os.path.join(tmp_dir, "bin")}:$PATH"\n'
         f'export DISCORD_DM_CACHE_FILE="{dm_cache_path}"\n'
-        f'source "{lib_env}"\n'
-        + modified
     )
+    if source_lib_env:
+        prefix += f'source "{lib_env}"\n'
+    modified = prefix + modified
 
     return modified, droplet_env, parsed_env, curl_log
 
@@ -135,13 +136,14 @@ exit 0
 def run_notify(platform="telegram", message="Test notification",
                tg_token="tg-bot-token", tg_user_id="12345",
                dc_token="dc-bot-token", dc_owner_id="owner-999",
-               curl_behavior="success", extra_droplet_env="", extra_parsed_env=""):
-    """Run tg-notify.sh and return (exit_code, curl_calls)."""
+               curl_behavior="success", extra_droplet_env="", extra_parsed_env="",
+               source_lib_env=True):
+    """Run tg-notify.sh and return (exit_code, combined_output, curl_calls)."""
     script_content = extract_notify_script()
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         modified, droplet_env, parsed_env, curl_log = make_notify_stub(
-            script_content, tmp_dir, curl_behavior
+            script_content, tmp_dir, curl_behavior, source_lib_env=source_lib_env
         )
 
         # Write env files
@@ -176,7 +178,7 @@ def run_notify(platform="telegram", message="Test notification",
             with open(curl_log) as f:
                 curl_calls = [line.strip() for line in f if line.strip()]
 
-        return result.returncode, curl_calls
+        return result.returncode, result.stdout + result.stderr, curl_calls
 
 
 # === Tests ===
@@ -186,32 +188,32 @@ class TestNotifyTelegram:
     """PLATFORM=telegram notifications."""
 
     def test_sends_telegram(self):
-        rc, calls = run_notify(platform="telegram")
+        rc, _, calls = run_notify(platform="telegram")
         assert rc == 0
         assert any("api.telegram.org" in c for c in calls)
 
     def test_no_discord_calls(self):
-        rc, calls = run_notify(platform="telegram")
+        rc, _, calls = run_notify(platform="telegram")
         assert not any("discord.com" in c for c in calls)
 
     def test_uses_bot_token(self):
-        rc, calls = run_notify(platform="telegram", tg_token="my-special-token")
+        rc, _, calls = run_notify(platform="telegram", tg_token="my-special-token")
         tg_calls = [c for c in calls if "api.telegram.org" in c]
         assert any("my-special-token" in c for c in tg_calls)
 
     def test_fails_without_token(self):
-        rc, calls = run_notify(platform="telegram", tg_token="")
+        rc, _, calls = run_notify(platform="telegram", tg_token="")
         assert rc != 0
 
     def test_fails_without_user_id(self):
-        rc, calls = run_notify(platform="telegram", tg_user_id="")
+        rc, _, calls = run_notify(platform="telegram", tg_user_id="")
         assert rc != 0
 
     def test_discord_owner_id_is_loaded_as_data_not_shell(self):
         fd, marker = tempfile.mkstemp(prefix="tg-notify-safe-parse-")
         os.close(fd)
         os.unlink(marker)
-        rc, calls = run_notify(
+        rc, _, calls = run_notify(
             platform="discord",
             dc_owner_id="",
             extra_parsed_env=f'DISCORD_OWNER_ID="$(touch {marker})"\n',
@@ -219,38 +221,47 @@ class TestNotifyTelegram:
         assert rc == 0
         assert not os.path.exists(marker)
 
+    def test_fails_clearly_when_env_loader_helper_is_unavailable(self):
+        rc, output, calls = run_notify(
+            platform="telegram",
+            source_lib_env=False,
+        )
+        assert rc != 0
+        assert "env_load_file_safe undefined" in output
+        assert not calls
+
 
 class TestNotifyDiscord:
     """PLATFORM=discord notifications."""
 
     def test_sends_discord(self):
-        rc, calls = run_notify(platform="discord")
+        rc, _, calls = run_notify(platform="discord")
         assert rc == 0
         assert any("discord.com" in c for c in calls)
 
     def test_no_telegram_calls(self):
-        rc, calls = run_notify(platform="discord")
+        rc, _, calls = run_notify(platform="discord")
         assert not any("api.telegram.org" in c for c in calls)
 
     def test_creates_dm_channel(self):
-        rc, calls = run_notify(platform="discord")
+        rc, _, calls = run_notify(platform="discord")
         assert any("users/@me/channels" in c for c in calls)
 
     def test_sends_to_dm_channel(self):
-        rc, calls = run_notify(platform="discord")
+        rc, _, calls = run_notify(platform="discord")
         assert any("channels/" in c and "messages" in c for c in calls)
 
     def test_uses_bot_token(self):
-        rc, calls = run_notify(platform="discord", dc_token="special-dc-token")
+        rc, _, calls = run_notify(platform="discord", dc_token="special-dc-token")
         dc_calls = [c for c in calls if "discord.com" in c]
         assert any("special-dc-token" in c for c in dc_calls)
 
     def test_fails_without_token(self):
-        rc, calls = run_notify(platform="discord", dc_token="")
+        rc, _, calls = run_notify(platform="discord", dc_token="")
         assert rc != 0
 
     def test_fails_without_owner_id(self):
-        rc, calls = run_notify(platform="discord", dc_owner_id="")
+        rc, _, calls = run_notify(platform="discord", dc_owner_id="")
         assert rc != 0
 
 
@@ -258,26 +269,26 @@ class TestNotifyBoth:
     """PLATFORM=both notifications."""
 
     def test_sends_both_platforms(self):
-        rc, calls = run_notify(platform="both")
+        rc, _, calls = run_notify(platform="both")
         assert rc == 0
         assert any("api.telegram.org" in c for c in calls)
         assert any("discord.com" in c for c in calls)
 
     def test_succeeds_if_telegram_fails(self):
         """Should succeed if at least one platform works."""
-        rc, calls = run_notify(platform="both", curl_behavior="fail_telegram")
+        rc, _, calls = run_notify(platform="both", curl_behavior="fail_telegram")
         assert rc == 0
         assert any("discord.com" in c for c in calls)
 
     def test_succeeds_if_discord_fails(self):
         """Should succeed if at least one platform works."""
-        rc, calls = run_notify(platform="both", curl_behavior="fail_discord")
+        rc, _, calls = run_notify(platform="both", curl_behavior="fail_discord")
         assert rc == 0
         assert any("api.telegram.org" in c for c in calls)
 
     def test_fails_if_both_fail(self):
         """Should fail only if all platforms fail."""
-        rc, calls = run_notify(platform="both", curl_behavior="fail_all")
+        rc, _, calls = run_notify(platform="both", curl_behavior="fail_all")
         assert rc != 0
 
 
@@ -286,13 +297,13 @@ class TestNotifyEdgeCases:
 
     def test_empty_message_exits(self):
         """Empty message should exit early."""
-        rc, calls = run_notify(platform="telegram", message="")
+        rc, _, calls = run_notify(platform="telegram", message="")
         # Script should exit 1 for empty message
         assert rc != 0
 
     def test_unknown_platform_fails_fast(self):
         """Unknown platform should fail with non-zero exit (TASK-1 fail-fast)."""
-        rc, calls = run_notify(platform="unknown_platform")
+        rc, _, calls = run_notify(platform="unknown_platform")
         assert rc != 0, "Unknown PLATFORM should cause script to fail"
         # Should NOT have made any API calls
         assert not any("api.telegram.org" in c for c in calls), "Should not fall back to telegram"
