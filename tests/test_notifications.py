@@ -230,6 +230,24 @@ class TestNotifyTelegram:
         assert "env_load_file_safe undefined" in output
         assert not calls
 
+    def test_fails_fast_on_invalid_droplet_env_syntax(self):
+        rc, output, calls = run_notify(
+            platform="telegram",
+            extra_droplet_env='BAD LINE\n',
+        )
+        assert rc != 0
+        assert "failed to parse" in output
+        assert not calls
+
+    def test_fails_fast_on_invalid_habitat_env_syntax(self):
+        rc, output, calls = run_notify(
+            platform="telegram",
+            extra_parsed_env='BAD LINE\n',
+        )
+        assert rc != 0
+        assert "failed to parse" in output
+        assert not calls
+
 
 class TestNotifyDiscord:
     """PLATFORM=discord notifications."""

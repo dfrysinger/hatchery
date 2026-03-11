@@ -32,9 +32,19 @@ type env_load_file_safe &>/dev/null || {
   exit 1
 }
 # Load env files as data only; never execute habitat-derived shell syntax.
-[ -f /etc/droplet.env ] && env_load_file_safe /etc/droplet.env
+if [ -f /etc/droplet.env ]; then
+  env_load_file_safe /etc/droplet.env || {
+    echo "FATAL: failed to parse /etc/droplet.env" >&2
+    exit 1
+  }
+fi
 [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
-[ -f /etc/habitat-parsed.env ] && env_load_file_safe /etc/habitat-parsed.env
+if [ -f /etc/habitat-parsed.env ]; then
+  env_load_file_safe /etc/habitat-parsed.env || {
+    echo "FATAL: failed to parse /etc/habitat-parsed.env" >&2
+    exit 1
+  }
+fi
 # PLATFORM must be explicitly set - no silent defaults
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 AC=${AGENT_COUNT:-1}

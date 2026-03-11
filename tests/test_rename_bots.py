@@ -221,6 +221,24 @@ class TestRenameTelegram:
         assert "env_load_file_safe undefined" in stdout
         assert not calls
 
+    def test_fails_fast_on_invalid_droplet_env_syntax(self):
+        rc, stdout, calls = run_rename(
+            platform="telegram",
+            extra_droplet_env='BAD LINE\n',
+        )
+        assert rc != 0
+        assert "failed to parse" in stdout
+        assert not calls
+
+    def test_fails_fast_on_invalid_habitat_env_syntax(self):
+        rc, stdout, calls = run_rename(
+            platform="telegram",
+            extra_parsed_env='BAD LINE\n',
+        )
+        assert rc != 0
+        assert "failed to parse" in stdout
+        assert not calls
+
     def test_multi_agent(self):
         agents = [
             {"name": "Claude", "bot_token": "tok1"},

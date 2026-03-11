@@ -9,12 +9,8 @@ Prevents:
 - ExecStartPost scripts using 'local' outside functions
 """
 
-import configparser
-import io
 import os
 import re
-import subprocess
-import textwrap
 
 import pytest
 
