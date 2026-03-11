@@ -747,6 +747,23 @@ class TestBackwardCompatibility:
 class TestComplexScenarios:
     """Test complex real-world scenarios end-to-end."""
 
+    def test_notify_platforms_emitted_for_both(self):
+        """platform=both should resolve once into ordered NOTIFY_PLATFORMS."""
+        habitat = {
+            "name": "BothPlatforms",
+            "platform": "both",
+            "platforms": {
+                "discord": {"serverId": "111", "ownerId": "222"},
+                "telegram": {"ownerId": "333"},
+            },
+            "agents": [{"agent": "Claude"}],
+        }
+        env_vars, stderr, rc = run_parse_habitat(habitat)
+
+        assert rc == 0, f"parse-habitat failed (rc={rc}): {stderr}"
+        assert env_vars.get("PLATFORM") == "both"
+        assert env_vars.get("NOTIFY_PLATFORMS") == "telegram,discord"
+
     def test_council_with_isolated_workers(self):
         """Full council setup with containerized workers."""
         habitat = {

@@ -26,7 +26,7 @@ def extract_rename_script():
         return f.read()
 
 
-def make_rename_stub(script_content, tmp_dir):
+def make_rename_stub(script_content, tmp_dir, source_lib_env=True):
     """Create a test-friendly version of rename-bots.sh.
 
     Stubs:
@@ -37,7 +37,6 @@ def make_rename_stub(script_content, tmp_dir):
     droplet_env = os.path.join(tmp_dir, "droplet.env")
     parsed_env = os.path.join(tmp_dir, "habitat-parsed.env")
     curl_log = os.path.join(tmp_dir, "curl_calls.log")
-
     # Create fake curl
     curl_path = os.path.join(tmp_dir, "bin", "curl")
     os.makedirs(os.path.join(tmp_dir, "bin"), exist_ok=True)
@@ -55,12 +54,16 @@ exit 0
     # Modify the script to use our test paths
     modified = script_content
     modified = modified.replace(
-        "source /etc/droplet.env",
-        f"source {droplet_env}",
+        "env_load_file_safe /etc/droplet.env",
+        f"env_load_file_safe {droplet_env}",
     )
     modified = modified.replace(
-        "source /etc/habitat-parsed.env",
-        f"source {parsed_env}",
+        "[ -f /etc/droplet.env ]",
+        f"[ -f {droplet_env} ]",
+    )
+    modified = modified.replace(
+        "env_load_file_safe /etc/habitat-parsed.env",
+        f"env_load_file_safe {parsed_env}",
     )
     modified = modified.replace(
         "[ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null",
@@ -72,14 +75,19 @@ exit 0
     )
 
     # Prepend PATH override so our fake curl is used
-    modified = f'export PATH="{os.path.join(tmp_dir, "bin")}:$PATH"\n' + modified
+    lib_env = os.path.join(os.path.dirname(__file__), "..", "scripts", "lib-env.sh")
+    prefix = f'export PATH="{os.path.join(tmp_dir, "bin")}:$PATH"\n'
+    if source_lib_env:
+        prefix += f'source "{lib_env}"\n'
+    modified = prefix + modified
 
     return modified, droplet_env, parsed_env, curl_log
 
 
 def run_rename(platform="telegram", agent_count=1, agents=None,
-               habitat_name="test-habitat"):
-    """Run rename-bots.sh and return (exit_code, stdout, curl_calls).
+               habitat_name="test-habitat", extra_droplet_env="", extra_parsed_env="",
+               source_lib_env=True):
+    """Run rename-bots.sh and return (exit_code, combined_output, curl_calls).
 
     agents: list of dicts with 'name' and 'bot_token' keys.
              Defaults to [{"name": "Claude", "bot_token": "tg-token-123"}]
@@ -91,12 +99,13 @@ def run_rename(platform="telegram", agent_count=1, agents=None,
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         modified, droplet_env, parsed_env, curl_log = make_rename_stub(
-            script_content, tmp_dir
+            script_content, tmp_dir, source_lib_env=source_lib_env
         )
 
         # Write env files
         with open(droplet_env, "w") as f:
             f.write(f'PLATFORM_B64="{b64(platform)}"\n')
+            f.write(extra_droplet_env)
 
         with open(parsed_env, "w") as f:
             f.write(f'PLATFORM="{platform}"\n')
@@ -105,6 +114,7 @@ def run_rename(platform="telegram", agent_count=1, agents=None,
             for i, agent in enumerate(agents, 1):
                 f.write(f'AGENT{i}_NAME="{agent["name"]}"\n')
                 f.write(f'AGENT{i}_BOT_TOKEN="{agent.get("bot_token", "")}"\n')
+            f.write(extra_parsed_env)
 
         script_path = os.path.join(tmp_dir, "test-rename.sh")
         with open(script_path, "w") as f:
@@ -123,7 +133,7 @@ def run_rename(platform="telegram", agent_count=1, agents=None,
             with open(curl_log) as f:
                 curl_calls = [line.strip() for line in f if line.strip()]
 
-        return result.returncode, result.stdout, curl_calls
+        return result.returncode, result.stdout + result.stderr, curl_calls
 
 
 # === Tests ===
@@ -189,6 +199,45 @@ class TestRenameTelegram:
         assert rc == 0
         assert "[rename-bots] Telegram: skipping" in stdout
         assert not any("api.telegram.org" in c for c in calls)
+
+    def test_habitat_env_is_loaded_as_data_not_shell(self):
+        fd, marker = tempfile.mkstemp(prefix="rename-bots-safe-parse-")
+        os.close(fd)
+        os.unlink(marker)
+        rc, stdout, calls = run_rename(
+            platform="telegram",
+            habitat_name="ignored",
+            extra_parsed_env=f'HABITAT_NAME="$(touch {marker})"\n',
+        )
+        assert rc == 0
+        assert not os.path.exists(marker)
+
+    def test_fails_clearly_when_env_loader_helper_is_unavailable(self):
+        rc, stdout, calls = run_rename(
+            platform="telegram",
+            source_lib_env=False,
+        )
+        assert rc != 0
+        assert "env_load_file_safe undefined" in stdout
+        assert not calls
+
+    def test_fails_fast_on_invalid_droplet_env_syntax(self):
+        rc, stdout, calls = run_rename(
+            platform="telegram",
+            extra_droplet_env='BAD LINE\n',
+        )
+        assert rc != 0
+        assert "failed to parse" in stdout
+        assert not calls
+
+    def test_fails_fast_on_invalid_habitat_env_syntax(self):
+        rc, stdout, calls = run_rename(
+            platform="telegram",
+            extra_parsed_env='BAD LINE\n',
+        )
+        assert rc != 0
+        assert "failed to parse" in stdout
+        assert not calls
 
     def test_multi_agent(self):
         agents = [

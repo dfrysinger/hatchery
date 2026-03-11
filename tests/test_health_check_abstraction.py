@@ -12,6 +12,8 @@ Validates the hc_* isolation-aware functions:
 """
 import subprocess
 import os
+import tempfile
+import uuid
 import pytest
 
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts')
@@ -70,6 +72,77 @@ class TestSyntax:
             capture_output=True, text=True,
         )
         assert result.returncode == 0, f"bash -n failed: {result.stderr}"
+
+    def test_requires_env_load_file_safe_helper(self):
+        content = open(LIB_PATH).read()
+        assert 'type env_load_file_safe &>/dev/null || {' in content
+        assert 'FATAL: lib-env.sh missing env_load_file_safe()' in content
+
+
+class TestSafeEnvLoading:
+    """hc_load_environment must treat group.env as data, not executable shell."""
+
+    def test_group_env_command_substitution_not_executed(self):
+        marker = os.path.join(tempfile.gettempdir(), f"hc-load-env-marker-{uuid.uuid4().hex}")
+        result = run_hc_function(
+            f'''
+rm -f "{marker}"
+home_dir="/home/${{USERNAME:-runner}}"
+mkdir -p "$home_dir/.openclaw/configs/default"
+cat > "$home_dir/.openclaw/configs/default/group.env" <<'EOF'
+GROUP_ENV_VERSION=1
+PLATFORM=telegram
+DANGEROUS=$(touch {marker})
+EOF
+USERNAME=runner hc_load_environment
+[ -f "{marker}" ] && echo "PWNED" || echo "SAFE"
+echo "DANGEROUS=$DANGEROUS"
+rm -f "{marker}"
+''',
+            env={'USERNAME': 'runner'},
+        )
+        assert "SAFE" in result.stdout
+        assert "PWNED" not in result.stdout
+        assert f"DANGEROUS=$(touch {marker})" in result.stdout
+
+    def test_group_env_quoted_values_load(self):
+        result = run_hc_function(
+            '''
+home_dir="/home/${USERNAME:-runner}"
+mkdir -p "$home_dir/.openclaw/configs/default"
+cat > "$home_dir/.openclaw/configs/default/group.env" <<'EOF'
+GROUP_ENV_VERSION=1
+HABITAT_NAME="My Habitat Name"
+PLATFORM=telegram
+EOF
+USERNAME=runner hc_load_environment
+echo "HABITAT=$HABITAT_NAME"
+''',
+            env={'USERNAME': 'runner'},
+        )
+        assert "HABITAT=My Habitat Name" in result.stdout
+
+    def test_preloaded_group_env_skips_disk_lookup(self):
+        result = run_hc_function(
+            '''
+unset USERNAME
+GROUP=browser \
+GROUP_ENV_VERSION=1 \
+PLATFORM=telegram \
+AGENT_COUNT=2 \
+OPENCLAW_CONFIG_PATH=/srv/openclaw/.openclaw/configs/browser/openclaw.session.json \
+hc_load_environment
+echo "HOME=$HC_HOME"
+echo "CONFIG=$HC_CONFIG_PATH"
+echo "SERVICE=$HC_SERVICE_NAME"
+echo "COUNT=$HC_AGENT_COUNT"
+''',
+            env={'USERNAME': ''},
+        )
+        assert "HOME=/srv/openclaw" in result.stdout
+        assert "CONFIG=/srv/openclaw/.openclaw/configs/browser/openclaw.session.json" in result.stdout
+        assert "SERVICE=openclaw-browser" in result.stdout
+        assert "COUNT=2" in result.stdout
 
 
 class TestRestartService:

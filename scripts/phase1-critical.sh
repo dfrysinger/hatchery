@@ -104,6 +104,14 @@ DOI="${DISCORD_OWNER_ID:-$(d "$DISCORD_OWNER_ID_B64")}"
 DGI="${DISCORD_GUILD_ID:-$(d "$DISCORD_GUILD_ID_B64")}"
 GK=$(d "$GOOGLE_API_KEY_B64")
 A1N="$AGENT1_NAME"
+# Emergency config uses AGENT1_MODEL directly; selects API key via provider
+EMERGENCY_MODEL="${AGENT1_MODEL:-anthropic/claude-opus-4-5}"
+EMERGENCY_TOKEN="$TBT"
+case "$EMERGENCY_MODEL" in
+  openai/*) EMERGENCY_KEY="${OPENAI_API_KEY:-$AK}"; EMERGENCY_KEY_VAR="OPENAI_API_KEY" ;;
+  google/*) EMERGENCY_KEY="${GOOGLE_API_KEY:-${GK:-$AK}}"; EMERGENCY_KEY_VAR="GOOGLE_API_KEY" ;;
+  *)        EMERGENCY_KEY="$AK"; EMERGENCY_KEY_VAR="ANTHROPIC_API_KEY" ;;
+esac
 # PLATFORM must be explicitly set - no silent defaults
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 GT=$(openssl rand -hex 24)
@@ -128,7 +136,7 @@ PLUGINS_JSON="\"telegram\":{\"enabled\":${TG_ENABLED}},\"discord\":{\"enabled\":
 # Build telegram channel config
 TG_CHANNEL=""
 if [ "$TG_ENABLED" = "true" ]; then
-  TG_CHANNEL="\"telegram\":{\"enabled\":true,\"dmPolicy\":\"allowlist\",\"allowFrom\":[\"${TUI}\"],\"accounts\":{\"default\":{\"botToken\":\"${TBT}\"}}}"
+  TG_CHANNEL="\"telegram\":{\"enabled\":true,\"dmPolicy\":\"allowlist\",\"allowFrom\":[\"${TUI}\"],\"accounts\":{\"default\":{\"botToken\":\"${EMERGENCY_TOKEN}\"}}}"
 else
   TG_CHANNEL="\"telegram\":{\"enabled\":false}"
 fi
@@ -146,11 +154,11 @@ fi
 cat > $H/.openclaw/openclaw.json <<CFG
 {
   "env": {
-    "ANTHROPIC_API_KEY": "${AK}"
+    "${EMERGENCY_KEY_VAR}": "${EMERGENCY_KEY}"
   },
   "agents": {
     "defaults": {
-      "model": {"primary": "anthropic/claude-opus-4-5"},
+      "model": {"primary": "${EMERGENCY_MODEL}"},
       "workspace": "$H/clawd"
     },
     "list": [
@@ -183,7 +191,7 @@ cat > $H/.openclaw/openclaw.json <<CFG
 }
 CFG
 # .env with API keys (used by OpenClaw at runtime)
-echo "ANTHROPIC_API_KEY=${AK}" > $H/.openclaw/.env
+echo "${EMERGENCY_KEY_VAR}=${EMERGENCY_KEY}" > $H/.openclaw/.env
 [ -n "$GK" ] && echo -e "GOOGLE_API_KEY=${GK}\nGEMINI_API_KEY=${GK}" >> $H/.openclaw/.env
 GCID=$(d "$GMAIL_CLIENT_ID_B64"); GSEC=$(d "$GMAIL_CLIENT_SECRET_B64"); GRTK=$(d "$GMAIL_REFRESH_TOKEN_B64")
 [ -n "$GCID" ] && echo -e "GMAIL_CLIENT_ID=${GCID}\nGMAIL_CLIENT_SECRET=${GSEC}\nGMAIL_REFRESH_TOKEN=${GRTK}" >> $H/.openclaw/.env

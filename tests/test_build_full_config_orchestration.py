@@ -174,7 +174,12 @@ cat "${CONFIG_BASE}/browser/group.env"
         result = run_orchestration_snippet(code, env)
         assert "GROUP=browser" in result.stdout
         assert "GROUP_PORT=18790" in result.stdout
-        assert "ANTHROPIC_API_KEY=test-key-123" in result.stdout
+        lines = result.stdout.splitlines()
+        assert "ANTHROPIC_API_KEY=test-key-123" in lines
+        assert not any(
+            line.lstrip() == "ANTHROPIC_API_KEY=test-key-123" and line != line.lstrip()
+            for line in lines
+        )
 
     def test_group_token_generated(self, tmp_path):
         env, paths = make_minimal_env(str(tmp_path))

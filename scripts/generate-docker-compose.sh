@@ -36,7 +36,7 @@ done
 type get_group_port &>/dev/null || { echo "FATAL: lib-isolation.sh not found" >&2; exit 1; }
 
 # --- Configuration ---
-ISOLATION="${ISOLATION_DEFAULT:-none}"
+export ISOLATION="${ISOLATION_DEFAULT:-none}"
 ISO_GROUPS="${ISOLATION_GROUPS:-}"
 SVC_USER="${SVC_USER:-${USERNAME:-bot}}"
 HOME_DIR="${HOME_DIR:-/home/${SVC_USER}}"
@@ -215,7 +215,7 @@ WorkingDirectory=${HOME_DIR}
 EnvironmentFile=${env_file}
 ExecStart=/usr/bin/docker compose -f ${compose_path} -p openclaw-${group} up -d --wait
 ExecStop=/usr/bin/docker compose -f ${compose_path} -p openclaw-${group} down
-ExecStartPost=+/bin/bash -c 'source ${env_file} && RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
+ExecStartPost=+/bin/bash -c 'RUN_MODE=execstartpost /usr/local/bin/gateway-health-check.sh'
 
 Restart=on-failure
 RestartSec=10

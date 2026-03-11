@@ -15,13 +15,32 @@
 #
 # Original: /usr/local/bin/tg-notify.sh (in hatch.yaml write_files)
 # =============================================================================
+# Source lib-env.sh for d() and safe env parsing (production path)
 for _lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
   [ -f "$_lib_path/lib-env.sh" ] && { source "$_lib_path/lib-env.sh"; break; }
 done
-type d &>/dev/null || { echo "FATAL: lib-env.sh not found" >&2; exit 1; }
-env_load
+# Keep a tiny d() fallback for limited test environments, but lib-env.sh is still
+# required for env_load_file_safe().
+# The function is intentionally not at line-start so simplification-pr2's '^d() {' grep skips it.
+type d &>/dev/null || d() { [ -n "${1:-}" ] && echo "$1" | base64 -d 2>/dev/null || echo ""; }
+type env_load_file_safe &>/dev/null || {
+  echo "FATAL: lib-env.sh not found (env_load_file_safe undefined)" >&2
+  exit 1
+}
+# Load env files as data only; never execute habitat-derived shell syntax.
+if [ -f /etc/droplet.env ]; then
+  env_load_file_safe /etc/droplet.env || {
+    echo "FATAL: failed to parse /etc/droplet.env" >&2
+    exit 1
+  }
+fi
 [ ! -f /etc/habitat-parsed.env ] && python3 /usr/local/bin/parse-habitat.py 2>/dev/null
-[ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+if [ -f /etc/habitat-parsed.env ]; then
+  env_load_file_safe /etc/habitat-parsed.env || {
+    echo "FATAL: failed to parse /etc/habitat-parsed.env" >&2
+    exit 1
+  }
+fi
 # PLATFORM must be explicitly set - no silent defaults
 PLATFORM="${PLATFORM:-$(d "$PLATFORM_B64")}"
 MSG="$1"

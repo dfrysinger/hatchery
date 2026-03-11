@@ -199,6 +199,38 @@ class TestManifestRequired:
         result = subprocess.run(['bash', SESSION_SCRIPT], capture_output=True, text=True, env=env)
         assert result.returncode != 0
 
+    def test_fails_when_manifest_group_field_missing(self, tmp_path):
+        """Manifest mode must fail fast instead of silently falling back."""
+        result, _, _ = run_generator(tmp_path, {'browser': {'port': 18790}})
+        assert result.returncode == 0, result.stderr
+
+        manifest_path = tmp_path / 'groups.json'
+        with open(manifest_path, encoding='utf-8') as f:
+            manifest = json.load(f)
+        del manifest['groups']['browser']['configPath']
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f)
+
+        env = {
+            'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+            'HOME': str(tmp_path / 'home' / 'bot'),
+            'MANIFEST': str(manifest_path),
+            'ISOLATION_DEFAULT': 'session',
+            'ISOLATION_GROUPS': 'browser',
+            'USERNAME': 'bot',
+            'HOME_DIR': str(tmp_path / 'home' / 'bot'),
+            'HABITAT_NAME': 'test',
+            'SESSION_OUTPUT_DIR': str(tmp_path / 'units'),
+            'DRY_RUN': '1',
+            'AGENT_COUNT': '1',
+            'AGENT1_ISOLATION_GROUP': 'browser',
+            'AGENT1_ISOLATION': 'session',
+            'AGENT1_NETWORK': 'host',
+        }
+        result = subprocess.run(['bash', SESSION_SCRIPT], capture_output=True, text=True, env=env)
+        assert result.returncode != 0
+        assert 'configPath' in result.stderr
+
 
 class TestSyntax:
     def test_bash_n(self):

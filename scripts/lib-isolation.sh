@@ -154,6 +154,131 @@ validate_group_consistency() {
 }
 
 # =========================================================================
+# Config Validation (Phase 0a — post-generation checks)
+# =========================================================================
+
+get_group_config_path() {
+    local group="$1"
+    local config_path=""
+
+    if [ -f "$MANIFEST" ]; then
+        config_path=$(jq -r --arg g "$group" '.groups[$g].configPath // empty' "$MANIFEST" 2>/dev/null) || config_path=""
+    fi
+
+    if [ -n "$config_path" ]; then
+        echo "$config_path"
+    else
+        echo "${CONFIG_BASE}/${group}/openclaw.session.json"
+    fi
+}
+
+# Validate a generated openclaw config for a group.
+# Checks:
+#   1. Single-agent groups prefer per-agent account bindings (by agent ID);
+#      a "default" account binding is allowed only as a backward-compatible fallback.
+#   2. Multi-agent groups must have a binding for every agent
+#   3. Every binding must reference an existing channel account
+#
+# Usage: validate_generated_config "group-name"
+# Returns: 0 on valid, 1 on invalid (with diagnostic to stderr)
+validate_generated_config() {
+    local group="$1"
+    local config_path
+    config_path=$(get_group_config_path "$group" 2>/dev/null) || config_path=""
+
+    if [ ! -f "$config_path" ]; then
+        echo "FATAL: validate_generated_config: config not found for group '$group' at $config_path" >&2
+        return 1
+    fi
+
+    local agent_count
+    if ! agent_count=$(jq '.agents.list | length' "$config_path" 2>/dev/null); then
+        echo "FATAL: validate_generated_config: failed to parse agents list for group '$group' at $config_path; ensure jq is installed and the JSON is valid" >&2
+        return 1
+    fi
+
+    # Check 1: Single-agent account naming (must use agent ID, e.g., "agent1")
+    # Multi-agent mode uses each agent's ID as the account key.
+    # The "default" key is only accepted for backward compat with deployed configs
+    # that were generated before this policy change.
+    if [ "$agent_count" -eq 1 ]; then
+        local single_agent_id
+        if ! single_agent_id=$(jq -r '.agents.list[0].id // empty' "$config_path" 2>/dev/null) || [ -z "$single_agent_id" ]; then
+            echo "FATAL: validate_generated_config: failed to read single agent ID for group '$group' at $config_path; ensure jq is installed, JSON is valid, and .agents.list[0].id is present" >&2
+            return 1
+        fi
+
+        for channel in telegram discord; do
+            local acct_keys
+            acct_keys=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null) || continue
+            # Reject only obviously wrong keys — empty configs or clearly wrong names
+            # "default" is accepted for backward compat; the actual agent ID is preferred
+            if [ -n "$acct_keys" ]; then
+                while IFS= read -r acct_key; do
+                    [ -z "$acct_key" ] && continue
+                    if [[ "$acct_key" != "default" && "$acct_key" != "$single_agent_id" && "$acct_key" != "safe-mode" ]]; then
+                        echo "WARNING: group '$group' single-agent $channel account key is '$acct_key' — expected agent ID '$single_agent_id'" >&2
+                    fi
+                done <<< "$acct_keys"
+            fi
+        done
+    fi
+
+    # Check 2: Multi-agent binding completeness
+    if [ "$agent_count" -gt 1 ]; then
+        local bound_agent_ids real_agent_ids missing_agents
+        missing_agents=0
+
+        # Collect distinct agentIds that have bindings
+        if ! bound_agent_ids=$(jq -r '.bindings[].agentId' "$config_path" 2>/dev/null | sort -u); then
+            bound_agent_ids=""
+        fi
+
+        # Collect the list of real agent IDs defined in the config
+        if ! real_agent_ids=$(jq -r '.agents.list[].id' "$config_path" 2>/dev/null); then
+            echo "FATAL: validate_generated_config: failed to read agent IDs for group '$group' at $config_path; ensure jq is installed and the JSON is valid" >&2
+            return 1
+        fi
+
+        # Ensure every real agent has at least one binding
+        local agent_id
+        while IFS= read -r agent_id; do
+            [ -z "$agent_id" ] && continue
+            if ! echo "$bound_agent_ids" | grep -qx "$agent_id"; then
+                missing_agents=$((missing_agents + 1))
+            fi
+        done <<< "$real_agent_ids"
+
+        if [ "$missing_agents" -gt 0 ]; then
+            echo "FATAL: group '$group' has $agent_count agents but $missing_agents lack bindings — messages won't route" >&2
+            return 1
+        fi
+    fi
+
+    # Check 3: Binding-to-account consistency
+    local binding_errors=0
+    for channel in telegram discord; do
+        local channel_accounts
+        channel_accounts=$(jq -r ".channels.$channel.accounts // {} | keys[]" "$config_path" 2>/dev/null) || continue
+        [ -z "$channel_accounts" ] && continue
+
+        local bound_accounts
+        bound_accounts=$(jq -r ".bindings[] | select(.match.channel == \"$channel\") | .match.accountId" "$config_path" 2>/dev/null) || continue
+
+        while IFS= read -r acct; do
+            [ -z "$acct" ] && continue
+            if ! echo "$channel_accounts" | grep -qx "$acct"; then
+                echo "FATAL: group '$group' binding references $channel account '$acct' but config has: $(echo "$channel_accounts" | tr '\n' ' ')" >&2
+                binding_errors=$((binding_errors + 1))
+            fi
+        done <<< "$bound_accounts"
+    done
+
+    [ "$binding_errors" -gt 0 ] && return 1
+    return 0
+}
+
+# =========================================================================
 # Port Allocation
 # =========================================================================
 
@@ -184,10 +309,11 @@ generate_groups_manifest() {
     # Sort groups alphabetically for deterministic port assignment
     local groups_unsorted groups
     IFS=',' read -ra groups_unsorted <<< "${ISOLATION_GROUPS:?ISOLATION_GROUPS required}"
-    groups=($(printf '%s\n' "${groups_unsorted[@]}" | sort))
+    mapfile -t groups < <(printf '%s\n' "${groups_unsorted[@]}" | sort)
 
     # Build JSON via jq for correctness (no manual string concatenation)
-    local manifest_json='{"generated":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","groups":{}}'
+    local manifest_json
+    manifest_json='{"generated":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","groups":{}}'
     local port_index=0
     local group
     for group in "${groups[@]}"; do
@@ -335,14 +461,37 @@ generate_group_token() {
     cat "$token_file"
 }
 
-# Write per-group environment file with decoded secrets and group metadata.
+# Append decoded secrets to a group.env file.
+# Called by generate_group_env after writing base vars.
+# Expects caller to have decoded secrets in env (via env_decode_keys or manual export).
+# If env_decode_keys is available (from lib-env.sh), it is called defensively to ensure
+# *_B64 vars are decoded before writing — prevents silently writing empty secrets.
+append_decoded_secrets() {
+    local env_file="$1"
+    type env_decode_keys &>/dev/null && env_decode_keys
+    cat >> "$env_file" <<SECRETS
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+OPENAI_API_KEY=${OPENAI_API_KEY:-}
+GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+GEMINI_API_KEY=${GOOGLE_API_KEY:-}
+BRAVE_API_KEY=${BRAVE_API_KEY:-}
+SECRETS
+}
+
+# Write per-group environment file with ALL habitat vars plus group-specific overrides.
 # Consumed by systemd EnvironmentFile= and compose env_file:.
 #
-# Note: GROUP, GROUP_PORT, ISOLATION, NETWORK_MODE are intentionally duplicated
-# from the manifest into group.env. Systemd EnvironmentFile= cannot read JSON,
-# and consumer scripts (health check, safe-mode-handler) need these values at
-# runtime without parsing the manifest. The manifest remains SSOT for generation;
-# group.env is the runtime delivery mechanism.
+# Phase 1 (ENV-REFACTOR): group.env is now the SINGLE SOURCE OF TRUTH for runtime scripts.
+# No runtime script should source habitat-parsed.env directly. All vars flow through group.env.
+#
+# Structure:
+#   1. GROUP_ENV_VERSION=1 (allows future format detection)
+#   2. All habitat-parsed.env vars (include-all approach)
+#   3. Group-specific overrides (GROUP, GROUP_PORT, ISOLATION, etc.)
+#   4. Decoded secrets (override B64 versions from habitat-parsed.env)
+#
+# Note: GROUP, GROUP_PORT, ISOLATION, NETWORK_MODE are derived from the manifest.
+# Systemd EnvironmentFile= cannot read JSON, so these are duplicated here.
 generate_group_env() {
     local group="$1"
     local config_dir="${CONFIG_BASE}/${group}"
@@ -355,26 +504,33 @@ generate_group_env() {
 
     local env_file="${config_dir}/group.env"
 
-    cat > "$env_file" <<ENVFILE
+    # Start fresh with version marker
+    cat > "$env_file" <<HEADER
+GROUP_ENV_VERSION=1
 # Runtime environment for group '${group}' — GENERATED, DO NOT EDIT
-# Topology values below are derived from /etc/openclaw-groups.json (the SSOT).
-# They are duplicated here because systemd EnvironmentFile cannot read JSON.
+# This is the SINGLE SOURCE OF TRUTH for runtime scripts.
 # To change topology, update the habitat config and re-run build-full-config.sh.
+HEADER
+
+    # Include all vars from habitat-parsed.env (exclude comments and empty lines)
+    if [ -f /etc/habitat-parsed.env ] && [ -r /etc/habitat-parsed.env ]; then
+        grep -v '^#\|^$' /etc/habitat-parsed.env >> "$env_file" 2>/dev/null || true
+    fi
+
+    # Group-specific overrides (these take precedence over habitat-parsed.env values)
+    cat >> "$env_file" <<OVERRIDES
+
+# Group-specific overrides (derived from manifest)
 GROUP=${group}
 GROUP_PORT=${port}
 ISOLATION=${isolation}
 NETWORK_MODE=${network}
 OPENCLAW_CONFIG_PATH=${config_dir}/openclaw.session.json
 OPENCLAW_STATE_DIR=${STATE_BASE}/${group}
-ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-OPENAI_API_KEY=${OPENAI_API_KEY:-}
-GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-GEMINI_API_KEY=${GOOGLE_API_KEY:-}
-BRAVE_API_KEY=${BRAVE_API_KEY:-}
-TELEGRAM_OWNER_ID=${TELEGRAM_OWNER_ID:-}
-DISCORD_OWNER_ID=${DISCORD_OWNER_ID:-}
-HC_HABITAT_NAME=${HC_HABITAT_NAME:-}
-ENVFILE
+OVERRIDES
+
+    # Decoded secrets (override B64 versions from habitat-parsed.env)
+    append_decoded_secrets "$env_file"
 
     chmod 600 "$env_file"
     chown "${svc_user}:${svc_user}" "$env_file" 2>/dev/null || true

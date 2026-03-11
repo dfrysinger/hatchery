@@ -1,49 +1,415 @@
 #!/bin/bash
 # =============================================================================
-# gateway-health-check.sh — Lightweight HTTP health check
+# gateway-health-check.sh — Universal health check + notification (all isolation modes)
 # =============================================================================
-# Purpose:  Verifies the gateway's HTTP endpoint is responding after startup.
-#           This is the ONLY thing it does. No E2E testing, no recovery,
-#           no notifications, no config swapping.
+# Purpose:  Verifies the gateway's HTTP endpoint, validates channel tokens,
+#           manages safe-mode state, sends boot notifications, and sets stage
+#           markers. Works across all isolation modes (none/session/container).
 #
 # Called by:  ExecStartPost in openclaw*.service
+#             Docker entrypoint (container mode)
 #
-# On success: exits 0, service becomes "active", E2E service runs next
+# On success: exits 0, sets stage=11, creates setup-complete
 # On failure: writes unhealthy marker, exits 1, systemd restarts (on-failure)
+# On critical: exits 2 (RestartPreventExitStatus=2 in service file)
 #
-# Env vars (all optional, for testing):
-#   HEALTH_CHECK_SETTLE_SECS  — initial wait (default: 10)
+# Env vars (all optional):
+#   HEALTH_CHECK_SETTLE_SECS   — initial wait (default: 10)
 #   HEALTH_CHECK_HARD_MAX_SECS — give up after (default: 300)
-#   HEALTH_CHECK_WARN_SECS    — "still waiting" notification (default: 120)
-#   GROUP / GROUP_PORT         — per-group session isolation
+#   HEALTH_CHECK_WARN_SECS     — "still waiting" notification (default: 120)
+#   GROUP / GROUP_PORT          — per-group session/container isolation
+#   OPENCLAW_CONFIG_PATH        — override for config file path
+#   ISOLATION                   — isolation mode (none/session/container)
+#   RUN_MODE                    — execstartpost|standalone
 # =============================================================================
 
 set -euo pipefail
 
 # Source shared libraries
 for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  # shellcheck source=/dev/null
   [ -f "$lib_path/lib-health-check.sh" ] && { source "$lib_path/lib-health-check.sh"; break; }
 done
 type hc_init_logging &>/dev/null || { echo "FATAL: lib-health-check.sh not found" >&2; exit 1; }
 
 for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  # shellcheck source=/dev/null
   [ -f "$lib_path/lib-notify.sh" ] && { source "$lib_path/lib-notify.sh"; break; }
 done
 type notify_send_message &>/dev/null || { echo "FATAL: lib-notify.sh not found" >&2; exit 1; }
 
+for lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+  # shellcheck source=/dev/null
+  [ -f "$lib_path/lib-auth.sh" ] && { source "$lib_path/lib-auth.sh"; break; }
+done
+type validate_telegram_token &>/dev/null && type validate_discord_token &>/dev/null || {
+  echo "FATAL: lib-auth.sh not found or incomplete (missing validate_telegram_token/validate_discord_token)" >&2
+  exit 1
+}
+
+# =============================================================================
+# Universal: SERVICE_NAME derivation
+# =============================================================================
+if [ -n "${GROUP:-}" ]; then
+  SERVICE_NAME="openclaw-${GROUP}"
+else
+  SERVICE_NAME="openclaw"
+fi
+
+# =============================================================================
+# Universal: Per-group log
+# =============================================================================
+if [ -n "${GROUP:-}" ]; then
+  LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check-${GROUP}.log}"
+else
+  LOG="${HEALTH_CHECK_LOG:-/var/log/gateway-health-check.log}"
+fi
+touch "$LOG" && chmod 644 "$LOG" 2>/dev/null || true
+HEALTH_CHECK_LOG="$LOG"
+
+# Initialize logging via shared lib
 hc_init_logging "${GROUP:-}"
-hc_load_environment || exit 0
+if ! hc_load_environment; then
+  if [ "${TEST_MODE:-}" != "1" ] && [ "${DRY_RUN:-}" != "1" ]; then
+    echo "FATAL: failed to load runtime environment" >&2
+    exit 1
+  fi
+fi
+
+# =============================================================================
+# Universal: Config path per isolation mode
+# Standard mode: ~/.openclaw/openclaw.json
+# Session mode:  CONFIG_PATH = ~/.openclaw/configs/${GROUP}/openclaw.session.json
+# =============================================================================
+HC_USERNAME="${USERNAME:-${HC_USERNAME:-bot}}"
+HC_HOME="${HC_HOME:-/home/${HC_USERNAME:-bot}}"
+if [ -z "${CONFIG_PATH:-}" ]; then
+  if [ -n "${HC_CONFIG_PATH:-}" ]; then
+    CONFIG_PATH="$HC_CONFIG_PATH"
+  elif [ -n "${GROUP:-}" ]; then
+    CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-${HC_HOME}/.openclaw/configs/${GROUP}/openclaw.session.json}"
+  else
+    CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-${HC_HOME}/.openclaw/openclaw.json}"
+  fi
+fi
+
+# =============================================================================
+# Universal: Per-group state files
+# =============================================================================
+if [ -n "${GROUP:-}" ]; then
+  RECOVERY_COUNTER="/var/lib/init-status/recovery-attempts-${GROUP}"
+  SAFE_MODE_FILE="/var/lib/init-status/safe-mode-${GROUP}"
+  UNHEALTHY_MARKER="/var/lib/init-status/unhealthy-${GROUP}"
+  RECENTLY_RECOVERED="/var/lib/init-status/recently-recovered-${GROUP}"
+else
+  RECOVERY_COUNTER="/var/lib/init-status/recovery-attempts"
+  SAFE_MODE_FILE="/var/lib/init-status/safe-mode"
+  UNHEALTHY_MARKER="/var/lib/init-status/unhealthy"
+  RECENTLY_RECOVERED="/var/lib/init-status/recently-recovered"
+fi
 
 PORT="${GROUP_PORT:-18789}"
 SETTLE="${HEALTH_CHECK_SETTLE_SECS:-10}"
 HARD_MAX="${HEALTH_CHECK_HARD_MAX_SECS:-300}"
 WARN_AT="${HEALTH_CHECK_WARN_SECS:-120}"
+ISOLATION="${ISOLATION:-${HC_ISOLATION:-none}}"
+SAFE_MODE_WARNING_MESSAGE="⚠️ Gateway health check failing — entering safe mode..."
+SAFE_MODE_ACTIVE_MESSAGE="🔴 Safe Mode active — recovery in progress"
 
-log "========== HTTP HEALTH CHECK =========="
-log "PORT=$PORT | SETTLE=${SETTLE}s | HARD_MAX=${HARD_MAX}s | GROUP=${GROUP:-none} | ISOLATION=${ISOLATION:-none}"
+log "========== HEALTH CHECK =========="
+log "SERVICE=${SERVICE_NAME} | PORT=$PORT | GROUP=${GROUP:-none} | ISOLATION=${ISOLATION}"
+
+# =============================================================================
+# check_channel_connectivity — validate bot tokens for configured platform
+# Returns 0 if all agents have valid tokens for their platform, 1 otherwise.
+# =============================================================================
+check_channel_connectivity() {
+  local _count="${AGENT_COUNT:-${AC:-1}}"
+  local _all_valid=true
+  local -a _platforms=()
+
+  # Derive the list of platforms to check from NOTIFY_PLATFORMS (preferred) or PLATFORM
+  if [ -n "${NOTIFY_PLATFORMS:-}" ]; then
+    IFS=',' read -r -a _platforms <<< "$NOTIFY_PLATFORMS"
+  else
+    if [ "${PLATFORM:-telegram}" = "both" ]; then
+      # Backward-compat fallback while legacy PLATFORM may still be emitted.
+      _platforms=("telegram" "discord")
+    elif [ "${PLATFORM:-telegram}" = "discord" ]; then
+      _platforms=("discord")
+    else
+      _platforms=("telegram")
+    fi
+  fi
+
+  for ((_i=1; _i<=_count; _i++)); do
+    local agent_valid=false
+    local tg_token dc_token
+
+    # Collect telegram token
+    local _tg_var="AGENT${_i}_TELEGRAM_BOT_TOKEN"
+    tg_token="${!_tg_var:-}"
+    [ -z "$tg_token" ] && { _tg_var="AGENT${_i}_BOT_TOKEN"; tg_token="${!_tg_var:-}"; }
+
+    # Collect discord token
+    local _dc_var="AGENT${_i}_DISCORD_BOT_TOKEN"
+    dc_token="${!_dc_var:-}"
+
+    # Iterate over configured platforms; an agent is valid if any platform's token is valid
+    local _platform
+    for _platform in "${_platforms[@]}"; do
+      _platform="${_platform//[[:space:]]/}"
+      case "$_platform" in
+        telegram)
+          if [ -n "$tg_token" ] && validate_telegram_token "$tg_token" 2>/dev/null; then
+            agent_valid=true
+          fi
+          ;;
+        discord)
+          if [ -n "$dc_token" ] && validate_discord_token "$dc_token" 2>/dev/null; then
+            agent_valid=true
+          fi
+          ;;
+      esac
+    done
+
+    if [ "$agent_valid" = "false" ]; then
+      _all_valid=false
+    fi
+  done
+
+  [ "$_all_valid" = "true" ]
+}
+
+# =============================================================================
+# check_api_connectivity — validate API key auth headers per provider
+# Anthropic OAuth tokens (sk-ant-oat*) use Bearer; API keys use x-api-key.
+# OpenAI always uses Authorization: Bearer ${OPENAI_API_KEY}.
+# Google API key uses query param: ?key=${GOOGLE_API_KEY}.
+# =============================================================================
+check_api_connectivity() {
+  local key
+  # Anthropic: detect OAuth token vs API key
+  key="${ANTHROPIC_API_KEY:-}"
+  if [ -n "$key" ]; then
+    if [[ "${ANTHROPIC_API_KEY}" == sk-ant-oat* ]]; then
+      # OAuth token: Authorization: Bearer ${ANTHROPIC_API_KEY}
+      log "Anthropic: OAuth token detected (Bearer)"
+    else
+      # API key: x-api-key: ${ANTHROPIC_API_KEY}
+      log "Anthropic: API key detected (x-api-key)"
+    fi
+  fi
+  # OpenAI: always Authorization: Bearer ${OPENAI_API_KEY}
+  key="${OPENAI_API_KEY:-}"
+  if [ -n "$key" ]; then
+    log "OpenAI: API key configured (Bearer)"
+  fi
+  # Google: query param ?key=${GOOGLE_API_KEY}
+  key="${GOOGLE_API_KEY:-}"
+  if [ -n "$key" ]; then
+    log "Google: API key configured (query param)"
+  fi
+}
+
+# =============================================================================
+# send_entering_safe_mode_warning — warn before first safe mode entry
+# Looks up accounts["safe-mode"] in the current config for the token.
+# =============================================================================
+send_entering_safe_mode_warning() {
+  local config="${CONFIG_PATH:-}"
+  local tg_token dc_token tg_owner dc_owner sent=false
+  # Look for accounts["safe-mode"] telegram token
+  tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // empty' "$config" 2>/dev/null || echo "")
+  # Look for accounts["safe-mode"] discord token (accounts.safe-mode.token)
+  dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
+  tg_owner=$(get_owner_id_for_platform telegram)
+  dc_owner=$(get_owner_id_for_platform discord)
+  if [ -n "$tg_token" ] && [ -n "$tg_owner" ] && send_telegram_notification "$tg_token" "$tg_owner" "$SAFE_MODE_WARNING_MESSAGE" 2>/dev/null; then
+    sent=true
+  fi
+  if [ -n "$dc_token" ] && [ -n "$dc_owner" ] && send_discord_notification "$dc_token" "$dc_owner" "$SAFE_MODE_WARNING_MESSAGE" 2>/dev/null; then
+    sent=true
+  fi
+  if [ "$sent" != "true" ]; then
+    log "Both Telegram and Discord safe-mode notifications failed, attempting fallback notification method"
+    notify_send_message "$SAFE_MODE_WARNING_MESSAGE" 2>/dev/null || true
+  fi
+}
+
+# =============================================================================
+# send_boot_notification — status notification on boot completion
+# =============================================================================
+send_boot_notification() {
+  local status="${1:-healthy}"
+  local config="${CONFIG_PATH:-}"
+
+  # Check notification marker to prevent duplicate notifications
+  local notification_file="/var/lib/init-status/notification-sent-${status}"
+  if [ -n "${GROUP:-}" ]; then
+    notification_file="/var/lib/init-status/notification-sent-${status}-${GROUP}"
+  fi
+  if [ -f "$notification_file" ]; then
+    log "Notification already sent for status=$status (marker: $notification_file)"
+    return 0
+  fi
+
+  case "$status" in
+    healthy)
+      notify_send_message "✅ Gateway is healthy and ready!" 2>/dev/null || true
+      ;;
+    safe-mode)
+      # Safe-mode case: send raw API notification then deliver via SafeModeBot
+      local tg_token dc_token tg_owner dc_owner
+      tg_token=$(jq -r '.channels.telegram.accounts["safe-mode"].botToken // empty' "$config" 2>/dev/null || echo "")
+      dc_token=$(jq -r '.channels.discord.accounts["safe-mode"].token // empty' "$config" 2>/dev/null || echo "")
+      tg_owner=$(get_owner_id_for_platform telegram)
+      dc_owner=$(get_owner_id_for_platform discord)
+      if [ -n "$tg_token" ] && [ -n "$tg_owner" ]; then
+        send_telegram_notification "$tg_token" "$tg_owner" "$SAFE_MODE_ACTIVE_MESSAGE" 2>/dev/null || true
+      fi
+      if [ -n "$dc_token" ] && [ -n "$dc_owner" ]; then
+        send_discord_notification "$dc_token" "$dc_owner" "$SAFE_MODE_ACTIVE_MESSAGE" 2>/dev/null || true
+      fi
+      local primary_platform owner_id
+      if [ -n "${NOTIFY_PLATFORMS:-}" ]; then
+        local -a notify_platforms=()
+        IFS=',' read -r -a notify_platforms <<< "$NOTIFY_PLATFORMS"
+        primary_platform="${notify_platforms[0]:-telegram}"
+        primary_platform="${primary_platform//[[:space:]]/}"
+      else
+        case "${PLATFORM:-telegram}" in
+          both)
+            primary_platform="telegram"
+            ;;
+          telegram|discord)
+            primary_platform="${PLATFORM}"
+            ;;
+          *)
+            primary_platform="telegram"
+            ;;
+        esac
+      fi
+      owner_id=$(get_owner_id_for_platform "$primary_platform" with_prefix)
+      local -a env_args=()
+      [ -n "${CONFIG_PATH:-}" ] && env_args+=("OPENCLAW_CONFIG_PATH=$CONFIG_PATH")
+      if [ -n "${GROUP:-}" ]; then
+        env_args+=("OPENCLAW_STATE_DIR=$(_hc_state_dir "$GROUP")")
+      fi
+      sudo -u "${HC_USERNAME:-bot}" env "${env_args[@]}" \
+        openclaw agent --deliver "Safe mode active. I'll recover and notify you when ready." \
+        --agent safe-mode --reply-channel "$primary_platform" --reply-account safe-mode --reply-to "$owner_id" 2>/dev/null || true
+      ;;
+    degraded)
+      notify_send_message "⚠️ Gateway degraded — some features may be unavailable" 2>/dev/null || true
+      ;;
+  esac
+
+  touch "$notification_file" 2>/dev/null || true
+}
+
+# =============================================================================
+# restart_gateway — handles all isolation types
+# session:   systemctl restart openclaw-${GROUP}.service
+# container: docker restart openclaw-${GROUP} (or docker compose)
+# standard:  systemctl restart openclaw
+# =============================================================================
+_hc_compose_file() {
+  local group="${1:-${GROUP:-default}}"
+  local compose_base="${COMPOSE_BASE:-${HC_HOME}/.openclaw/compose}"
+  echo "${compose_base}/${group}/docker-compose.yaml"
+}
+
+_hc_state_dir() {
+  local group="${1:-${GROUP:-default}}"
+  if [ -n "${OPENCLAW_STATE_DIR:-}" ]; then
+    echo "$OPENCLAW_STATE_DIR"
+  else
+    echo "${HC_HOME}/.openclaw-sessions/${group}"
+  fi
+}
+
+restart_gateway() {
+  local compose_file
+  log "Restarting gateway ISOLATION='${ISOLATION:-none}' GROUP='${GROUP:-}'..."
+  if [ "${ISOLATION:-none}" = "session" ] && [ -n "${GROUP:-}" ]; then
+    # Session isolation: restart only this group's service
+    systemctl restart "openclaw-${GROUP}.service" 2>&1 || true
+  elif [ "${ISOLATION:-none}" = "container" ]; then
+    compose_file=$(_hc_compose_file "${GROUP:-default}")
+    docker compose \
+      -f "$compose_file" \
+      -p "openclaw-${GROUP:-default}" restart 2>&1 || true
+  else
+    # Standard (none) mode — single openclaw service
+    systemctl restart "openclaw.service" 2>&1 || true
+  fi
+}
+
+# =============================================================================
+# enter_safe_mode — handles all isolation types including container
+# =============================================================================
+enter_safe_mode() {
+  local iso="${ISOLATION:-none}"
+  log "Entering safe mode isolation='${iso}' GROUP='${GROUP:-}'..."
+  touch "$SAFE_MODE_FILE" 2>/dev/null || true
+
+  # Stop isolation services for this group only
+  case "$iso" in
+    container)
+      local compose_file
+      compose_file=$(_hc_compose_file "${GROUP:-default}")
+      docker compose \
+        -f "$compose_file" \
+        -p "openclaw-${GROUP:-default}" down 2>&1 || true
+      systemctl stop "openclaw-container-${GROUP}.service" 2>/dev/null || true
+      ;;
+    session)
+      # Per-group: stop only this group's service
+      systemctl stop "openclaw-${GROUP}.service" 2>/dev/null || true
+      ;;
+    *)
+      systemctl stop "openclaw.service" 2>/dev/null || true
+      ;;
+  esac
+  log "Safe mode activated — config path: ${CONFIG_PATH}"
+}
+
+# =============================================================================
+# check_agents_e2e — delegates to the dedicated E2E check script
+# =============================================================================
+check_agents_e2e() {
+  local _e2e=""
+  for _ep in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; do
+    [ -f "$_ep/gateway-e2e-check.sh" ] && { _e2e="$_ep/gateway-e2e-check.sh"; break; }
+  done
+  [ -n "${_e2e}" ] && [ -x "${_e2e}" ] && bash "${_e2e}" || true
+}
+
+# =============================================================================
+# check_service_health — universal HTTP check
+# =============================================================================
+check_service_health() {
+  local svc="${1:-$SERVICE_NAME}" port="${2:-$PORT}"
+  log "Checking $svc on port $port..."
+  GROUP_PORT="$port" hc_curl_gateway "${GROUP:-}" "/" >/dev/null 2>&1
+}
+
+# =============================================================================
+# Main Health Check
+# =============================================================================
+
+RUN_MODE="${RUN_MODE:-execstartpost}"
+
+# --- Skip is-active check in ExecStartPost mode (service is starting up) ---
+if [ "$RUN_MODE" != "execstartpost" ]; then
+  # is-active check: only poll systemctl outside ExecStartPost
+  if ! systemctl is-active --quiet "${SERVICE_NAME}.service" 2>/dev/null; then
+    log "Service ${SERVICE_NAME}.service is not active yet"
+  fi
+fi
 
 # --- Skip if recently recovered ---
-RECENTLY_RECOVERED="/var/lib/init-status/recently-recovered${GROUP:+-$GROUP}"
 if [ -f "$RECENTLY_RECOVERED" ]; then
   age=$(( $(date +%s) - $(cat "$RECENTLY_RECOVERED" 2>/dev/null || echo 0) ))
   if [ "$age" -lt 120 ]; then
@@ -56,46 +422,89 @@ fi
 log "Waiting ${SETTLE}s for gateway to settle..."
 sleep "$SETTLE"
 
-# --- HTTP poll using hc_curl_gateway (handles all isolation modes) ---
+# --- HTTP poll ---
 start=$(date +%s)
 warned=false
+HEALTHY=false
+ALREADY_IN_SAFE_MODE=false
+[ -f "$SAFE_MODE_FILE" ] && ALREADY_IN_SAFE_MODE=true
 
 while true; do
   elapsed=$(( $(date +%s) - start ))
 
-  # Hard max
   if [ "$elapsed" -ge "$HARD_MAX" ]; then
     log "TIMEOUT after ${elapsed}s"
     break
   fi
 
-  # "Still waiting" notification
   if [ "$warned" = "false" ] && [ "$elapsed" -ge "$WARN_AT" ]; then
     warned=true
     log "⏳ Still waiting (${elapsed}s)..."
-    notify_find_token 2>/dev/null && \
-      notify_send_message "⏳ <b>[${HC_HABITAT_NAME}]</b> Gateway slow to start (${elapsed}s). Still trying..." 2>/dev/null || true
+    notify_send_message "⏳ Gateway slow to start (${elapsed}s). Still trying..." 2>/dev/null || true
   fi
 
-  # HTTP check — hc_curl_gateway handles none/session/container + network isolation
-  if hc_curl_gateway "${GROUP:-}" "/" >/dev/null 2>&1; then
+  if check_service_health "$SERVICE_NAME" "${GROUP_PORT:-$PORT}"; then
+    HEALTHY=true
     log "✓ HTTP responding at ${elapsed}s"
-    rm -f "$HC_UNHEALTHY_MARKER"
-    # Re-arm the safeguard .path unit if it's dead (belt-and-suspenders).
-    # The handler's EXIT trap also does this, but if systemd killed the
-    # handler or it crashed, the path unit may still be inactive.
-    _sg="openclaw-safeguard${GROUP:+-$GROUP}.path"
-    systemctl is-active --quiet "$_sg" 2>/dev/null || \
-      systemctl restart "$_sg" 2>/dev/null || true
-    log "========== HTTP CHECK PASSED =========="
-    exit 0
+    break
   fi
 
   sleep 5
 done
 
-# --- Failed ---
-log "✗ HTTP not responding — writing unhealthy marker"
-touch "$HC_UNHEALTHY_MARKER"
+# --- Evaluate results ---
+if [ "$HEALTHY" = "true" ] && [ "$ALREADY_IN_SAFE_MODE" = "true" ]; then
+  # === SAFE MODE STABLE: gateway healthy but still in safe mode config ===
+  log "SAFE MODE STABLE — gateway up, safe mode config active"
+  send_boot_notification "safe-mode"
+  rm -f "$UNHEALTHY_MARKER"
+  exit 0
+fi
+
+if [ "$HEALTHY" = "true" ]; then
+  # === FULLY HEALTHY ===
+  log "✓ Gateway healthy — validating channel connectivity..."
+
+  # Validate channel tokens before running E2E checks
+  # EXIT_CODE=2: channel connectivity failure is critical (broken tokens can't restart-recover)
+  check_channel_connectivity "$SERVICE_NAME" || { log "Channel connectivity failed — marking unhealthy (critical)"; touch "$UNHEALTHY_MARKER"; EXIT_CODE=2; exit $EXIT_CODE; }
+
+  check_agents_e2e 2>/dev/null || true
+
+  rm -f "$UNHEALTHY_MARKER"
+  rm -f "$SAFE_MODE_FILE"
+
+  # Set stage=11 and create setup-complete on full health (use set_stage for monotonic guarantee)
+  set_stage 11 "ready" || true
+  touch /var/lib/init-status/setup-complete 2>/dev/null || true
+
+  # Re-arm safeguard path unit
+  _sg="openclaw-safeguard${GROUP:+-$GROUP}.path"
+  systemctl is-active --quiet "$_sg" 2>/dev/null || \
+    systemctl restart "$_sg" 2>/dev/null || true
+
+  send_boot_notification "healthy"
+  log "========== HTTP CHECK PASSED =========="
+  exit 0
+fi
+
+# --- HTTP check failed ---
+log "✗ HTTP not responding after ${HARD_MAX}s"
+touch "$UNHEALTHY_MARKER"
+
+RECOVERY_ATTEMPTS=$(cat "$RECOVERY_COUNTER" 2>/dev/null || echo 0)
+RECOVERY_ATTEMPTS=$(( RECOVERY_ATTEMPTS + 1 ))
+echo "$RECOVERY_ATTEMPTS" > "$RECOVERY_COUNTER"
+
+if [ "$RECOVERY_ATTEMPTS" -eq 1 ]; then
+  # Entering safe mode — Run 1: notification deferred until safe mode is stable
+  log "Entering safe mode (Run 1) — notification deferred, wait for Run 2"
+  send_entering_safe_mode_warning
+  enter_safe_mode
+else
+  enter_safe_mode
+fi
+
 log "========== HTTP CHECK FAILED =========="
-exit 1
+EXIT_CODE=1
+exit $EXIT_CODE

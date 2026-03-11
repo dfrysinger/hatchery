@@ -161,14 +161,14 @@ echo ""
 echo "=== Platform-aware token validation ==="
 
 # Verify platform conditional for telegram
-if grep -A3 'platform.*telegram.*both' "$HEALTH_CHECK" | head -5 | grep -q 'TELEGRAM_BOT_TOKEN\|tg_token'; then
+if grep -A3 'telegram)' "$HEALTH_CHECK" | head -8 | grep -q 'TELEGRAM_BOT_TOKEN\|tg_token'; then
   pass "Token validation checks Telegram when platform=telegram"
 else
   fail "Token validation should check Telegram tokens for platform=telegram"
 fi
 
 # Verify platform conditional for discord
-if grep -A3 'platform.*discord.*both' "$HEALTH_CHECK" | head -5 | grep -q 'DISCORD_BOT_TOKEN\|dc_token'; then
+if grep -A3 'discord)' "$HEALTH_CHECK" | head -8 | grep -q 'DISCORD_BOT_TOKEN\|dc_token'; then
   pass "Token validation checks Discord when platform=discord"
 else
   fail "Token validation should check Discord tokens for platform=discord"
@@ -200,7 +200,8 @@ else
 fi
 
 # Also must trigger SafeModeBot intro
-if echo "$SAFE_MODE_CASE" | grep -q 'openclaw agent.*deliver.*safe-mode'; then
+if echo "$SAFE_MODE_CASE" | grep -q 'openclaw agent --deliver' && \
+   echo "$SAFE_MODE_CASE" | grep -q -- '--agent safe-mode'; then
   pass "Safe-mode case triggers SafeModeBot intro via --deliver"
 else
   fail "Safe-mode case should trigger SafeModeBot intro via openclaw agent --deliver"

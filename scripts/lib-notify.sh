@@ -104,7 +104,7 @@ notify_find_token() {
 
   # Steps 2+3: Delegate to lib-auth's find_working_platform_token()
   # (single implementation for agent iteration + cross-platform fallback)
-  [ -f /etc/habitat-parsed.env ] && source /etc/habitat-parsed.env
+  # Do not source habitat-parsed.env at runtime; hc_load_environment/group.env is SSOT.
   export PLATFORM="${HC_PLATFORM:-telegram}"
   export AGENT_COUNT="${HC_AGENT_COUNT:-${AGENT_COUNT:-1}}"
 

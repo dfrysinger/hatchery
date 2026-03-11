@@ -104,7 +104,8 @@ apply_full_config() {
         generate_group_config "$TARGET_GROUP"
       else
         # Regenerate configs for all groups
-        local groups="$(_resolve_groups)"
+        local groups
+        groups="$(_resolve_groups)"
         IFS=',' read -ra _groups <<< "$groups"
         for grp in "${_groups[@]}"; do
           log "Regenerating config for group ${grp}"
@@ -135,7 +136,8 @@ restart_services() {
         log "Restarting group ${TARGET_GROUP}"
         ISOLATION="$(get_group_isolation "$TARGET_GROUP")" hc_restart_service "$TARGET_GROUP"
       else
-        local groups="$(_resolve_groups)"
+        local groups
+        groups="$(_resolve_groups)"
         IFS=',' read -ra _groups <<< "$groups"
         for grp in "${_groups[@]}"; do
           log "Restarting group ${grp}"
@@ -170,7 +172,8 @@ wait_for_all_groups() {
         ISOLATION="$iso" NETWORK_MODE="$net" GROUP_PORT="${port:-18789}" \
           hc_wait_for_http "$TARGET_GROUP"
       else
-        local groups="$(_resolve_groups)"
+        local groups
+        groups="$(_resolve_groups)"
         IFS=',' read -ra _groups <<< "$groups"
         for grp in "${_groups[@]}"; do
           local iso net port

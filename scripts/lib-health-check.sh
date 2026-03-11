@@ -45,27 +45,52 @@ for _hc_lib_path in /usr/local/sbin /usr/local/bin "$(cd "$(dirname "${BASH_SOUR
   [ -f "$_hc_lib_path/lib-env.sh" ] && { source "$_hc_lib_path/lib-env.sh"; break; }
 done
 type d &>/dev/null || { echo "FATAL: lib-env.sh not found (d() undefined)" >&2; exit 1; }
+type env_load_file_safe &>/dev/null || {
+  echo "FATAL: lib-env.sh missing env_load_file_safe()" >&2
+  exit 1
+}
 
 hc_load_environment() {
-  # Load env files (droplet.env + habitat-parsed.env)
-  if ! env_load; then
-    log "ERROR: env_load failed (missing /etc/droplet.env?)"
-    return 1
-  fi
+  # Phase 1 (ENV-REFACTOR): group.env is the SINGLE SOURCE OF TRUTH.
+  # No runtime script should source habitat-parsed.env directly.
 
-  if [ ! -f /etc/habitat-parsed.env ] && [ -z "${TEST_MODE:-}" ]; then
-    log "ERROR: /etc/habitat-parsed.env not found"
-    return 1
-  fi
-
-  # Decode API keys from base64
-  env_decode_keys
-
-  # Common variables
-  HC_AGENT_COUNT="${AGENT_COUNT:-1}"
+  # Determine group.env path based on GROUP (may be set via EnvironmentFile=)
+  local group_env_file=""
   HC_USERNAME="${USERNAME:-bot}"
-  HC_HOME="/home/$HC_USERNAME"
-  HC_ISOLATION="${ISOLATION_DEFAULT:-none}"
+
+  if [ -n "${OPENCLAW_CONFIG_PATH:-}" ] && [[ "$OPENCLAW_CONFIG_PATH" == */.openclaw/* ]]; then
+    HC_HOME="${OPENCLAW_CONFIG_PATH%%/.openclaw/*}"
+  elif [ -n "${OPENCLAW_STATE_DIR:-}" ] && [[ "$OPENCLAW_STATE_DIR" == */.openclaw-sessions/* ]]; then
+    HC_HOME="${OPENCLAW_STATE_DIR%%/.openclaw-sessions/*}"
+  else
+    HC_HOME="/home/$HC_USERNAME"
+  fi
+
+  if [ -n "${GROUP_ENV_FILE:-}" ]; then
+    group_env_file="$GROUP_ENV_FILE"
+  elif [ -n "${GROUP:-}" ]; then
+    # Isolated mode: group-specific env file
+    group_env_file="${HC_HOME}/.openclaw/configs/${GROUP}/group.env"
+  else
+    # Non-isolated mode: default group.env
+    group_env_file="${HC_HOME}/.openclaw/configs/default/group.env"
+  fi
+
+  # Load group.env safely (the SSOT for runtime)
+  if [ -n "${GROUP_ENV_VERSION:-}" ]; then
+    # EnvironmentFile= has already populated group.env values in this process
+    # (for example in systemd ExecStartPost), so skip re-reading from disk.
+    :
+  elif [ -f "$group_env_file" ]; then
+    env_load_file_safe "$group_env_file" || return 1
+  elif [ -z "${TEST_MODE:-}" ]; then
+    log "ERROR: group.env not found at $group_env_file"
+    return 1
+  fi
+
+  # Common variables (populated from group.env)
+  HC_AGENT_COUNT="${AGENT_COUNT:-1}"
+  HC_ISOLATION="${ISOLATION:-${ISOLATION_DEFAULT:-none}}"
   HC_SESSION_GROUPS="${ISOLATION_GROUPS:-}"
   HC_PLATFORM="${PLATFORM:-telegram}"
   HC_HABITAT_NAME="${HABITAT_NAME:-Droplet}"

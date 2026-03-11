@@ -571,8 +571,8 @@ test_health_check_sets_ready_status() {
   
   local script="$REPO_DIR/scripts/gateway-health-check.sh"
   
-  # Check for stage=11 setting on success
-  if grep -q "echo '11' > /var/lib/init-status/stage" "$script"; then
+  # Check for stage=11 setting on success (via set_stage for monotonic guarantee)
+  if grep -q "set_stage 11" "$script"; then
     pass "Health check sets stage=11 on success"
   else
     fail "Health check missing stage=11 setting"

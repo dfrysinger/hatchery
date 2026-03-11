@@ -153,73 +153,88 @@ result=$(run_check)
 assert_eq "1" "$result" "no_cross_platform_fallback: FAILS despite valid Discord token"
 
 # =============================================================================
-# Tests: Platform = both
+# Tests: NOTIFY_PLATFORMS = telegram,discord
 # =============================================================================
 echo ""
-echo "=== Platform: both (agent needs at least one working token) ==="
+echo "=== notify platforms: telegram,discord (agent needs at least one working token) ==="
 
 # Test: Agent has valid TG only - should pass
 cat > "$TEST_TMPDIR/env.sh" << EOF
-PLATFORM="both"
+NOTIFY_PLATFORMS="telegram,discord"
 AGENT_COUNT=1
 AGENT1_TELEGRAM_BOT_TOKEN="$VALID_TG_TOKEN"
 EOF
 result=$(run_check)
-assert_eq "0" "$result" "platform_both_tg_only: passes with just Telegram"
+assert_eq "0" "$result" "platforms_csv_tg_only: passes with just Telegram"
 
 # Test: Agent has valid DC only - should pass
 cat > "$TEST_TMPDIR/env.sh" << EOF
-PLATFORM="both"
+NOTIFY_PLATFORMS="telegram,discord"
 AGENT_COUNT=1
 AGENT1_DISCORD_BOT_TOKEN="$VALID_DC_TOKEN"
 EOF
 result=$(run_check)
-assert_eq "0" "$result" "platform_both_dc_only: passes with just Discord"
+assert_eq "0" "$result" "platforms_csv_dc_only: passes with just Discord"
 
 # Test: Agent has broken TG but valid DC - should pass with "both"
 cat > "$TEST_TMPDIR/env.sh" << EOF
-PLATFORM="both"
+NOTIFY_PLATFORMS="telegram,discord"
 AGENT_COUNT=1
 AGENT1_TELEGRAM_BOT_TOKEN="$BROKEN_TG_TOKEN"
 AGENT1_DISCORD_BOT_TOKEN="$VALID_DC_TOKEN"
 EOF
 result=$(run_check)
-assert_eq "0" "$result" "platform_both_fallback: passes when one platform works"
+assert_eq "0" "$result" "platforms_csv_fallback: passes when one platform works"
 
 # Test: Agent has both broken - should fail
 cat > "$TEST_TMPDIR/env.sh" << EOF
-PLATFORM="both"
+NOTIFY_PLATFORMS="telegram,discord"
 AGENT_COUNT=1
 AGENT1_TELEGRAM_BOT_TOKEN="$BROKEN_TG_TOKEN"
 AGENT1_DISCORD_BOT_TOKEN="$BROKEN_DC_TOKEN"
 EOF
 result=$(run_check)
-assert_eq "1" "$result" "platform_both_all_broken: fails when both platforms broken"
+assert_eq "1" "$result" "platforms_csv_all_broken: fails when both platforms broken"
 
 # =============================================================================
-# Tests: Multi-agent with platform = both
+# Tests: Multi-agent with NOTIFY_PLATFORMS = telegram,discord
 # =============================================================================
 echo ""
-echo "=== Platform: both (multiple agents) ==="
+echo "=== notify platforms: telegram,discord (multiple agents) ==="
 
 # Test: 2 agents, agent1 has TG, agent2 has DC - both should pass
 cat > "$TEST_TMPDIR/env.sh" << EOF
-PLATFORM="both"
+NOTIFY_PLATFORMS="telegram,discord"
 AGENT_COUNT=2
 AGENT1_TELEGRAM_BOT_TOKEN="$VALID_TG_TOKEN"
 AGENT2_DISCORD_BOT_TOKEN="$VALID_DC_TOKEN"
 EOF
 result=$(run_check)
-assert_eq "0" "$result" "multi_both_mixed_tokens: passes when each agent has at least one"
+assert_eq "0" "$result" "multi_platforms_csv_mixed_tokens: passes when each agent has at least one"
 
 # Test: 2 agents, agent1 has valid TG, agent2 has nothing - should fail
 cat > "$TEST_TMPDIR/env.sh" << EOF
-PLATFORM="both"
+NOTIFY_PLATFORMS="telegram,discord"
 AGENT_COUNT=2
 AGENT1_TELEGRAM_BOT_TOKEN="$VALID_TG_TOKEN"
 EOF
 result=$(run_check)
-assert_eq "1" "$result" "multi_both_one_missing: FAILS when one agent has no tokens"
+assert_eq "1" "$result" "multi_platforms_csv_one_missing: FAILS when one agent has no tokens"
+
+# =============================================================================
+# Tests: Legacy PLATFORM=both backward compatibility
+# =============================================================================
+echo ""
+echo "=== legacy platform: both (backward compatibility) ==="
+
+# Test: Agent has valid Discord only - should pass (legacy both => telegram+discord)
+cat > "$TEST_TMPDIR/env.sh" << EOF
+PLATFORM="both"
+AGENT_COUNT=1
+AGENT1_DISCORD_BOT_TOKEN="$VALID_DC_TOKEN"
+EOF
+result=$(run_check)
+assert_eq "0" "$result" "platform_legacy_both_dc_only: passes with valid Discord token"
 
 # =============================================================================
 # Summary

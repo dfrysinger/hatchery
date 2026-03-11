@@ -102,13 +102,12 @@ esac
 EXEC_POLICY='{"security":"full","ask":"off"}'
 
 # Build agents.defaults — single source of truth for all modes.
-# Args: $1 = model (optional override, defaults to opus)
-#        $2 = workspace override (optional)
 # All keys MUST match the OpenClaw config schema (agents.defaults.*).
 # Invalid keys cause "Config invalid" → gateway refuses to start.
 build_defaults() {
-  local model="${1:-anthropic/claude-opus-4-5}"
-  local workspace="${2:-${HOME_DIR}/clawd}"
+  # Model and workspace come from global variables; no positional args used.
+  local model="${DEFAULTS_MODEL:-anthropic/claude-opus-4-5}"
+  local workspace="${DEFAULTS_WORKSPACE:-${HOME_DIR}/clawd}"
 
   jq -n \
     --arg model "$model" \
@@ -213,12 +212,11 @@ build_telegram_channel() {
     groups=$(jq -n --arg gid "$cgi" '{($gid): {requireMention: true}, "*": {requireMention: true}}')
   fi
 
-  # Always use accounts object. Single agent → "default" (Doctor enforces this
-  # by renaming single-account configs). Multi agent → agent IDs.
+  # Always use agent IDs as account keys. Single-agent uses the agent's ID
+  # (e.g., "agent1") — never "default". Multi-agent uses each agent's ID.
   local accounts="{}"
   for idx in "${!agent_ids[@]}"; do
     local acct_name="${agent_ids[$idx]}"
-    [ "${#agent_ids[@]}" -eq 1 ] && acct_name="default"
     accounts=$(echo "$accounts" | jq \
       --arg id "$acct_name" \
       --arg tok "${agent_tokens[$idx]}" \
@@ -270,11 +268,10 @@ build_discord_channel() {
     dm_flat=$(jq -n '{dmPolicy: "pairing"}')
   fi
 
-  # Always use accounts object. Single → "default", multi → agent IDs.
+  # Always use agent IDs as account keys (single or multi-agent).
   local accounts="{}"
   for idx in "${!dc_agent_ids[@]}"; do
     local acct_name="${dc_agent_ids[$idx]}"
-    [ "${#dc_agent_ids[@]}" -eq 1 ] && acct_name="default"
     accounts=$(echo "$accounts" | jq \
       --arg id "$acct_name" \
       --arg tok "${dc_agent_tokens[$idx]}" \
@@ -308,7 +305,7 @@ build_bindings() {
     group_agent_count=$((group_agent_count + 1))
   done
 
-  # Single-agent groups use account "default" — no binding needed (fallback routing)
+  # Single-agent groups use the agent's ID as account key — no binding needed (fallback routing)
   [ "$group_agent_count" -le 1 ] && { echo "$bindings"; return; }
 
   for i in $(seq 1 "$AGENT_COUNT"); do
@@ -508,10 +505,10 @@ generate_safe_mode() {
   local tg_config="null" dc_config="null"
   if [ "$SM_PLATFORM" = "telegram" ]; then
     tg_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, accounts: {default: {botToken: $tok, dmPolicy: "allowlist", allowFrom: [$oid]}}}')
+      '{"enabled": true, "accounts": {"safe-mode": {"botToken": $tok, "dmPolicy": "allowlist", "allowFrom": [$oid]}}}')
   elif [ "$SM_PLATFORM" = "discord" ]; then
     dc_config=$(jq -n --arg tok "$SM_BOT_TOKEN" --arg oid "$SM_OWNER_ID" \
-      '{enabled: true, dmPolicy: "allowlist", allowFrom: [$oid], accounts: {default: {token: $tok}}}')
+      '{"enabled": true, "dmPolicy": "allowlist", "allowFrom": [$oid], "accounts": {"safe-mode": {"token": $tok}}}')
   fi
 
   # Build plugins — only enable the active platform's provider
